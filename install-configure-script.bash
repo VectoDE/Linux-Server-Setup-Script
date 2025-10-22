@@ -662,12 +662,12 @@ PHP
 }
 # --------------------------- MAIN FLOW ---------------------------
 require_root
-verify_prerequisites
 parse_domain_groups "$DOMAINS_RAW"
 detect_os
 determine_web_user
 check_system_resources
 install_common
+verify_prerequisites
 update_system_packages
 enable_automatic_updates
 
