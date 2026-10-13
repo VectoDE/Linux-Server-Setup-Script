@@ -86,7 +86,8 @@ EOF
 # vm_run SCRIPT: runs SCRIPT as root in the VM; standard input is passed on.
 vm_run() {
 	local script=$1
-	vm_ssh "sudo --preserve-env=SSH_CONNECTION bash -c $(printf '%q' "${script}")"
+	# The RHEL family's sudo path has no /usr/local/sbin, where the harness links lss.
+	vm_ssh "sudo --preserve-env=SSH_CONNECTION bash -c $(printf '%q' "PATH=/usr/local/sbin:\${PATH}; ${script}")"
 	return
 }
 

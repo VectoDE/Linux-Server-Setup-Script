@@ -86,7 +86,8 @@ That creates the administrator `alice` with the SSH keys of the GitHub account, 
 the firewall, fail2ban, kernel hardening, AppArmor or SELinux, auditing, automatic security updates, integrity checks
 and the daily guard. Keep a second SSH session open the first time.
 
-Without a command, `sudo lss` opens a menu.
+Without a command, `sudo lss` opens a menu. On the RHEL family, sudo looks for commands only in `/usr/sbin` and
+`/usr/bin` until the `admin-user` module has added `/usr/local/sbin`; call `sudo /usr/local/sbin/lss` until then.
 
 ## Commands
 
