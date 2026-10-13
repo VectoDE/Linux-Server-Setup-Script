@@ -52,14 +52,15 @@ module_list() {
 	done < <(_module_dirs) | sort -u
 }
 
-# module_meta NAME VAR: prints a metadata variable of a module.
+# module_meta NAME VAR: prints a metadata variable of a module. The final newline lets `while read` loops see the
+# last line; command substitutions drop it.
 module_meta() {
 	local file
 	file=$(module_file "$1") || die "Unknown module '$1'. See 'lss list'."
 	(
 		# shellcheck source=/dev/null
 		source "${file}"
-		printf '%s' "${!2-}"
+		printf '%s\n' "${!2-}"
 	)
 }
 

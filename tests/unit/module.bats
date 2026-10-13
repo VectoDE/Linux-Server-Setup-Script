@@ -184,6 +184,7 @@ setup() {
 }
 
 @test "settings that no module reads are reported" {
+	# shellcheck disable=SC2153 # LSS_MODULES is a setting key here, not a variable
 	LSS_CFG_FILE=([LSS_ALPHA_VALUE]=x [LSS_ALPHA_VALEU]=y [LSS_MODULES]=alpha)
 	LSS_CFG_SET=([LSS_BETA_MODE]=docker [LSS_NOPE]=1)
 	run config_unknown_keys
