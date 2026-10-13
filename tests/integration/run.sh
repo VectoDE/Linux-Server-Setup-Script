@@ -97,12 +97,23 @@ resources_snapshot() {
 	in_target 'echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
 }
 
-# Prints what an install cost: time, memory taken from MemAvailable, disk space, and the largest processes.
+# Samples MemAvailable twice a second until resources_report stops it, for the peak memory of an install and verify.
+memory_watch_start() {
+	in_target 'rm -f /run/lss-memwatch /run/lss-memwatch.stop
+		setsid sh -c "until [ -e /run/lss-memwatch.stop ]; do grep MemAvailable /proc/meminfo; sleep 0.5; done" \
+			>/run/lss-memwatch 2>/dev/null </dev/null &'
+}
+
+# Prints what an install and verify cost: time, memory in use afterwards and at the peak (from MemAvailable), disk
+# space, and the largest processes.
 resources_report() {
-	local label=$1 before=$2 started=$3 mem_before disk_before mem_after disk_after
+	local label=$1 before=$2 started=$3 mem_before disk_before mem_after disk_after mem_low
 	read -r mem_before disk_before <<<"${before}"
 	read -r mem_after disk_after <<<"$(resources_snapshot)"
-	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB, disk $((disk_after - disk_before)) MiB"
+	in_target 'touch /run/lss-memwatch.stop; sleep 1'
+	mem_low=$(in_target "awk 'NR == 1 || \$2 < low { low = \$2 } END { print int(low / 1024) }' /run/lss-memwatch
+		rm -f /run/lss-memwatch /run/lss-memwatch.stop")
+	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB after, $((mem_before - mem_low)) MiB peak, disk $((disk_after - disk_before)) MiB"
 	in_target 'ps -eo rss=,comm= --sort=-rss | head -n 8' | awk '{ printf "  %5d MiB  %s\n", $1 / 1024, $2 }'
 }
 
@@ -114,9 +125,10 @@ if [[ $1 == --profile ]]; then
 	group_start "${system}: profile ${profile}"
 	before=$(resources_snapshot)
 	started=${SECONDS}
+	memory_watch_start
 	in_target "lss --yes --no-color install --profile ${profile}"
-	resources_report "${system} profile ${profile}" "${before}" "${started}"
 	in_target "lss --yes --no-color verify"
+	resources_report "${system} profile ${profile}" "${before}" "${started}"
 	install_again --profile "${profile}"
 	group_end
 	group_start "${system}: Lynis audit"
@@ -130,9 +142,10 @@ for module in "$@"; do
 	group_start "${system}: ${module}"
 	before=$(resources_snapshot)
 	started=${SECONDS}
+	memory_watch_start
 	in_target "lss --yes --no-color install ${module}"
-	resources_report "${system} ${module}" "${before}" "${started}"
 	in_target "lss --yes --no-color verify"
+	resources_report "${system} ${module}" "${before}" "${started}"
 	install_again "${module}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
 		in_target "lss --yes --no-color remove ${module}"
