@@ -245,3 +245,184 @@ EOF
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"docker compose cannot read"* ]]
 }
+
+# --- container firewall -------------------------------------------------------------------------------------------
+
+@test "the container firewall lists the public and vpn ports of every module and reloads on a change" {
+	LSS_MODULE=web
+	fw_allow 443/tcp 3000/tcp:vpn 5432/tcp:local
+	LSS_MODULE=mail
+	fw_allow 25/tcp
+	[ "$(fw_container_ports)" = $'tcp 25 any\ntcp 3000 10.66.0.0/24\ntcp 443 any' ]
+	# No container module yet: nothing is written.
+	fw_container_sync
+	[ ! -e "$(fw_container_list)" ]
+	: >"$(fw_container_list)"
+	export STUB_ACTIVE_UNITS=lss-container-firewall.service
+	fw_container_sync
+	[ "$(cat "$(fw_container_list)")" = $'tcp 25 any\ntcp 3000 10.66.0.0/24\ntcp 443 any' ]
+	grep -q 'systemctl reload lss-container-firewall.service' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	fw_container_sync
+	run ! grep -q reload "${STUB_LOG}"
+	LSS_MODULE=web fw_remove_module
+	[ "$(cat "$(fw_container_list)")" = 'tcp 25 any' ]
+}
+
+# Records file_write calls in $BATS_TEST_TMPDIR/writes and reports a change.
+record_writes() {
+	# shellcheck disable=SC2329 # called by the functions under test
+	file_write() {
+		printf '== %s %s %s\n' "$1" "$2" "$3" >>"${BATS_TEST_TMPDIR}/writes"
+		cat >>"${BATS_TEST_TMPDIR}/writes"
+		LSS_FILE_CHANGED=1
+	}
+	return
+}
+
+@test "ctr_firewall_setup installs the script, the unit and the list; removal waits for the last container module" {
+	record_writes
+	CTR_FIREWALL_SCRIPT=${BATS_TEST_TMPDIR}/lib/container-firewall
+	ctr_firewall_setup
+	local writes=${BATS_TEST_TMPDIR}/writes
+	grep -qxF "== 0755 root:root ${CTR_FIREWALL_SCRIPT}" "${writes}"
+	grep -qxF '== 0644 root:root /etc/systemd/system/lss-container-firewall.service' "${writes}"
+	grep -qxF "ExecStart=${CTR_FIREWALL_SCRIPT} start" "${writes}"
+	grep -qxF 'Before=network-pre.target docker.service podman.service k3s.service shutdown.target' "${writes}"
+	[ -f "$(fw_container_list)" ]
+	grep -q 'systemctl enable --now lss-container-firewall.service' "${STUB_LOG}"
+	grep -q 'systemctl restart lss-container-firewall.service' "${STUB_LOG}"
+	state_set k3s status installed
+	: >"${STUB_LOG}"
+	ctr_firewall_remove
+	[ -f "$(fw_container_list)" ]
+	run ! grep -q daemon-reload "${STUB_LOG}"
+	state_set k3s status removed
+	ctr_firewall_remove
+	[ ! -e "$(fw_container_list)" ]
+	grep -q 'systemctl daemon-reload' "${STUB_LOG}"
+}
+
+@test "ctr_firewall_verify needs the active unit, the table and every listed port" {
+	TEST_RULESET=$(LSS_CONTAINER_PORTS=/dev/null bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
+	# A variable of the test: ctr_firewall_verify has a local "ruleset" that would hide one of that name.
+	# shellcheck disable=SC2329 # called by ctr_firewall_verify
+	nft() {
+		printf '%s\n' "${TEST_RULESET}"
+	}
+	run ctr_firewall_verify
+	[[ ${output} == *"is not active"* ]]
+	export STUB_ACTIVE_UNITS=lss-container-firewall.service
+	mkdir -p "${LSS_STATE_DIR}"
+	: >"$(fw_container_list)"
+	ctr_firewall_verify
+	fw_allow 8080/tcp
+	run ctr_firewall_verify
+	[[ ${output} == *"does not let 8080/tcp through"* ]]
+	TEST_RULESET=$(LSS_CONTAINER_PORTS=$(fw_container_list) bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
+	ctr_firewall_verify
+	printf 'tcp 9 any\n' >>"$(fw_container_list)"
+	run ctr_firewall_verify
+	[[ ${output} == *"lists other ports than the firewall rules"* ]]
+}
+
+@test "the container firewall rule set: redirected connections only to listed ports, nothing straight to containers" {
+	local ports=${BATS_TEST_TMPDIR}/ports output
+	printf 'tcp 443 any\ntcp 3000 10.66.0.0/24\nudp 51820-51830 fd00::/64\nicmp 1 any\ntcp 80 nonsense\n\n' >"${ports}"
+	output=$(LSS_CONTAINER_PORTS=${ports} bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
+	[[ ${output} == $'table inet lss_containers\ndelete table inet lss_containers\ntable inet lss_containers {'* ]]
+	[[ ${output} == *$'\t\ttype filter hook forward priority -10; policy accept;\n\t\tct state established,related accept\n'* ]]
+	[[ ${output} == *$'\t\tiifname "br-*" accept\n'* ]]
+	[[ ${output} == *$'\t\toifname "cni0" ct status dnat jump published\n'* ]]
+	[[ ${output} == *$'\t\toifname "podman*" ct state new drop\n'* ]]
+	[[ ${output} != *'oifname "cni0" ct state new drop'* ]]
+	[[ ${output} == *$'\t\tmeta l4proto tcp ct original proto-dst 443 accept\n'* ]]
+	[[ ${output} == *$'\t\tip saddr 10.66.0.0/24 meta l4proto tcp ct original proto-dst 3000 accept\n'* ]]
+	[[ ${output} == *$'\t\tip6 saddr fd00::/64 meta l4proto udp ct original proto-dst 51820-51830 accept\n'* ]]
+	[[ ${output} != *icmp* && ${output} != *nonsense* && ${output} != *'proto-dst 80 '* ]]
+	[[ ${output} == *$'\t\tdrop\n\t}\n}' ]]
+	run bash "${REPO_ROOT}/libexec/lss-container-firewall" bogus
+	[ "${status}" -eq 2 ]
+}
+
+# --- engine, Compose, Trivy ---------------------------------------------------------------------------------------
+
+@test "the engine is the module being installed or the installed one" {
+	LSS_MODULE=portainer
+	run ctr_engine
+	[ "${status}" -eq 1 ]
+	state_set podman status installed
+	[ "$(ctr_engine)" = podman ]
+	LSS_MODULE=docker
+	[ "$(ctr_engine)" = docker ]
+	[ "$(ctr_socket podman)" = /run/podman/podman.sock ]
+	run ctr_socket lxc
+	[ "${status}" -eq 1 ]
+}
+
+@test "Compose projects start only with docker and after the check" {
+	command -v jq >/dev/null || skip "jq is not installed"
+	local file=${BATS_TEST_TMPDIR}/compose.yaml
+	: >"${file}"
+	# shellcheck disable=SC2329 # called by ctr_compose_up
+	docker() {
+		printf 'docker %s\n' "$*" >>"${BATS_TEST_TMPDIR}/engine.log"
+		if [[ $* == *config* ]]; then
+			printf '{"services": {}}\n'
+		fi
+		return 0
+	}
+	run ctr_compose_up 'Bad Name' "${file}"
+	[ "${status}" -eq 1 ]
+	ctr_compose_up shop "${file}"
+	grep -qxF "docker compose --project-name shop -f ${file} up --detach --remove-orphans --quiet-pull" "${BATS_TEST_TMPDIR}/engine.log"
+	LSS_MODULE=podman
+	run ctr_compose_up shop "${file}"
+	[[ ${output} == *"need the docker module"* ]]
+}
+
+@test "Trivy is kept when it is current and removed with the last engine" {
+	CTR_TRIVY=${BATS_TEST_TMPDIR}/trivy
+	CTR_TRIVY_CACHE=${BATS_TEST_TMPDIR}/trivy-cache
+	printf '#!/bin/sh\necho "Version: %s"\n' "${CTR_TRIVY_VERSION}" >"${CTR_TRIVY}"
+	chmod +x "${CTR_TRIVY}"
+	mkdir -p "${CTR_TRIVY_CACHE}"
+	ctr_trivy_install
+	run ! grep -q curl "${STUB_LOG}"
+	state_set podman status installed
+	ctr_trivy_remove
+	[ -x "${CTR_TRIVY}" ]
+	state_set podman status removed
+	ctr_trivy_remove
+	[ ! -e "${CTR_TRIVY}" ]
+	[ ! -e "${CTR_TRIVY_CACHE}" ]
+}
+
+# --- modules ------------------------------------------------------------------------------------------------------
+
+@test "the container modules declare their group, requirements and mutual conflicts" {
+	[ "$(module_meta docker MOD_GROUP)" = container ]
+	[ "$(module_meta portainer MOD_REQUIRES)" = "system docker|podman" ]
+	[ "$(module_meta docker MOD_CONFLICTS)" = "podman k3s" ]
+	[ "$(module_meta podman MOD_CONFLICTS)" = docker ]
+	[ "$(module_meta k3s MOD_CONFLICTS)" = docker ]
+	[ "$(module_meta portainer MOD_SECRETS)" = portainer-admin-password ]
+	[[ $(module_meta k3s MOD_OPTIONS) == *"api_access|local|"* ]]
+	run module_resolve docker podman
+	[ "${status}" -eq 1 ]
+	run module_resolve k3s docker
+	[ "${status}" -eq 1 ]
+	run module_resolve podman portainer
+	[ "${status}" -eq 0 ]
+	[[ ${output} == *$'podman\nportainer'* ]]
+}
+
+@test "the downloads of k3s, k3s-selinux and Trivy are pinned for both architectures" {
+	local arch name
+	for arch in x86_64 aarch64; do
+		use_os debian-12 "${arch}"
+		for name in k3s-v1.36.5+k3s1 "trivy-${CTR_TRIVY_VERSION}" k3s-selinux-el9 k3s-selinux-el10; do
+			[[ $(fetch_entry "${name}") =~ ^[0-9a-f]{64}\ https://github.com/ ]]
+		done
+	done
+}
