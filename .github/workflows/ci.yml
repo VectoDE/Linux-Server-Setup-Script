@@ -52,11 +52,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install bats and kcov
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends bats kcov
+      - name: Install bats
+        run: scripts/dev/install-bats.sh "$RUNNER_TEMP/bats"
       - name: Unit tests
-        run: bats --print-output-on-failure tests/unit
+        run: '"$RUNNER_TEMP/bats/bin/bats" --print-output-on-failure tests/unit'
       - name: Coverage
-        run: scripts/dev/coverage.sh
+        run: scripts/dev/coverage.sh "$RUNNER_TEMP/bats" "$RUNNER_TEMP/coverage"

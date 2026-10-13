@@ -29,7 +29,10 @@ template_render_string() {
 template_render() {
 	local file=$1 text
 	[[ -r ${file} ]] || die "Template ${file} not found."
-	text=$(cat "${file}"; printf x)
+	text=$(
+		cat "${file}"
+		printf x
+	)
 	text=${text%x}
 	template_render_string "${text}"
 }
@@ -37,6 +40,9 @@ template_render() {
 # template_install MODULE FILE MODE OWNER DEST: renders templates/MODULE/FILE into DEST as a managed file.
 template_install() {
 	local rendered
-	rendered=$(template_render "$(template_path "$1" "$2")"; printf x)
+	rendered=$(
+		template_render "$(template_path "$1" "$2")"
+		printf x
+	)
 	file_write "$3" "$4" "$5" < <(printf '%s' "${rendered%x}")
 }
