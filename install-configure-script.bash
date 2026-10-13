@@ -11,6 +11,8 @@ IFS=$'\n\t'
 SCRIPT_NAME=$(basename "$0")
 LOG_FILE="/var/log/enterprise-server-setup.log"
 STATE_DIR="/var/local/enterprise-server-setup"
+# Downloads accept only HTTPS with TLS 1.2 or later, also after a redirect.
+CURL_HTTPS=(--proto =https --tlsv1.2 -fsSL)
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 touch "$LOG_FILE"
 chmod 600 "$LOG_FILE"
@@ -230,11 +232,11 @@ install_node(){
   log "INFO" "Installing Node.js ${node_version}.x"
   case "$OS_ID" in
     ubuntu|debian)
-      curl --proto '=https' --tlsv1.2 -fsSL https://deb.nodesource.com/setup_${node_version}.x | bash -
+      curl "${CURL_HTTPS[@]}" https://deb.nodesource.com/setup_${node_version}.x | bash -
       apt-get install -y nodejs build-essential
       ;;
     centos|rhel)
-      curl --proto '=https' --tlsv1.2 -fsSL https://rpm.nodesource.com/setup_${node_version}.x | bash -
+      curl "${CURL_HTTPS[@]}" https://rpm.nodesource.com/setup_${node_version}.x | bash -
       yum install -y nodejs gcc-c++ make
       ;;
     *)
@@ -251,7 +253,7 @@ install_php(){
       export DEBIAN_FRONTEND=noninteractive
       apt-get install -y lsb-release ca-certificates apt-transport-https gnupg
       if [[ ! -f /etc/apt/sources.list.d/php.list ]]; then
-        curl --proto '=https' --tlsv1.2 -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury-php.gpg
+        curl "${CURL_HTTPS[@]}" https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury-php.gpg
         echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
       fi
       apt-get update
@@ -328,7 +330,7 @@ install_phpmyadmin_native(){
     centos|rhel)
       local php_myadmin_dir=/usr/share/phpmyadmin
       mkdir -p "$php_myadmin_dir"
-      curl --proto '=https' --tlsv1.2 -fsSL https://files.phpmyadmin.net/phpMyAdmin/latest/phpMyAdmin-latest-all-languages.tar.gz | \
+      curl "${CURL_HTTPS[@]}" https://files.phpmyadmin.net/phpMyAdmin/latest/phpMyAdmin-latest-all-languages.tar.gz | \
         tar xz --strip-components=1 -C "$php_myadmin_dir"
       mkdir -p /var/lib/phpmyadmin/tmp
       chown -R root:root "$php_myadmin_dir"
@@ -741,12 +743,12 @@ if [[ "$MODE" = "docker" ]]; then
   case "$OS_ID" in
     ubuntu|debian)
       apt-get remove -y docker docker-engine docker.io containerd runc || true
-      curl --proto '=https' --tlsv1.2 -fsSL https://get.docker.com | sh
+      curl "${CURL_HTTPS[@]}" https://get.docker.com | sh
       apt-get install -y docker-compose-plugin
       systemctl enable --now docker
       ;;
     centos|rhel)
-      curl --proto '=https' --tlsv1.2 -fsSL https://get.docker.com | sh
+      curl "${CURL_HTTPS[@]}" https://get.docker.com | sh
       yum install -y docker-compose-plugin || true
       systemctl enable --now docker
       ;;
