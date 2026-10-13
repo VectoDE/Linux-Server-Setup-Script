@@ -137,8 +137,8 @@ mod_configure() {
 		if _auditd_immutable_now; then
 			log_warn "auditd: the loaded rules are locked (-e 2); the new rules apply after the next reboot."
 		else
-			augenrules --check >/dev/null 2>&1 || true
-			augenrules --load >/dev/null || die "auditd: the kernel rejected the audit rules."
+			# augenrules reports slow rule forms on RHEL; that detail belongs in the log, not on the screen.
+			log_command augenrules --load || die "auditd: the kernel rejected the audit rules."
 		fi
 	fi
 	return

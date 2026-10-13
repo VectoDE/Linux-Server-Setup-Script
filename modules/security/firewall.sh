@@ -74,7 +74,7 @@ _fw_defaults_firewalld() {
 }
 
 mod_configure() {
-	local ssh_port spec
+	local ssh_port spec i
 	ssh_port=$(fw_ssh_port)
 	# SSH first: recorded and applied before the firewall is switched on.
 	fw_allow "${ssh_port}/tcp"
@@ -96,6 +96,11 @@ mod_configure() {
 			svc_enable ufw
 		else
 			svc_enable firewalld
+			# firewall-cmd prints a waiting notice while firewalld is still starting.
+			for ((i = 0; i < 30; i++)); do
+				firewall-cmd --state >/dev/null 2>&1 && break
+				sleep 1
+			done
 		fi
 		files_note_change "firewall enabled"
 		_fw_is_open "${ssh_port}" || die "firewall: SSH port ${ssh_port} is not open; the firewall stays off."
