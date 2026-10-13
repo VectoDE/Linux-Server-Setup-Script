@@ -34,15 +34,27 @@ setting() {
 	printf '%s' "${default}"
 }
 
+# Findings can quote text that local users control (file names, log lines). Control characters are replaced, so such
+# text cannot add lines to the summary, end the mail early or forge journal entries.
+clean() {
+	local text=$1
+	printf '%s' "${text//[[:cntrl:]]/?}"
+	return
+}
+
 finding() {
-	FINDINGS+=("$1")
-	logger -t lss-guard -p auth.warning -- "$1"
+	local text
+	text=$(clean "$1")
+	FINDINGS+=("${text}")
+	logger -t lss-guard -p auth.warning -- "${text}"
 	return
 }
 
 note() {
-	NOTES+=("$1")
-	logger -t lss-guard -p auth.info -- "$1"
+	local text
+	text=$(clean "$1")
+	NOTES+=("${text}")
+	logger -t lss-guard -p auth.info -- "${text}"
 	return
 }
 
@@ -107,7 +119,8 @@ check_updates() {
 check_logins() {
 	local threshold log failed count sources accepted
 	threshold=$(setting GUARD_LOGIN_THRESHOLD 50)
-	log=$(journalctl --since -24h --no-pager -o cat -t sshd -t sshd-session 2>/dev/null) || return 0
+	# _COMM and _UID are set by journald itself; a syslog identifier (-t sshd) could be forged with logger.
+	log=$(journalctl --since -24h --no-pager -o cat _COMM=sshd _COMM=sshd-session _UID=0 2>/dev/null) || return 0
 	failed=$(grep -E 'Failed (password|publickey|keyboard-interactive)|Invalid user|maximum authentication attempts' <<<"${log}" || true)
 	count=0
 	[[ -z ${failed} ]] || count=$(wc -l <<<"${failed}")
@@ -258,7 +271,7 @@ notify() {
 	fi
 	if [[ -n ${email} ]] && command -v sendmail >/dev/null 2>&1; then
 		printf 'To: %s\nSubject: [lss guard] %s\n\n%s\n' "${email}" "$(hostname -f 2>/dev/null || hostname)" "${summary}" |
-			sendmail -t || logger -t lss-guard -p auth.err -- "Mail delivery failed"
+			sendmail -t -i || logger -t lss-guard -p auth.err -- "Mail delivery failed"
 	fi
 	return
 }

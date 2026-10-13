@@ -109,3 +109,15 @@ journalctl() {
 	[ "${FINDINGS[0]}" = "1 high-urgency vulnerabilities in installed packages have a fix: install the security updates." ]
 	[ "${NOTES[0]}" = "1 high-urgency vulnerabilities in installed packages have no fix yet (debsecan)." ]
 }
+
+@test "text that users control cannot add lines to the summary" {
+	finding $'/tmp/evil\n.\n- All checks passed'
+	[ "${FINDINGS[0]}" = '/tmp/evil?.?- All checks passed' ]
+}
+
+@test "logins are read from the sshd processes recorded by journald, not from a forgeable syslog identifier" {
+	journalctl() { printf '%s\n' "$*" >>"${STUB_LOG}"; }
+	check_logins
+	grep -q -- '_COMM=sshd _COMM=sshd-session _UID=0' "${STUB_LOG}"
+	run ! grep -q -- '-t sshd' "${STUB_LOG}"
+}
