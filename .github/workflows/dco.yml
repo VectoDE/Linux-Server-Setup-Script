@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Every commit in a pull request must be signed off (Developer Certificate of Origin): the author certifies the right
+# to submit it under the project's license. Commits by bots such as Dependabot are exempt.
+name: DCO
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dco:
+    name: Sign-off
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - name: Check every commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          missing=0
+          while IFS=$'\t' read -r sha login email; do
+            case "$login" in *'[bot]') continue ;; esac
+            message="$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq .commit.message)"
+            if printf '%s\n' "$message" | grep -i '^Signed-off-by:' | grep -qiF "<$email>"; then
+              echo "${sha:0:7} signed off by $email"
+            else
+              echo "::error::Commit ${sha:0:7} has no 'Signed-off-by: ... <$email>' line. Amend it with git commit -s."
+              missing=1
+            fi
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
+            --jq '.[] | [.sha, (.author.login // ""), .commit.author.email] | @tsv')
+          exit "$missing"

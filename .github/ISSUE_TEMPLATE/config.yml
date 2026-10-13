@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/VectoDE/Linux-Server-Setup-Script/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue.
+  - name: Questions and ideas
+    url: https://github.com/VectoDE/Linux-Server-Setup-Script/discussions
+    about: Ask questions and discuss ideas in Discussions.

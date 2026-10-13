@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Groups automatically generated release notes by pull request label.
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: Security
+      labels: [security]
+    - title: Breaking changes
+      labels: [breaking-change]
+    - title: New modules and features
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Dependencies
+      labels: [dependencies]
+    - title: Documentation
+      labels: [documentation]
+    - title: Other changes
+      labels: ['*']
