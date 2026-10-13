@@ -36,3 +36,37 @@ valkey-jammy aarch64 44abd1a738fdda3831bb3d84f19e4bcd45bdb537d0cee24dace364f5111
 # Release Engineering key BCA43417C3B485DD128EC6D4B7B3B788A8D3785C (data/keys/mysql.asc); the SHA-256 below was taken
 # from that verified file on 2026-10-13.
 mysql-generic aarch64 04b2f9791d314167a9eb83abcb476f45a7cd9e4aa88fa7a638cba40d1bc2a109 https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-linux-glibc2.28-aarch64.tar.xz
+
+# modsecurity: OWASP Core Rule Set, digests of the GitHub release files (the releases are also PGP-signed by
+# security@coreruleset.org, 3600 6F0E 0BA1 6783 2158 8211 38EE ACA1 AB8A 6E72). 4.25 is the long-term-support line;
+# 3.3 serves the ModSecurity versions of Ubuntu 22.04.
+coreruleset-4.25.2 any a2d4b2a5bb4f397f7e40d4e22d0346350706a5f17c1cfefc09e8b9740e00d87e https://github.com/coreruleset/coreruleset/releases/download/v4.25.2/coreruleset-4.25.2-minimal.tar.gz
+coreruleset-3.3.10 any 0c35a9e14f8af3cf02fc29eaae807312c6555d0f9bfa306274268ab5913c1110 https://github.com/coreruleset/coreruleset/releases/download/v3.3.10/coreruleset-3.3.10-minimal.tar.gz
+# modsecurity: libmodsecurity (RHEL 10) and the nginx connector (Ubuntu 22.04, RHEL 10), from the .sha256 files the
+# OWASP ModSecurity project publishes with each release.
+libmodsecurity-3.0.17 any f283b33d5c21130fd3a15c84a93a1abe12bd1949edaf44288b12af571b671a50 https://github.com/owasp-modsecurity/ModSecurity/releases/download/v3.0.17/modsecurity-v3.0.17.tar.gz
+modsecurity-nginx-1.0.4 any 6bdc7570911be884c1e43aaf85046137f9fde0cfa0dd4a55b853c81c45a13313 https://github.com/owasp-modsecurity/ModSecurity-nginx/releases/download/v1.0.4/ModSecurity-nginx-v1.0.4.tar.gz
+# modsecurity: nginx sources of the version Ubuntu 22.04 ships, for the connector build. nginx.org publishes PGP
+# signatures only; the digest is of the file whose signature (Maxim Dounin, B0F4 2533 73F8 F6F5 10D4 2178 520A 9993
+# A1C0 52F8) verified.
+nginx-1.18.0 any 4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99 https://nginx.org/download/nginx-1.18.0.tar.gz
+# modsecurity: CRS 4 application exclusion plugins. Their repositories publish no release files; the files are pinned
+# by the commit of the release tag (cpanel, dokuwiki, drupal, phpbb, xenforo v1.0.0, nextcloud v1.7.1, phpmyadmin
+# v1.1.0, wordpress v1.2.0).
+crs-plugin-cpanel-config any f4c93c6b8c404237b4ac7a01332476827982216f3e39dbb1f9735045e0cc6ce4 https://raw.githubusercontent.com/coreruleset/cpanel-rule-exclusions-plugin/2fd1cab8706c760fe9cdccf55afe75b94a66f89f/plugins/cpanel-rule-exclusions-config.conf
+crs-plugin-cpanel-before any 8433fce90b44fd6adfdda9b68f2cb9d1c8f81c4c26af586eeaf1d0648d510726 https://raw.githubusercontent.com/coreruleset/cpanel-rule-exclusions-plugin/2fd1cab8706c760fe9cdccf55afe75b94a66f89f/plugins/cpanel-rule-exclusions-before.conf
+crs-plugin-dokuwiki-config any 921dc270f6709e8c27db23b2d845bb8702bf8862584497f4c6a6ee99dab5c762 https://raw.githubusercontent.com/coreruleset/dokuwiki-rule-exclusions-plugin/00996762a746ecfe85d6ccc022f2a3efb44377a7/plugins/dokuwiki-rule-exclusions-config.conf
+crs-plugin-dokuwiki-before any ba93cc37f8c6a101b13fa8681eff740fd0c4235a9dcf6a0a1fb63be98dc5aa74 https://raw.githubusercontent.com/coreruleset/dokuwiki-rule-exclusions-plugin/00996762a746ecfe85d6ccc022f2a3efb44377a7/plugins/dokuwiki-rule-exclusions-before.conf
+crs-plugin-drupal-config any 01ee7ff94b101c42dbb7117a73af6d3bc3327fc24a92cd774be3623f45d8df9f https://raw.githubusercontent.com/coreruleset/drupal-rule-exclusions-plugin/6771319cf184690d33d3251e3dac76e39c54c7f6/plugins/drupal-rule-exclusions-config.conf
+crs-plugin-drupal-before any 1c529d96f4df82bf57edc64ce7541b25923b608d020ebf42fd635d0717d5dcac https://raw.githubusercontent.com/coreruleset/drupal-rule-exclusions-plugin/6771319cf184690d33d3251e3dac76e39c54c7f6/plugins/drupal-rule-exclusions-before.conf
+crs-plugin-nextcloud-config any 17ed8c7826c3351d8f86683a9898b88aca89311fc140f8e319d10c797d5be11a https://raw.githubusercontent.com/coreruleset/nextcloud-rule-exclusions-plugin/d907a20c7ca9c27d5666185c8ffab58f859d4832/plugins/nextcloud-rule-exclusions-config.conf
+crs-plugin-nextcloud-before any 5f398812bfec2c9d21dcad3b7898065cdfa4721cdf980bfe487e988cc4729aab https://raw.githubusercontent.com/coreruleset/nextcloud-rule-exclusions-plugin/d907a20c7ca9c27d5666185c8ffab58f859d4832/plugins/nextcloud-rule-exclusions-before.conf
+crs-plugin-phpbb-config any 22923096d7705354d29619f62f7dbc93a8e7ea59d2fe98f1b986665fb588c3f4 https://raw.githubusercontent.com/coreruleset/phpbb-rule-exclusions-plugin/5f1e03417cd73f1a5f22040bf06680e86e49d71e/plugins/phpbb-rule-exclusions-config.conf
+crs-plugin-phpbb-before any 60ab969d01444d1e3dd634057d8a823a34bf53ec46290d383d740784e34c887a https://raw.githubusercontent.com/coreruleset/phpbb-rule-exclusions-plugin/5f1e03417cd73f1a5f22040bf06680e86e49d71e/plugins/phpbb-rule-exclusions-before.conf
+crs-plugin-phpmyadmin-config any 3e96eacb813a6fd9b70c8854c59c5a57b05044a8edbac172fb3fe0880c40c001 https://raw.githubusercontent.com/coreruleset/phpmyadmin-rule-exclusions-plugin/6629e888b9f9fee9ae8288a335233e2f37a5c0a5/plugins/phpmyadmin-rule-exclusions-config.conf
+crs-plugin-phpmyadmin-before any 955b2804d353990b1a855c07335a14cc20cf837a5f1176c7196ee12dbad644e2 https://raw.githubusercontent.com/coreruleset/phpmyadmin-rule-exclusions-plugin/6629e888b9f9fee9ae8288a335233e2f37a5c0a5/plugins/phpmyadmin-rule-exclusions-before.conf
+crs-plugin-phpmyadmin-after any 278bc3558d66289510aff703a7fc9d42e1c032baf09eebe767c89aeec373454c https://raw.githubusercontent.com/coreruleset/phpmyadmin-rule-exclusions-plugin/6629e888b9f9fee9ae8288a335233e2f37a5c0a5/plugins/phpmyadmin-rule-exclusions-after.conf
+crs-plugin-wordpress-config any cdffad1a5410057a06cc2ce0489c470f77c69af876d79536f5f34e88c00bced2 https://raw.githubusercontent.com/coreruleset/wordpress-rule-exclusions-plugin/161bb90bb0d543f805fc6cd966a7c53a2e5b08de/plugins/wordpress-rule-exclusions-config.conf
+crs-plugin-wordpress-before any d6bb0e6a2848e6d39e73818537b21058c61a2b80a7b9e0de79fe2b3238eb9076 https://raw.githubusercontent.com/coreruleset/wordpress-rule-exclusions-plugin/161bb90bb0d543f805fc6cd966a7c53a2e5b08de/plugins/wordpress-rule-exclusions-before.conf
+crs-plugin-xenforo-config any dcd4091a4b611931715f9b6a4c10a02210d617a810f044ef8e7d16fc9a6b6253 https://raw.githubusercontent.com/coreruleset/xenforo-rule-exclusions-plugin/193288ac2faa8ccbc4d86cdf829047f477812f28/plugins/xenforo-rule-exclusions-config.conf
+crs-plugin-xenforo-before any f65f5600d9cb2004291013461fd206dd7cf2743398e8e40e5285f0588c0d6df3 https://raw.githubusercontent.com/coreruleset/xenforo-rule-exclusions-plugin/193288ac2faa8ccbc4d86cdf829047f477812f28/plugins/xenforo-rule-exclusions-before.conf

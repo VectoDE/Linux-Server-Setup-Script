@@ -39,6 +39,8 @@ worker_rlimit_nofile 8192;
 pid /run/nginx.pid;
 error_log /var/log/nginx/error.log warn;
 include $(_nginx_modules_dir)/*.conf;
+# Modules and http settings that other lss modules add (modsecurity); empty otherwise.
+include ${NGINX_DIR}/modules/*.conf;
 
 events {
 	worker_connections 2048;
@@ -72,6 +74,7 @@ http {
 		'' close;
 	}
 
+	include ${NGINX_DIR}/http/*.conf;
 	include ${NGINX_DIR}/default.conf;
 	include ${NGINX_DIR}/admin.conf;
 	include ${NGINX_DIR}/sites/*.conf;
