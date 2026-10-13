@@ -6,7 +6,8 @@ MOD_NAME="aide"
 MOD_GROUP="security"
 MOD_DESCRIPTION="File integrity monitoring: daily AIDE check of system files against a trusted database"
 MOD_REQUIRES="system"
-MOD_OPTIONS="check_time|05:15|Time of the daily check (HH:MM)"
+MOD_OPTIONS="check_time|05:15|Time of the daily check (HH:MM)
+exclude||More directories AIDE leaves out, separated by spaces (large data or tool directories)"
 
 AIDE_UNIT=lss-aide-check
 
@@ -19,7 +20,12 @@ _aide_db() {
 }
 
 mod_check() {
+	local path
 	[[ $(opt check_time) =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "LSS_AIDE_CHECK_TIME must look like 05:15."
+	for path in $(opt exclude); do
+		[[ ${path} =~ ^/[A-Za-z0-9._+/-]+$ && ${path} != */../* && ${path} != */.. ]] ||
+			die "LSS_AIDE_EXCLUDE: '${path}' is not an absolute directory path."
+	done
 }
 
 mod_install() {
@@ -43,28 +49,39 @@ _aide_excludes() {
 !/var/lib/fail2ban
 !/var/lib/aide
 EOF
+	local path
+	for path in $(opt exclude); do
+		# AIDE reads the path as a regular expression; a literal dot must not match any character.
+		printf '!%s\n' "${path//./[.]}"
+	done
 }
 
 mod_configure() {
 	LSS_FILE_CHANGED=0
 	if os_is_debian; then
 		file_write 0644 root:root /etc/aide/aide.conf.d/99_lss_excludes <<<"$(_aide_excludes)"
-	elif ! grep -qF '# lss excludes' /etc/aide.conf; then
+	else
+		# RHEL has no conf.d: the block after the marker belongs to lss and is rewritten on every run, so changed
+		# excludes take effect; everything before it stays as the package or the administrator left it.
+		local base
+		base=$(sed '/^# lss excludes$/,$d' /etc/aide.conf)
 		file_write 0600 root:root /etc/aide.conf < <(
-			cat /etc/aide.conf
-			printf '\n# lss excludes\n'
+			printf '%s\n\n# lss excludes\n' "${base}"
 			_aide_excludes
 		)
 	fi
 	local changed=${LSS_FILE_CHANGED}
 	if [[ ! -s $(_aide_db) || ${changed} == 1 ]]; then
-		log_info "Building the AIDE database (takes a few minutes)"
+		log_info "Building the AIDE database; this reads every system file and takes minutes on large systems."
+		log_info "Directories with large data can be left out with LSS_AIDE_EXCLUDE."
+		local start=${SECONDS}
 		if os_is_debian; then
-			aideinit --yes --force >/dev/null
+			nice -n 19 ionice -c 2 -n 7 aideinit --yes --force >/dev/null
 		else
-			aide --init --config /etc/aide.conf >/dev/null
+			nice -n 19 ionice -c 2 -n 7 aide --init --config /etc/aide.conf >/dev/null
 			mv -f /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
 		fi
+		log_info "AIDE database built in $((SECONDS - start)) seconds."
 		files_note_change "AIDE database"
 	fi
 	svc_unit "${AIDE_UNIT}.service" <<EOF
