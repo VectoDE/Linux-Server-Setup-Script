@@ -26,12 +26,12 @@ jobs:
   container:
     name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / ${{ matrix.group }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web, runtime]
+        group: [base, security, scanners, web, runtime, database, database-alt]
         arch: [x64, arm64]
         include:
           - group: base
@@ -42,9 +42,14 @@ jobs:
             modules: aide rkhunter clamav lynis
           # Each web server alone, then with certificates (Pebble) and sites; then HAProxy.
           - group: web
-            modules: nginx,tls,vhost apache,tls,vhost caddy,tls,vhost haproxy
+            modules: nginx,tls,vhost apache,tls,vhost caddy,tls,vhost haproxy nginx,modsecurity apache,modsecurity
           - group: runtime
             modules: php,composer nginx,php node python ruby java go dotnet
+          # Conflicting engines (mariadb/mysql, redis/valkey) run in separate jobs: a removal keeps their data.
+          - group: database
+            modules: mariadb postgresql redis nginx,php,mariadb,phpmyadmin caddy,php,adminer apache,postgresql,pgadmin
+          - group: database-alt
+            modules: mysql valkey mongodb
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -103,12 +108,16 @@ jobs:
   vm:
     name: ${{ matrix.system }} VM / ${{ matrix.run }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, rocky-9, almalinux-10]
         run: [kernel, profile minimal-secure]
+        include:
+          # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases.
+          - system: debian-13
+            run: profile all
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -139,5 +148,5 @@ jobs:
             vm-debian-*) minimum=82 ;;
             *) minimum=60 ;;
             esac
-            tests/integration/run.sh "$SYSTEM" --profile minimal-secure "$minimum"
+            tests/integration/run.sh "$SYSTEM" --profile "${RUN#profile }" "$minimum"
           fi

@@ -23,8 +23,6 @@ adminer-6.1.2 any b32316156bd18ffa99c1a27617142c2e5ad72260e37f15da4e9937a3dbb15f
 pgadmin4-9.18 any 9ea084fc416265e4fc95c9fb6e6ae0f6668d34da8670c9b65c79cea054124356 https://files.pythonhosted.org/packages/0e/80/86d7e7123e2b6de41890bd1edc3e27348e2572acea337088faa0ec41c7f5/pgadmin4-9.18-py3-none-any.whl
 gunicorn-26.2.0 any bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3 https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl
 
-# Files lss downloads directly, read by fetch_verified (lib/fetch.sh): <name> <arch|any> <sha256> <url>.
-
 # Valkey 8.1.10, upstream build for Ubuntu 22.04, which has no Valkey package. SHA-256 from the .sha256 files next to
 # the archives (https://valkey.io/download/), 2026-10-13.
 valkey-jammy x86_64 23400087a684b6e87f66332e0a836a2674c24c7c482361766777149499c08e50 https://download.valkey.io/releases/valkey-8.1.10-jammy-x86_64.tar.gz

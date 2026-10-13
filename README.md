@@ -135,12 +135,17 @@ change, run `lss configure MODULE`.
 (AppArmor or SELinux), `auditd`, `auto-updates`, `password-policy`, `aide`, `rkhunter`, `clamav`, `lynis`,
 `usbguard`, `guard`.
 
-**Web:** `nginx`, `apache` or `caddy`, `tls` (certificates from Let's Encrypt), `vhost` (sites), `haproxy`.
+**Web:** `nginx`, `apache` or `caddy`, `tls` (certificates from Let's Encrypt), `vhost` (sites), `haproxy`,
+`modsecurity` (web application firewall with the OWASP Core Rule Set for nginx or Apache).
 
 **Runtimes:** `php` (PHP-FPM with a hardened pool for the web server), `composer`, `node` (Node.js 22, 24 or 26 from
 NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK 21, Temurin where the distribution has
 none), `go` (official archive), `dotnet` (.NET SDK 10, telemetry off). `LSS_PHP_VERSION`, `LSS_NODE_VERSION`,
 `LSS_JAVA_VERSION` and `LSS_DOTNET_VERSION` pick another version.
+
+**Databases:** `mariadb` or `mysql`, `postgresql`, `redis` or `valkey`, `mongodb`. Each listens on localhost only,
+with hardened authentication and optional databases and users (`LSS_<ENGINE>_USERS=user:database`, the password with
+`lss secrets show <engine>-user-<user>`). `access=vpn` or `public` opens the port.
 
 **Database tools:** `phpmyadmin`, `adminer` (only the local database servers) and `pgadmin` (its own service; the
 first password with `lss secrets show pgadmin-admin-password`), all on the admin port.

@@ -31,6 +31,11 @@ now or later.
   (NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK, Temurin where missing), `go` (official
   archive) and `dotnet` (.NET SDK, telemetry off), all from repositories with pinned keys or checksum-verified
   downloads.
+- `modsecurity`: the ModSecurity web application firewall with the OWASP Core Rule Set for nginx and Apache on every
+  supported system, with a module built from verified sources where the distribution has none.
+- Database modules: `mariadb`, `mysql`, `postgresql`, `redis`, `valkey` and `mongodb`, on localhost with hardened
+  authentication, optional databases and least-privilege users; root or admin accounts never exist without a password.
+- Profiles `webhosting` and `all`.
 - Database tools: `phpmyadmin`, `adminer` and `pgadmin` on the admin port of the web server, from checksum-verified
   downloads, limited to the local database servers; pgAdmin runs as its own sandboxed service.
 - A warning for every setting that no module reads, so a misspelt key does not silently fall back to the default.

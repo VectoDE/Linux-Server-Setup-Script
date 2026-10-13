@@ -39,6 +39,12 @@ Docker, databases and its own sudo rules) 78. CI checks that it stays at 82 on D
 | `phpmyadmin`       | Checksum-verified release without the setup wizard; configuration readable by root and PHP-FPM only, with a generated cookie secret; only the local database server, no root and no empty-password logins; no version check and no error reports; only on the admin port | (operations) |
 | `adminer`          | Checksum-verified release; a login plugin allows only the configured local servers and drivers; only on the admin port | (operations) |
 | `pgadmin`          | Pinned, checksum-verified wheels in an isolated environment; own system user; systemd sandbox without capabilities; bound to 127.0.0.1; no upgrade check, no psql tool, no browsing of binary paths; secure cookies when the admin port is public | (operations) |
+| `modsecurity`      | Requests filtered by ModSecurity with the OWASP Core Rule Set (anomaly scoring, paranoia level 1 by default) and blocked with 403; matches go to an audit log without request bodies | OWASP CRS |
+| `mariadb`          | Bound to 127.0.0.1, `local-infile=0`, root only through the Unix socket, no anonymous accounts and no test database, one least-privilege user per application, systemd sandbox | CIS MariaDB |
+| `mysql`            | Bound to 127.0.0.1 (the X protocol too), `local-infile=0`, root through `auth_socket` (RHEL: a generated password in `/root/.my.cnf` 0600); root never exists without a password; systemd sandbox | CIS MySQL |
+| `postgresql`       | localhost, `scram-sha-256`, TLS 1.2 or later, peer login only for `postgres`, each role reaches only its own database, PUBLIC loses CONNECT and CREATE, systemd sandbox | CIS PostgreSQL |
+| `redis`, `valkey`  | localhost, ACL password stored as SHA-256, `FLUSHALL`, `CONFIG`, `DEBUG`, `MODULE` and similar commands blocked, systemd sandbox | (vendor guide) |
+| `mongodb`          | Authorization from the first start, bound to 127.0.0.1, no Unix socket, server-side JavaScript off, mongosh telemetry off, least-privilege application users, systemd sandbox | CIS MongoDB |
 | `haproxy`          | Statistics only on 127.0.0.1, admin socket readable by root only, chroot, systemd sandbox, ports in the firewall only for services that are not `local` | (operations) |
 
 ## Deliberate deviations
