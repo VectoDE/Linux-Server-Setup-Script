@@ -18,7 +18,8 @@ PORTAINER_IMAGE=docker.io/portainer/portainer-ce@sha256:03f94a406496dc84d37b5527
 PORTAINER_NAME=lss-portainer
 PORTAINER_VOLUME=lss-portainer-data
 PORTAINER_PORT=9443
-PORTAINER_DIR=/etc/lss/portainer
+# The one directory of /etc the container may mount (lib/container.sh, CTR_CONFIG_DIR).
+PORTAINER_DIR=${CTR_CONFIG_DIR}/${PORTAINER_NAME}
 PORTAINER_PASSWORD_FILE=${PORTAINER_DIR}/admin-password
 PORTAINER_PATH=portainer
 
@@ -124,7 +125,7 @@ mod_remove() {
 	fi
 	ctr_remove "${PORTAINER_NAME}"
 	file_remove "${PORTAINER_PASSWORD_FILE}"
-	rmdir "${PORTAINER_DIR}" 2>/dev/null || true
+	rmdir "${PORTAINER_DIR}" "${CTR_CONFIG_DIR}" 2>/dev/null || true
 	[[ ${LSS_PURGE:-0} == 1 ]] || return 0
 	local engine
 	engine=$(ctr_engine) || engine=''

@@ -67,16 +67,51 @@ _ctr_engine_path() {
 	esac
 }
 
-# _ctr_host_path_denied PATH: system directories and credentials that no container gets.
+# Host files a container may mount from /etc: only its own directory /etc/lss/containers/NAME (configuration and
+# secrets lss hands to that one container).
+CTR_CONFIG_DIR=/etc/lss/containers
+
+# _ctr_host_path_denied NAME PATH: system directories, credentials, the state and logs of lss and the sockets of
+# systemd and D-Bus, which no container gets. All of /etc is denied except the directory of container NAME.
 _ctr_host_path_denied() {
-	local path=$1
+	local name=$1 path=$2
 	path=${path%/}
+	if [[ ${path} == "${CTR_CONFIG_DIR}/${name}" || ${path} == "${CTR_CONFIG_DIR}/${name}/"* ]]; then
+		return 1
+	fi
 	case ${path} in
-	'' | /etc | /usr | /bin | /sbin | /lib | /lib64 | /home | /root | /boot | /proc | /sys | /dev) return 0 ;;
-	/root/* | /boot/* | /proc/* | /sys/* | /dev/* | /etc/ssh | /etc/ssh/* | /etc/lss/secrets | /etc/lss/secrets/*) return 0 ;;
-	/etc/shadow* | /etc/gshadow* | /etc/sudoers*) return 0 ;;
+	'' | /etc | /etc/* | /usr | /bin | /sbin | /lib | /lib64 | /home | /root | /boot | /proc | /sys | /dev) return 0 ;;
+	/root/* | /boot/* | /proc/* | /sys/* | /dev/*) return 0 ;;
+	/var/lib/lss | /var/lib/lss/* | /var/lib/lss-* | /var/log/lss | /var/log/lss/* | /var/log/lss-*) return 0 ;;
+	/run/systemd | /run/systemd/* | /var/run/systemd | /var/run/systemd/*) return 0 ;;
+	/run/dbus | /run/dbus/* | /var/run/dbus | /var/run/dbus/*) return 0 ;;
 	*) return 1 ;;
 	esac
+}
+
+# _ctr_host_source_problem NAME SOURCE: prints why the host path SOURCE may not be mounted into container NAME, or
+# nothing. Both the path as written and the path it resolves to (symbolic links followed) are checked, so a link to a
+# socket or a system directory does not slip through. Fails when the path cannot be resolved.
+_ctr_host_source_problem() {
+	local name=$1 source=$2 resolved path
+	if [[ ! ${source} =~ ^/[A-Za-z0-9._/-]*$ || /${source}/ == */../* ]]; then
+		printf '%s is not a valid host path' "${source}"
+		return 0
+	fi
+	resolved=$(realpath -m -- "${source}") || return 1
+	[[ ${resolved} == /* ]] || return 1
+	for path in "${source}" "${resolved}"; do
+		if _ctr_engine_path "${path}"; then
+			printf 'mounting %s hands over the container engine; only %s may have its socket' "${source}" "${CTR_SOCKET_CONTAINERS}"
+			return 0
+		fi
+		if _ctr_host_path_denied "${name}" "${path}"; then
+			printf '%s may not be mounted into a container' "${source}"
+			[[ ${path} == "${source}" ]] || printf ' (it leads to %s)' "${path}"
+			return 0
+		fi
+	done
+	return 0
 }
 
 _ctr_check_publish() {
@@ -87,7 +122,7 @@ _ctr_check_publish() {
 }
 
 _ctr_check_volume() {
-	local name=$1 spec=$2 source target rest options=''
+	local name=$1 spec=$2 source target rest options='' problem
 	[[ ${spec} == *:* ]] || die "container ${name}: volume '${spec}' must be SOURCE:TARGET[:OPTIONS]."
 	source=${spec%%:*}
 	rest=${spec#*:}
@@ -103,14 +138,8 @@ _ctr_check_volume() {
 		[[ ${source} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "container ${name}: '${source}' is not a volume name."
 		return 0
 	fi
-	[[ ${source} =~ ^/[A-Za-z0-9._/-]*$ && /${source}/ != */../* ]] ||
-		die "container ${name}: '${source}' is not a valid host path."
-	if _ctr_engine_path "${source}"; then
-		die "container ${name}: mounting ${source} hands over the container engine; only ${CTR_SOCKET_CONTAINERS} may have its socket."
-	fi
-	if _ctr_host_path_denied "${source}"; then
-		die "container ${name}: ${source} may not be mounted into a container."
-	fi
+	problem=$(_ctr_host_source_problem "${name}" "${source}") || die "container ${name}: cannot resolve the host path ${source}."
+	[[ -z ${problem} ]] || die "container ${name}: ${problem}."
 	return
 }
 
@@ -333,36 +362,55 @@ ctr_remove() {
 }
 
 # The rules of ctr_args for Compose files, as a jq program over the output of "docker compose config --format json":
-# one line "SERVICE: problem" per violation.
+# one line "SERVICE: problem" per violation. $denied: CTR_DENIED_CAPS. Host paths of bind mounts are checked by the
+# shell afterwards (CTR_COMPOSE_BINDS), because only realpath can follow their symbolic links.
 # shellcheck disable=SC2016 # jq variables, not shell variables
 CTR_COMPOSE_RULES='
+($denied | split(" ")) as $deny |
 .services // {} | to_entries[] | .key as $name | .value as $s |
 (
 	(if (($s.image // "") | test("^[a-z0-9.:-]+/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$")) then empty
 		else "the image is not pinned by digest (registry/name@sha256:...)" end),
 	(if $s.privileged == true then "runs privileged" else empty end),
 	(if any($s.cap_drop[]?; . == "ALL") then empty else "keeps capabilities (cap_drop: [ALL])" end),
+	($s.cap_add[]? | ascii_upcase | ltrimstr("CAP_") | select(. == "ALL" or (. as $c | $deny | index($c)))
+		| "adds the capability \(.)"),
 	(if any($s.security_opt[]?; test("^no-new-privileges([:=]true)?$")) then empty
 		else "may gain new privileges (security_opt: [no-new-privileges:true])" end),
+	(if any($s.security_opt[]?; test("unconfined|^label[:=]disable|^no-new-privileges[:=]false"))
+		then "lifts a security profile (security_opt)" else empty end),
+	(if ($s.devices // []) | length > 0 then "has host devices (devices)" else empty end),
 	(if $s.read_only == true or ($s.labels["lss.writable"]? // "") == "true" then empty
 		else "has a writable root file system (read_only: true, or the label lss.writable: \"true\")" end),
 	(if ($s.mem_limit // $s.deploy.resources.limits.memory // null) == null then "has no memory limit (mem_limit)" else empty end),
 	(if ($s.pids_limit // $s.deploy.resources.limits.pids // null) == null then "has no process limit (pids_limit)" else empty end),
-	(if $s.network_mode == "host" or $s.pid == "host" or $s.ipc == "host" then "shares a namespace of the host" else empty end),
-	(if any($s.volumes[]?; .type == "bind" and ((.source // "") | test("(docker|podman|containerd)[.]sock$|^/(var/)?run/?$")))
-		then "mounts the socket of the container engine" else empty end),
+	(if ([$s.network_mode, $s.pid, $s.ipc, $s.uts, $s.userns_mode, $s.cgroup] | any(. == "host"))
+		or (($s.network_mode // "") | startswith("container:")) or (($s.pid // "") | startswith("container:"))
+		then "shares a namespace of the host or another container" else empty end),
 	(if any($s.ports[]?; (.host_ip // "") == "") then "publishes a port without an address (host_ip)" else empty end)
 ) | "\($name): \(.)"'
+# "SERVICE<TAB>SOURCE" for every bind mount.
+# shellcheck disable=SC2016 # jq variables, not shell variables
+CTR_COMPOSE_BINDS='.services // {} | to_entries[] | .key as $name | .value.volumes[]? | select(.type == "bind") | "\($name)\t\(.source // "")"'
 
 # ctr_compose_check FILE: checks every service of a Compose file against the container rules. docker compose resolves
 # the file first (extends, anchors, defaults), so the checks see what Compose would run. Prints each violation and fails
-# when there is one.
+# when there is one; a file it cannot read or check fails as well.
 ctr_compose_check() {
-	local file=$1 json problems line
+	local file=$1 json problems binds service source problem line
 	[[ -r ${file} ]] || die "container: cannot read the Compose file ${file}."
 	json=$(docker compose -f "${file}" config --format json 2>/dev/null) ||
 		die "container: docker compose cannot read ${file} (docker compose -f ${file} config shows why)."
-	problems=$(jq -r "${CTR_COMPOSE_RULES}" <<<"${json}") || die "container: jq cannot check ${file}."
+	problems=$(jq -r --arg denied "${CTR_DENIED_CAPS}" "${CTR_COMPOSE_RULES}" <<<"${json}") ||
+		die "container: jq cannot check ${file}."
+	binds=$(jq -r "${CTR_COMPOSE_BINDS}" <<<"${json}") || die "container: jq cannot read the mounts of ${file}."
+	while IFS=$'\t' read -r service source; do
+		[[ -n ${service} ]] || continue
+		problem=$(_ctr_host_source_problem "compose-${service}" "${source}") ||
+			die "container: cannot resolve the host path ${source} of ${service} in ${file}."
+		[[ -z ${problem} ]] || problems+=$'\n'"${service}: ${problem}"
+	done <<<"${binds}"
+	problems=$(sed '/^$/d' <<<"${problems}")
 	[[ -n ${problems} ]] || return 0
 	while IFS= read -r line; do
 		log_error "${file}: ${line}"
