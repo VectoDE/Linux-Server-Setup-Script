@@ -164,7 +164,7 @@ start_target
 
 if [[ $1 == --profile ]]; then
 	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
-	if grep -qE '^LSS_MODULES=.*tls' "profiles/${profile}.conf"; then
+	if grep -qE '^LSS_MODULES=(.* )?tls( |$)' "profiles/${profile}.conf"; then
 		group_start "${system}: Pebble (ACME test server)"
 		pebble_start
 		group_end
