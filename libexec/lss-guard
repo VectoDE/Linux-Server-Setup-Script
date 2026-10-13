@@ -275,11 +275,9 @@ images() {
 		while read -r id repository tag; do
 			[[ -n ${id} ]] || continue
 			if [[ ${repository} == '<none>' || ${tag} == '<none>' || -z ${tag} ]]; then
-				printf '%s %s
-' "${id}" "${id}"
+				printf '%s %s\n' "${id}" "${id}"
 			else
-				printf '%s %s:%s
-' "${id}" "${repository}" "${tag}"
+				printf '%s %s:%s\n' "${id}" "${repository}" "${tag}"
 			fi
 		done | awk '!seen[$1]++'
 	return
@@ -290,7 +288,7 @@ images() {
 scan_image() {
 	local engine=$1 id=$2 ref=$3 tmp status=0
 	# shellcheck disable=SC2016 # a Go template, not a shell expansion
-	local -a scan=("${TRIVY}" image --cache-dir "${TRIVY_CACHE}" --scanners vuln --severity HIGH,CRITICAL --quiet
+	local -a scan=("${TRIVY}" image --cache-dir "${TRIVY_CACHE}" --scanners vuln --severity "HIGH,CRITICAL" --quiet
 		--timeout 15m --format template --template '{{range .Results}}{{range .Vulnerabilities}}{{println .Severity}}{{end}}{{end}}')
 	if [[ ${engine} == docker ]]; then
 		"${scan[@]}" --image-src docker "${ref}"

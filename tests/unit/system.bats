@@ -286,11 +286,12 @@ time.sleep(30)' >"${port_file}" 2>/dev/null 3>&- &
 	LSS_MODULE=k3s
 	# shellcheck disable=SC2329 # called by fw_trust
 	_fw_host_addresses() {
-		printf '192.168.1.10
-'
+		printf '192.168.1.10\n'
 	}
 	local spec
-	for spec in '0.0.0.0/0 cni0' '::/0 cni0' '300.1.1.1/24 cni0' '10.0.0.0/33 cni0' '10.0.0.0/7 cni0' '2001:db8::/16 cni0' 		'fd00::/129 cni0' '10.42.0.0 cni0' '10.42.0.0/16' '10.42.0.0/16 cni*' '10.42.0.0/16 a-very-long-interface' 		'192.168.0.0/16 eth0' '192.168.1.10/32 eth0'; do
+	for spec in '0.0.0.0/0 cni0' '::/0 cni0' '300.1.1.1/24 cni0' '10.0.0.0/33 cni0' '10.0.0.0/7 cni0' '2001:db8::/16 cni0' \
+		'fd00::/129 cni0' '10.42.0.0 cni0' '10.42.0.0/16' '10.42.0.0/16 cni*' '10.42.0.0/16 a-very-long-interface' \
+		'192.168.0.0/16 eth0' '192.168.1.10/32 eth0'; do
 		# shellcheck disable=SC2086 # NETWORK and INTERFACE as two words
 		run fw_trust ${spec}
 		[ "${status}" -eq 1 ]
@@ -302,8 +303,7 @@ time.sleep(30)' >"${port_file}" 2>/dev/null 3>&- &
 	[ ! -e "${LSS_STATE_DIR}/firewall-trusted/k3s" ]
 	fw_trust 10.42.0.0/16 cni0
 	fw_trust fd00:42::/48 cni0
-	[ "$(cat "${LSS_STATE_DIR}/firewall-trusted/k3s")" = $'10.42.0.0/16 cni0
-fd00:42::/48 cni0' ]
+	[ "$(cat "${LSS_STATE_DIR}/firewall-trusted/k3s")" = $'10.42.0.0/16 cni0\nfd00:42::/48 cni0' ]
 }
 
 @test "ufw: a trusted network is accepted on its interface only, once, and removed with the module" {
