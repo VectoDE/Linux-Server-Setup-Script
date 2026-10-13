@@ -565,6 +565,14 @@ EOF
 	run ! grep -q ReadWritePaths <<<"${output}"
 }
 
+@test "svc_scanner_sandbox lets scanners enter their SELinux domain" {
+	export STUB_EXIT_selinuxenabled=0
+	run svc_scanner_sandbox strict /var/lib/aide
+	[ "${status}" -eq 0 ]
+	grep -qxF 'NoNewPrivileges=no' <<<"${output}"
+	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+}
+
 @test "fw_ssh_port falls back to 22 when sshd fails" {
 	STUB_EXIT_sshd=255 run fw_ssh_port
 	[ "${status}" -eq 0 ]

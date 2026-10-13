@@ -110,9 +110,14 @@ svc_wait_port() {
 # kernel modules and the kernel log stay visible: a private /tmp would hide it from ClamAV and rkhunter, and rkhunter,
 # AIDE and Lynis check the others.
 svc_scanner_sandbox() {
-	local level=$1 path
+	local level=$1 path nnp=yes
 	shift
-	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only NoNewPrivileges=yes ProtectControlGroups=yes \
+	# Under SELinux a scanner enters its own domain (aide_t, antivirus_t) on exec. NoNewPrivileges blocks that change;
+	# the scanner then stays in init_t, which may not write its reports.
+	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+		nnp=no
+	fi
+	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=${nnp}" ProtectControlGroups=yes \
 		ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
 		LockPersonality=yes SystemCallArchitectures=native
 	for path in "$@"; do
