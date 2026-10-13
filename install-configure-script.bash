@@ -230,11 +230,11 @@ install_node(){
   log "INFO" "Installing Node.js ${node_version}.x"
   case "$OS_ID" in
     ubuntu|debian)
-      curl -fsSL https://deb.nodesource.com/setup_${node_version}.x | bash -
+      curl --proto '=https' --tlsv1.2 -fsSL https://deb.nodesource.com/setup_${node_version}.x | bash -
       apt-get install -y nodejs build-essential
       ;;
     centos|rhel)
-      curl -fsSL https://rpm.nodesource.com/setup_${node_version}.x | bash -
+      curl --proto '=https' --tlsv1.2 -fsSL https://rpm.nodesource.com/setup_${node_version}.x | bash -
       yum install -y nodejs gcc-c++ make
       ;;
     *)
@@ -251,7 +251,7 @@ install_php(){
       export DEBIAN_FRONTEND=noninteractive
       apt-get install -y lsb-release ca-certificates apt-transport-https gnupg
       if [[ ! -f /etc/apt/sources.list.d/php.list ]]; then
-        curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury-php.gpg
+        curl --proto '=https' --tlsv1.2 -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury-php.gpg
         echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
       fi
       apt-get update
@@ -328,7 +328,7 @@ install_phpmyadmin_native(){
     centos|rhel)
       local php_myadmin_dir=/usr/share/phpmyadmin
       mkdir -p "$php_myadmin_dir"
-      wget -qO- https://files.phpmyadmin.net/phpMyAdmin/latest/phpMyAdmin-latest-all-languages.tar.gz | \
+      curl --proto '=https' --tlsv1.2 -fsSL https://files.phpmyadmin.net/phpMyAdmin/latest/phpMyAdmin-latest-all-languages.tar.gz | \
         tar xz --strip-components=1 -C "$php_myadmin_dir"
       mkdir -p /var/lib/phpmyadmin/tmp
       chown -R root:root "$php_myadmin_dir"
@@ -741,12 +741,12 @@ if [[ "$MODE" = "docker" ]]; then
   case "$OS_ID" in
     ubuntu|debian)
       apt-get remove -y docker docker-engine docker.io containerd runc || true
-      curl -fsSL https://get.docker.com | sh
+      curl --proto '=https' --tlsv1.2 -fsSL https://get.docker.com | sh
       apt-get install -y docker-compose-plugin
       systemctl enable --now docker
       ;;
     centos|rhel)
-      curl -fsSL https://get.docker.com | sh
+      curl --proto '=https' --tlsv1.2 -fsSL https://get.docker.com | sh
       yum install -y docker-compose-plugin || true
       systemctl enable --now docker
       ;;

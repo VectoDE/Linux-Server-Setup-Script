@@ -87,8 +87,14 @@ os_require_supported() {
 	return
 }
 
-os_is_debian() { [[ ${OS_FAMILY} == debian ]]; return; }
-os_is_rhel() { [[ ${OS_FAMILY} == rhel ]]; return; }
+os_is_debian() {
+	[[ ${OS_FAMILY} == debian ]]
+	return
+}
+os_is_rhel() {
+	[[ ${OS_FAMILY} == rhel ]]
+	return
+}
 
 # Debian architecture name (amd64/arm64) for repository lines and downloads.
 os_deb_arch() {

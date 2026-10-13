@@ -67,11 +67,26 @@ log_debug() {
 	_log DEBUG '2' "$*"
 }
 
-log_info() { _log INFO '0' "$*"; return; }
-log_step() { _log '==>' '1;34' "$*"; return; }
-log_ok() { _log OK '32' "$*"; return; }
-log_warn() { _log WARN '33' "$*"; return; }
-log_error() { _log ERROR '31' "$*"; return; }
+log_info() {
+	_log INFO '0' "$*"
+	return
+}
+log_step() {
+	_log '==>' '1;34' "$*"
+	return
+}
+log_ok() {
+	_log OK '32' "$*"
+	return
+}
+log_warn() {
+	_log WARN '33' "$*"
+	return
+}
+log_error() {
+	_log ERROR '31' "$*"
+	return
+}
 
 # log_command COMMAND...: runs a command whose output only matters when it fails (package managers, database
 # builds). The output goes to the run log, and to the terminal with --verbose; when the command fails, its last 40

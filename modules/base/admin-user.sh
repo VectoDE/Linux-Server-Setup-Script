@@ -15,7 +15,10 @@ sudo_nopasswd|false|sudo without password (the generated password is then only n
 
 ADMIN_KEY_PATTERN='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^[:cntrl:]]*)?$'
 
-_admin_name() { opt name; return; }
+_admin_name() {
+	opt name
+	return
+}
 
 _admin_group() {
 	if os_is_debian; then printf 'sudo'; else printf 'wheel'; fi
