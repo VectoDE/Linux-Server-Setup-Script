@@ -126,6 +126,15 @@ setup() {
 	[ "$(module_mode unverified)" = native ]
 }
 
+@test "a module in docker mode requires a container engine first" {
+	config_set LSS_MODE docker
+	run module_resolve unverified
+	[ "${status}" -eq 0 ]
+	[ "${output}" = $'docker\nunverified' ]
+	run module_resolve alpha
+	[[ ${output} != *docker* ]]
+}
+
 @test "metadata, the plain list and the default module directory" {
 	[ "$(module_meta alpha MOD_DESCRIPTION)" = 'Writes one file' ]
 	run module_meta nope MOD_DESCRIPTION

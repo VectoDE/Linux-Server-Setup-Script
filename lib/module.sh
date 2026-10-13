@@ -6,7 +6,7 @@
 # subshell, so its variables and functions never leak into the core or into another module.
 #
 # MOD_REQUIRES entries are module names; "a|b|c" means one of them (the first one is chosen if none is installed or
-# requested).
+# requested). A module that runs in docker mode also requires a container engine (docker or podman).
 
 LSS_MODULE_DIRS=${LSS_MODULE_DIRS:-}
 
@@ -96,7 +96,12 @@ module_resolve() {
 		[[ -z ${visiting[${module}]+x} ]] || die "Dependency cycle involving '${module}'."
 		module_exists "${module}" || die "Unknown module '${module}'. See 'lss list'."
 		visiting[${module}]=1
-		for requirement in $(module_meta "${module}" MOD_REQUIRES); do
+		local requirements
+		requirements=$(module_meta "${module}" MOD_REQUIRES)
+		if [[ $(module_mode "${module}") == docker ]]; then
+			requirements+=" docker|podman"
+		fi
+		for requirement in ${requirements}; do
 			picked=$(_module_pick "${requirement}" "${requested}")
 			requested+="${picked} "
 			_visit "${picked}"

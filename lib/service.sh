@@ -121,6 +121,27 @@ svc_scanner_sandbox() {
 	return
 }
 
+# svc_sandbox UNIT [DIRECTIVE...]: confines a service with a drop-in (lss-sandbox.conf): read-only system, no home
+# directories, a private /tmp and /dev, no kernel tunables, modules or logs, no new privileges. DIRECTIVEs follow the
+# baseline, so a service adds the paths it writes (ReadWritePaths=/var/lib/NAME) or relaxes a setting it cannot live
+# with (PrivateDevices=no); for single-value settings the last assignment wins.
+svc_sandbox() {
+	local unit=$1 directive
+	shift
+	{
+		printf '# Managed by lss (module %s). Sandbox of %s.\n[Service]\n' "${LSS_MODULE:-lss}" "${unit}"
+		printf '%s\n' NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
+			ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes ProtectControlGroups=yes \
+			ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
+			LockPersonality=yes SystemCallArchitectures=native \
+			'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' ReadWritePaths=-/var/log ReadWritePaths=-/run
+		for directive in "$@"; do
+			printf '%s\n' "${directive}"
+		done
+	} | svc_dropin "${unit}" lss-sandbox
+	return
+}
+
 # svc_unit UNIT: writes /etc/systemd/system/UNIT (a unit of lss's own) from stdin and reloads systemd when it
 # changed.
 svc_unit() {

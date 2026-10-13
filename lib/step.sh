@@ -13,7 +13,7 @@
 set -Eeuo pipefail
 shopt -s inherit_errexit
 
-for library in log os config files template secrets state pkg repo fetch service firewall module; do
+for library in log os config files template secrets state pkg repo fetch service firewall web module; do
 	# shellcheck source=/dev/null
 	source "${LSS_ROOT}/lib/${library}.sh"
 done
