@@ -13,6 +13,9 @@ MOD_SECRETS="web-admin-password"
 
 CADDY_FILE=/etc/caddy/Caddyfile
 CADDY_DIR=/etc/caddy/lss
+# The admin API changes the running configuration, so it listens on a socket only the caddy user (and root) can open,
+# not on a TCP port every local account can reach.
+CADDY_ADMIN_SOCKET=/run/caddy/admin.sock
 
 mod_check() {
 	[[ $(opt max_body) =~ ^[0-9]+[kKmMgG]?$ ]] || die "LSS_CADDY_MAX_BODY '$(opt max_body)' is not a size like 64m or 1g."
@@ -49,7 +52,7 @@ _caddy_file() {
 # Managed by lss (module caddy). Sites: ${CADDY_DIR}/sites, admin paths: ${CADDY_DIR}/admin.
 {
 	auto_https off
-	admin localhost:2019
+	admin unix/${CADDY_ADMIN_SOCKET}|0600
 	servers {
 		protocols h1 h2
 	}
@@ -73,6 +76,15 @@ $(_caddy_headers)
 	request_body {
 		max_size $(_caddy_size "$(opt max_body)")
 	}
+}
+
+# Dot files and directories (.git, .env, .htpasswd) are never served; ACME challenges below .well-known are.
+(lss_hidden) {
+	@lss_hidden {
+		path */.*
+		not path /.well-known/*
+	}
+	respond @lss_hidden 404
 }
 
 (lss_headers) {
@@ -113,9 +125,10 @@ _caddy_admin_block() {
 			"${WEB_TLS_DIR}" "${WEB_TLS_DIR}"
 		printf '\tbasic_auth {\n\t\timport %s\n\t}\n' "${WEB_ADMIN_CADDY_AUTH}"
 	else
-		printf 'http://127.0.0.1:%s {\n' "${WEB_ADMIN_PORT}"
+		# The site address only matches the Host header; bind keeps the listener itself on the loopback interface.
+		printf 'http://127.0.0.1:%s {\n\tbind 127.0.0.1\n' "${WEB_ADMIN_PORT}"
 	fi
-	printf '\timport lss_headers\n\tlog\n\timport %s/admin/*.caddy\n\thandle {\n\t\trespond 404\n\t}\n}\n' "${CADDY_DIR}"
+	printf '\timport lss_headers\n\timport lss_hidden\n\tlog\n\timport %s/admin/*.caddy\n\thandle {\n\t\trespond 404\n\t}\n}\n' "${CADDY_DIR}"
 	return
 }
 
@@ -131,7 +144,8 @@ mod_configure() {
 		fw_allow "${WEB_ADMIN_PORT}/tcp"
 	fi
 	fw_allow 80/tcp 443/tcp
-	svc_sandbox caddy.service ReadWritePaths=-/var/lib/caddy ReadWritePaths=-/var/log/caddy
+	svc_sandbox caddy.service ReadWritePaths=-/var/lib/caddy ReadWritePaths=-/var/log/caddy RuntimeDirectory=caddy \
+		RuntimeDirectoryMode=0750
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	web_test caddy || die "caddy: the configuration does not load; see above."
 	svc_enable caddy

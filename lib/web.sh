@@ -518,7 +518,8 @@ _web_site_caddy() {
 	printf '# Managed by lss (site %s).\n%s{\n' "${name}" "${http_names}"
 	printf '\thandle /.well-known/acme-challenge/* {\n\t\troot * %s\n\t\tfile_server\n\t}\n' "${WEB_ACME_ROOT}"
 	printf '\thandle {\n\t\tredir https://{host}{uri} permanent\n\t}\n}\n\n%s{\n' "${https_names}"
-	printf '\ttls %s/fullchain.pem %s/privkey.pem\n\timport lss_tls_headers\n\tlog\n' "${cert}" "${cert}"
+	printf '\ttls %s/fullchain.pem %s/privkey.pem\n\timport lss_tls_headers\n\timport lss_hidden\n\tlog\n' \
+		"${cert}" "${cert}"
 	case ${kind} in
 	proxy) printf '\treverse_proxy %s\n' "${target}" ;;
 	php) printf '\troot * %s\n\tphp_fastcgi unix/%s\n\tfile_server\n' "${target}" "${WEB_PHP_SOCKET}" ;;
