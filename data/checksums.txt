@@ -25,6 +25,11 @@ gunicorn-26.2.0 any bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b
 
 # Files lss downloads directly, read by fetch_verified (lib/fetch.sh): <name> <arch|any> <sha256> <url>.
 
+# Valkey 8.1.10, upstream build for Ubuntu 22.04, which has no Valkey package. SHA-256 from the .sha256 files next to
+# the archives (https://valkey.io/download/), 2026-10-13.
+valkey-jammy x86_64 23400087a684b6e87f66332e0a836a2674c24c7c482361766777149499c08e50 https://download.valkey.io/releases/valkey-8.1.10-jammy-x86_64.tar.gz
+valkey-jammy aarch64 44abd1a738fdda3831bb3d84f19e4bcd45bdb537d0cee24dace364f511193eaf https://download.valkey.io/releases/valkey-8.1.10-jammy-arm64.tar.gz
+
 # MySQL 8.4.11 LTS, Oracle's generic glibc 2.28 build for Debian on arm64 (repo.mysql.com has amd64 packages only).
 # Oracle publishes an MD5 sum and a GnuPG signature, no SHA-256: the archive matched the MD5 on
 # https://dev.mysql.com/downloads/mysql/8.4.html (b22fb0240514099ff95251b1c8ed2127) and its signature by the MySQL
