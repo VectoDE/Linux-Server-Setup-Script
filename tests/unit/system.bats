@@ -528,6 +528,18 @@ EOF
 	[ ! -e "${BATS_TEST_TMPDIR}/new/tool" ]
 }
 
+@test "svc_timer_skip_missed stamps only a stopped timer" {
+	export LSS_SYSTEMD_TIMER_DIR=${BATS_TEST_TMPDIR}/timers
+	export STUB_ACTIVE_UNITS=apt-daily.timer
+	svc_timer_skip_missed apt-daily-upgrade.timer
+	[ -f "${LSS_SYSTEMD_TIMER_DIR}/stamp-apt-daily-upgrade.timer" ]
+	svc_timer_skip_missed apt-daily.timer
+	[ ! -e "${LSS_SYSTEMD_TIMER_DIR}/stamp-apt-daily.timer" ]
+	ln -s /etc/passwd "${LSS_SYSTEMD_TIMER_DIR}/stamp-other.timer"
+	run svc_timer_skip_missed other.timer
+	[ "${status}" -eq 1 ]
+}
+
 @test "svc_unit writes an own unit and reloads systemd only on change" {
 	record_writes
 	svc_unit test.swap <<<"[Swap]"

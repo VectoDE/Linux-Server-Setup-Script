@@ -67,6 +67,8 @@ EOF
 $nrconf{restart} = 'a';
 $nrconf{kernelhints} = 0;
 EOF
+	svc_timer_skip_missed apt-daily.timer
+	svc_timer_skip_missed apt-daily-upgrade.timer
 	svc_enable apt-daily.timer
 	svc_enable apt-daily-upgrade.timer
 }
@@ -89,6 +91,7 @@ emit_via = stdio
 [base]
 debuglevel = 1
 EOF
+	svc_timer_skip_missed dnf-automatic.timer
 	svc_enable dnf-automatic.timer
 }
 

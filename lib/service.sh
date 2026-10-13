@@ -30,6 +30,18 @@ svc_enable() {
 	files_note_change "enabled ${unit}"
 }
 
+# svc_timer_skip_missed TIMER: before a stopped timer with Persistent=true is started, records "ran now" in its
+# stamp file, so systemd does not catch up on runs it missed while the timer was off. Otherwise enabling
+# apt-daily-upgrade.timer on a fresh server starts a full unattended upgrade at once, which holds the dpkg lock
+# for the rest of the setup.
+svc_timer_skip_missed() {
+	local stamp="${LSS_SYSTEMD_TIMER_DIR:-/var/lib/systemd/timers}/stamp-$1"
+	svc_is_active "$1" && return 0
+	[[ ! -L ${stamp} ]] || die "${stamp} is a symbolic link."
+	mkdir -p "$(dirname "${stamp}")"
+	touch "${stamp}"
+}
+
 svc_disable() {
 	local unit=$1
 	svc_exists "${unit}" || return 0
