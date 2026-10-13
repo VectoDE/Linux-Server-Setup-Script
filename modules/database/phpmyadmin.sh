@@ -193,12 +193,17 @@ _phpmyadmin_get() {
 }
 
 mod_verify() {
-	local page status
+	local page status try
 	[[ -f ${PMA_DIR}/RELEASE-DATE-${PMA_VERSION} ]] || die "phpmyadmin: phpMyAdmin ${PMA_VERSION} is missing in ${PMA_DIR}."
 	[[ ! -e ${PMA_DIR}/setup ]] || die "phpmyadmin: the setup wizard ${PMA_DIR}/setup must not exist."
 	[[ $(stat -c '%a %U' "${PMA_CONFIG}") == '640 root' ]] || die "phpmyadmin: ${PMA_CONFIG} must be mode 640, owned by root."
-	page=$(_phpmyadmin_get "${PMA_PATH}/") || true
-	status=${page##*$'\n'}
+	# Right after a reload the old workers of the web server answer for a moment without the new admin path.
+	for ((try = 0; try < 15; try++)); do
+		page=$(_phpmyadmin_get "${PMA_PATH}/") || true
+		status=${page##*$'\n'}
+		[[ ${status} != 200 ]] || break
+		sleep 1
+	done
 	[[ ${status} == 200 ]] ||
 		die "phpmyadmin: the admin port answers ${status:-nothing} for /${PMA_PATH}/ instead of the login page."
 	grep -qF 'name="pma_username"' <<<"${page}" ||

@@ -232,8 +232,13 @@ mod_verify() {
 		sleep 2
 	done
 	[[ ${answer} == PING ]] || die "pgadmin: pgAdmin does not answer on 127.0.0.1:${port}; see journalctl -u ${PGADMIN_UNIT}."
-	page=$(_pgadmin_get "${PGADMIN_PATH}/login") || true
-	status=${page##*$'\n'}
+	# Right after a reload the old workers of the web server answer for a moment without the new admin path.
+	for ((i = 0; i < 15; i++)); do
+		page=$(_pgadmin_get "${PGADMIN_PATH}/login") || true
+		status=${page##*$'\n'}
+		[[ ${status} != 200 ]] || break
+		sleep 1
+	done
 	[[ ${status} == 200 ]] ||
 		die "pgadmin: the admin port answers ${status:-nothing} for /${PGADMIN_PATH}/login instead of the login page."
 	grep -qi 'pgadmin' <<<"${page}" || die "pgadmin: /${PGADMIN_PATH}/login is not pgAdmin's login page."

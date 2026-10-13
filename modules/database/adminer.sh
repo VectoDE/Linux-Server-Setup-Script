@@ -98,11 +98,16 @@ _adminer_get() {
 }
 
 mod_verify() {
-	local page status first
+	local page status first try
 	[[ $(sha256sum "${ADMINER_DIR}/index.php" | cut -d ' ' -f 1) == "$(fetch_entry "adminer-${ADMINER_VERSION}" | cut -d ' ' -f 1)" ]] ||
 		die "adminer: ${ADMINER_DIR}/index.php is not Adminer ${ADMINER_VERSION} as published."
-	page=$(_adminer_get "${ADMINER_PATH}/") || true
-	status=${page##*$'\n'}
+	# Right after a reload the old workers of the web server answer for a moment without the new admin path.
+	for ((try = 0; try < 15; try++)); do
+		page=$(_adminer_get "${ADMINER_PATH}/") || true
+		status=${page##*$'\n'}
+		[[ ${status} != 200 ]] || break
+		sleep 1
+	done
 	[[ ${status} == 200 ]] ||
 		die "adminer: the admin port answers ${status:-nothing} for /${ADMINER_PATH}/ instead of the login page."
 	grep -qF 'auth[username]' <<<"${page}" || die "adminer: /${ADMINER_PATH}/ shows no login form."

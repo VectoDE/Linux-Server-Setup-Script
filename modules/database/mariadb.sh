@@ -237,7 +237,9 @@ collation-server = utf8mb4_unicode_ci
 [client]
 default-character-set = utf8mb4
 EOF
-	# The data directory is the only place the server writes outside /run and /var/log.
+	# The data directory is the only place the server writes outside /run and /var/log. Newer packages (Ubuntu 26.04)
+	# create it on the first start, but the sandbox needs it before.
+	[[ -d ${MARIADB_DATA} ]] || install -d -m 0750 -o mysql -g mysql "${MARIADB_DATA}"
 	svc_sandbox "${MARIADB_UNIT}.service" "ReadWritePaths=${MARIADB_DATA}"
 	[[ $(files_changes_of mariadb) == "${before}" ]] || changed=1
 	svc_enable "${MARIADB_UNIT}"
