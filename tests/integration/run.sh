@@ -88,6 +88,15 @@ install_again() {
 	}
 	printf '%s\n' "${second}"
 	if grep -E 'OK +[a-z0-9-]+: done' <<<"${second}"; then
+		# What changed: the notes of the run and, for rewritten files, the difference to the version before it.
+		in_target 'run=$(ls -td /var/lib/lss/runs/*/ | head -n 1)
+			cat "${run}changes"
+			for backup in $(find "/var/lib/lss/backup/$(basename "${run}")" -path "*/files/*" -type f 2>/dev/null); do
+				file=/${backup#*/files/}
+				echo "--- ${file}"
+				diff "${backup}" "${file}" | head -n 20
+				stat -c "%a %U:%G" "${backup}" "${file}"
+			done' || true
 		echo "Second install of $* changed something; modules must be idempotent." >&2
 		exit 1
 	fi
