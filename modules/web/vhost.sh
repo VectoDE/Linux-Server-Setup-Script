@@ -12,7 +12,7 @@ VHOST_ROOT=/var/www
 
 # _vhost_parse SPEC: sets VHOST_NAME, VHOST_KIND, VHOST_TARGET and VHOST_DOMAINS (array).
 _vhost_parse() {
-	local spec=$1 domains rest domain
+	local spec=$1 domains rest domain url
 	IFS=':' read -r VHOST_NAME VHOST_KIND domains rest <<<"${spec}"
 	[[ ${VHOST_NAME} =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "LSS_VHOST_SITES: '${spec}' does not start with a site name (a-z, 0-9, -)."
 	case ${VHOST_KIND} in
@@ -23,7 +23,8 @@ _vhost_parse() {
 		;;
 	proxy)
 		VHOST_TARGET=${rest}
-		[[ ${VHOST_TARGET} =~ ^https?://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~/-]*)?$ ]] ||
+		url='^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$'
+		[[ ${VHOST_TARGET} =~ ${url} ]] ||
 			die "LSS_VHOST_SITES: the proxy site ${VHOST_NAME} needs a backend URL like http://127.0.0.1:3000."
 		;;
 	*) die "LSS_VHOST_SITES: '${VHOST_KIND}' in '${spec}' is not static, php or proxy." ;;
