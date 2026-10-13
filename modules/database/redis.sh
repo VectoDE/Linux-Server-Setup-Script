@@ -139,10 +139,28 @@ EOF
 	return
 }
 
+# A non-default port needs the redis_port_t label under SELinux (the RHEL policy confines Redis as redis_t).
+_redis_selinux_port() {
+	local port=$1 custom
+	[[ ${port} != 6379 ]] || return 0
+	os_is_rhel || return 0
+	if ! command -v selinuxenabled >/dev/null 2>&1 || ! selinuxenabled; then
+		return 0
+	fi
+	pkg_install policycoreutils-python-utils
+	custom=$(semanage port -l -C 2>/dev/null | awk '$1 == "redis_port_t" && $2 == "tcp" { print $3 }')
+	grep -qxF "${port}" <<<"${custom}" && return 0
+	semanage port -a -t redis_port_t -p tcp "${port}" 2>/dev/null ||
+		semanage port -m -t redis_port_t -p tcp "${port}"
+	files_note_change "SELinux port ${port}/tcp for Redis"
+	return
+}
+
 mod_configure() {
 	local before changed=0 password unit config
 	unit=$(_redis_unit)
 	before=$(files_changes_of redis)
+	_redis_selinux_port "$(opt_int port)"
 	secret_load redis-password password
 	if ! getent group "${REDIS_GROUP}" >/dev/null; then
 		groupadd --system "${REDIS_GROUP}"
