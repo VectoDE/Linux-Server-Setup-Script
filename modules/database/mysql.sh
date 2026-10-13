@@ -272,16 +272,22 @@ _mysql_initialize() {
 	[[ -d ${MYSQL_DATA} && ! -L ${MYSQL_DATA} ]] || die "mysql: ${MYSQL_DATA} is missing or a symbolic link."
 	[[ -z $(ls -A -- "${MYSQL_DATA}") ]] ||
 		die "mysql: ${MYSQL_DATA} is not empty but holds no MySQL data dictionary; move its content away first."
-	install -d -m 0755 -o mysql -g mysql /run/mysqld
-	dir=$(mktemp -d /run/mysqld/lss-init.XXXXXX)
-	[[ ${dir} == /run/mysqld/lss-init.?* ]] || die "mysql: could not create a private directory in /run/mysqld."
+	# The directory sits in root-owned /run, so the mysql user cannot swap it for a link between the steps below.
+	dir=$(mktemp -d /run/lss-mysql-init.XXXXXX)
+	[[ ${dir} == /run/lss-mysql-init.?* ]] || die "mysql: could not create a private directory in /run."
 	chgrp mysql "${dir}"
 	chmod 0750 "${dir}"
+	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+		chcon -t mysqld_var_run_t "${dir}" 2>/dev/null || true
+	fi
 	(
 		umask 027
 		printf '%s\n' "${sql}" >"${dir}/init.sql"
 	)
 	chgrp mysql "${dir}/init.sql"
+	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+		chcon -t mysqld_var_run_t "${dir}/init.sql" 2>/dev/null || true
+	fi
 	log_command "$@" --initialize --user=mysql "--init-file=${dir}/init.sql" || status=$?
 	rm -rf -- "${dir}"
 	if [[ ${status} -ne 0 ]]; then
