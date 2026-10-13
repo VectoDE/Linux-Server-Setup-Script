@@ -11,3 +11,14 @@ composer any 7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6 ht
 # Go 1.27.2: https://go.dev/dl/?mode=json and https://dl.google.com/go/go1.27.2.linux-<arch>.tar.gz.sha256 (2026-10-13).
 go x86_64 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 https://go.dev/dl/go1.27.2.linux-amd64.tar.gz
 go aarch64 94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 https://go.dev/dl/go1.27.2.linux-arm64.tar.gz
+
+# phpMyAdmin 5.2.3: SHA-256 from https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.xz.sha256
+# (checked 2026-10-13).
+phpmyadmin-5.2.3 any 57881348297c4412f86c410547cf76b4d8a236574dd2c6b7d6a2beebe7fc44e3 https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.xz
+# Adminer 6.1.2: SHA-256 digest of the release asset on GitHub (gh api repos/vrana/adminer/releases/tags/v6.1.2,
+# checked 2026-10-13).
+adminer-6.1.2 any b32316156bd18ffa99c1a27617142c2e5ad72260e37f15da4e9937a3dbb15f57 https://github.com/vrana/adminer/releases/download/v6.1.2/adminer-6.1.2.php
+# pgAdmin 4 9.18 and gunicorn 26.2.0: SHA-256 of the wheels as published by PyPI (https://pypi.org/pypi/pgadmin4/9.18/json,
+# https://pypi.org/pypi/gunicorn/26.2.0/json, checked 2026-10-13).
+pgadmin4-9.18 any 9ea084fc416265e4fc95c9fb6e6ae0f6668d34da8670c9b65c79cea054124356 https://files.pythonhosted.org/packages/0e/80/86d7e7123e2b6de41890bd1edc3e27348e2572acea337088faa0ec41c7f5/pgadmin4-9.18-py3-none-any.whl
+gunicorn-26.2.0 any bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3 https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl
