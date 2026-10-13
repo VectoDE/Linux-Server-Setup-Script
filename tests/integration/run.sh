@@ -67,6 +67,7 @@ start_target() {
 		docker rm -f "${container}" >/dev/null 2>&1 || true
 		docker run -d --name "${container}" --hostname lss-test --privileged --cgroupns=host \
 			-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec \
+			-v /var/lib/containers \
 			-v "${PWD}:/src:ro" "lss-test:${system}" >/dev/null
 		in_target 'for i in $(seq 60); do s=$(systemctl is-system-running 2>/dev/null || true); [[ $s == running || $s == degraded ]] && exit 0; sleep 1; done; exit 1'
 		in_target 'cp -a /src /opt/lss-src'

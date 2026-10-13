@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web, runtime, database, database-alt]
+        group: [base, security, scanners, web, runtime, database, database-alt, container]
         arch: [x64, arm64]
         include:
           - group: base
@@ -50,6 +50,10 @@ jobs:
             modules: mariadb postgresql redis nginx,php,mariadb,phpmyadmin caddy,php,adminer apache,postgresql,pgadmin
           - group: database-alt
             modules: mysql valkey mongodb
+          # Podman runs inside a test container (its storage on a volume, not on overlayfs). Docker, Portainer and
+          # k3s need a kernel of their own (bridges, iptables, cgroups) and run in the VM jobs below.
+          - group: container
+            modules: podman
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -118,6 +122,30 @@ jobs:
           # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases.
           - system: debian-13
             run: profile all
+          # Docker with Portainer, then k3s (after Docker is removed; they conflict) on every supported system. The
+          # runner itself already has Docker, so these need a clean VM.
+          - system: debian-12
+            run: containers
+          - system: debian-13
+            run: containers
+          - system: ubuntu-22.04
+            run: containers
+          - system: ubuntu-24.04
+            run: containers
+          - system: ubuntu-26.04
+            run: containers
+          - system: rocky-9
+            run: containers
+          - system: almalinux-10
+            run: containers
+          # minimal-secure on the newest Ubuntu release in a VM, without the runner image's extra software.
+          - system: ubuntu-26.04
+            run: profile minimal-secure
+          # The Kubernetes node profile with a Lynis audit.
+          - system: debian-13
+            run: profile k8s-node
+          - system: almalinux-10
+            run: profile k8s-node
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -135,7 +163,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       # Kernel modules as on the runner VM, then the whole profile with a Lynis audit. minimal-secure reached a
       # hardening index of 87 on Debian 12 and 85 on Debian 13, 85 on Rocky Linux 9 and 84 on AlmaLinux 10 (October
-      # 2026). The minimums leave room for small changes between Lynis versions.
+      # 2026). The minimums leave room for small changes between Lynis versions. Docker and k3s cost points (IP
+      # forwarding, Lynis' container checks); the minimums of Ubuntu and of the profiles all and k8s-node are estimates
+      # until the first runs.
       - name: Install, verify, reinstall, remove
         env:
           SYSTEM: vm-${{ matrix.system }}
@@ -143,10 +173,15 @@ jobs:
         run: |
           if [[ $RUN == kernel ]]; then
             tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard
+          elif [[ $RUN == containers ]]; then
+            tests/integration/run.sh "$SYSTEM" firewall,docker,portainer firewall,k3s
           else
-            case $SYSTEM in
-            vm-debian-*) minimum=82 ;;
-            *) minimum=80 ;;
+            case $SYSTEM:$RUN in
+            vm-debian-*:"profile minimal-secure") minimum=82 ;;
+            vm-rocky-*:"profile minimal-secure" | vm-almalinux-*:"profile minimal-secure") minimum=80 ;;
+            *:"profile minimal-secure") minimum=75 ;;
+            vm-debian-*) minimum=75 ;;
+            *) minimum=60 ;;
             esac
             tests/integration/run.sh "$SYSTEM" --profile "${RUN#profile }" "$minimum"
           fi
