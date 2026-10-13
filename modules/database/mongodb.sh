@@ -111,13 +111,39 @@ mod_check() {
 }
 
 mod_install() {
-	local repo name
+	local repo name before
 	repo=$(_mongo_repo)
 	for name in ${MONGO_REPOS}; do
 		[[ ${name} == "${repo}" ]] || repo_remove "${name}"
 	done
 	repo_add "${repo}"
+	# The configuration and the unit drop-in are in place before the package arrives, so whatever starts mongod first
+	# (a package script, a reboot, a failed later step) starts it with authorization on and bound to localhost; it
+	# never runs once with the package's open default configuration.
+	before=$(files_changes_of mongodb)
+	_mongo_write_config
+	if [[ $(files_changes_of mongodb) != "${before}" ]] && svc_is_active "${MONGO_UNIT}"; then
+		svc_restart "${MONGO_UNIT}"
+	fi
 	pkg_install mongodb-org-server mongodb-mongosh
+	return
+}
+
+# Writes lss's configuration and points the unit at it. Authorization and the bind list are fixed parts of the file,
+# never left to a default, and nothing is written if they are missing.
+_mongo_write_config() {
+	local config
+	config=$(_mongo_config) || die "mongodb: cannot build the configuration."
+	[[ ${config} == *$'\n  authorization: enabled\n'* && ${config} == *$'\n  bindIp: '[0-9A-Fa-f:.]* ]] ||
+		die "mongodb: the configuration lacks authorization or bindIp; refusing to write it."
+	file_write 0644 root:root "${MONGO_CONF}" <<<"${config}"
+	svc_dropin "${MONGO_UNIT}.service" lss-config <<EOF
+# Managed by lss (module mongodb): mongod reads the lss configuration instead of /etc/mongod.conf.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/mongod --config ${MONGO_CONF}
+EOF
+	svc_sandbox "${MONGO_UNIT}.service" "ReadWritePaths=$(_mongo_data)"
 	return
 }
 
@@ -271,7 +297,7 @@ EOF
 }
 
 mod_configure() {
-	local before changed=0 password config port
+	local before changed=0 password port
 	port=$(opt_int port)
 	before=$(files_changes_of mongodb)
 	_mongo_selinux_port "${port}"
@@ -281,15 +307,7 @@ mod_configure() {
 mongosh:
   enableTelemetry: false
 EOF
-	config=$(_mongo_config)
-	file_write 0644 root:root "${MONGO_CONF}" <<<"${config}"
-	svc_dropin "${MONGO_UNIT}.service" lss-config <<EOF
-# Managed by lss (module mongodb): mongod reads the lss configuration instead of /etc/mongod.conf.
-[Service]
-ExecStart=
-ExecStart=/usr/bin/mongod --config ${MONGO_CONF}
-EOF
-	svc_sandbox "${MONGO_UNIT}.service" "ReadWritePaths=$(_mongo_data)"
+	_mongo_write_config
 	[[ $(files_changes_of mongodb) == "${before}" ]] || changed=1
 	svc_enable "${MONGO_UNIT}"
 	if [[ ${changed} == 1 ]]; then
