@@ -111,6 +111,6 @@ signed build attestation that `lss update` verifies before it installs a version
 - Unit tests (bats) cover the CLI, the libraries and the module runner, including link refusal, setting validation,
   restore on failure and the repository signature checks; line coverage of `lib/` is above 90 % and enforced in CI.
 - The integration tests install, verify, reinstall (which must change nothing) and remove every module on every
-  supported distribution, and run the `minimal-secure` profile on a virtual machine followed by a Lynis audit that must
-  reach a hardening index of 70.
+  supported distribution on x64 and arm64, and run the `minimal-secure` profile in virtual machines followed by a Lynis
+  audit that must reach a hardening index of 82 on Debian and 75 on the Ubuntu runner.
 - ShellCheck, shfmt, SonarQube Cloud, actionlint, zizmor, gitleaks and the REUSE check run on every pull request.

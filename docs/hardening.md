@@ -4,15 +4,16 @@ This page lists what the security modules change, which part of the CIS Benchmar
 Enterprise Linux each one covers, and where lss deliberately does something else. Every value below can be checked on
 a server with `lss verify`; the `lynis` module gives a second opinion with `lss audit`.
 
-The profile `minimal-secure` installs everything in this list except the modules marked opt-in. On an Ubuntu 24.04
-virtual machine it reaches a Lynis hardening index of 75; CI checks that it stays at 70 or above.
+The profile `minimal-secure` installs everything in this list except the modules marked opt-in. On fresh Debian 12
+and 13 cloud images it reaches a Lynis hardening index of 87 and 85, on the Ubuntu 24.04 GitHub runner (which brings
+Docker, databases and its own sudo rules) 78. CI checks that it stays at 82 on Debian and 75 on the runner.
 
 ## What the modules do
 
 | Module             | Changes                                                                                                                                          | CIS area                              |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
 | `admin-user`       | One administrator with SSH keys only (RSA at least 3072 bits), sudo through the sudo or wheel group (with a pseudo terminal, a 5-minute timestamp and its own log file; sudo-rs logs to the journal), a generated password for the console | User accounts, sudo                   |
-| `ssh-hardening`    | No root login, no passwords, public keys only, `AllowGroups`, 3 tries, 30 s login grace, idle sessions closed after 15 minutes, no agent, X11 or tunnel forwarding, verbose logging, a login banner (also in `/etc/issue` and `/etc/issue.net`), modern key exchange (ML-KEM and sntrup761 hybrids first), AEAD ciphers first with AES-CTR as fallback, encrypt-then-MAC MACs only, DH moduli of 3072 bits and more | SSH server                            |
+| `ssh-hardening`    | No root login, no passwords, public keys only, `AllowGroups`, 3 tries, 30 s login grace, idle sessions closed after 15 minutes, no agent, X11 or tunnel forwarding, verbose logging, `sshd_config` readable by root only, a login banner (also in `/etc/issue` and `/etc/issue.net`), modern key exchange (ML-KEM and sntrup761 hybrids first), AEAD ciphers first with AES-CTR as fallback, encrypt-then-MAC MACs only, DH moduli of 3072 bits and more | SSH server                            |
 | `ssh-2fa` (opt-in) | A TOTP code in addition to the key, per user                                                                                                    | SSH server, authentication            |
 | `firewall`         | ufw or firewalld, everything inbound closed except SSH and the ports of installed modules; a rollback timer switches it off again if SSH cannot be confirmed | Host-based firewall                   |
 | `fail2ban`         | Bans after 5 failures in 10 minutes, ban time grows from 1 hour to 1 week, a recidive jail for repeat offenders, bans through nftables          | (not in CIS; defence in depth)        |
@@ -27,6 +28,7 @@ virtual machine it reaches a Lynis hardening index of 75; CI checks that it stay
 | `clamav` (opt-in)  | Virus signatures updated several times a day, daily low-priority scan of writable directories                                                    | (not in CIS)                          |
 | `lynis`            | Weekly audit with the hardening index kept as history; `lss audit` fails below a minimum you set                                                | (audit tool)                          |
 | `usbguard` (opt-in)| Only the USB devices present at installation are allowed                                                                                         | Removable media                       |
+| `system`           | System crontab and cron directories readable by root only (600 and 700)                                                                         | Job schedulers                        |
 | `logging`          | Persistent journal with size and age limits, optional forwarding to a syslog server over TLS                                                     | Logging                               |
 | `time`             | chrony with NTS-authenticated servers, no NTP port open                                                                                          | Time synchronisation                  |
 | `guard`            | Runs `lss verify` every day, repairs modules that failed or were changed outside lss, reports failed units, full disks, pending security updates, vulnerable packages, a needed reboot, a low Lynis index, AIDE/rkhunter/ClamAV findings and failed SSH logins; notes logins and bans | (operations)                          |

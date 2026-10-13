@@ -31,7 +31,8 @@ now or later.
   daily AIDE, rkhunter and ClamAV runs found, which their units had only written to the journal; successful logins
   and active bans appear as notes.
 - More hardening towards a Lynis index of 85: the login banner also in `/etc/issue` and `/etc/issue.net`, costlier
-  password hashes, libpam-tmpdir, process accounting, debsums and apt-show-versions.
+  password hashes, libpam-tmpdir, process accounting, debsums, apt-show-versions, cron files and `sshd_config`
+  readable by root only. minimal-secure reaches 85 to 87 on Debian.
 - System requirements in the README: RAM, disk and install time for the profile and every module, measured by the
   integration tests on every supported system.
 - Package repositories of vendors are added only with a pinned key fingerprint.

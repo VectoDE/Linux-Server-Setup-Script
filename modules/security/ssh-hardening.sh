@@ -178,6 +178,11 @@ mod_configure() {
 	file_write 0644 root:root /etc/issue.net <<<"$(opt banner)"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	file_write 0600 root:root "${SSH_CONFIG}" < <(_ssh_render)
+	# The main file can hold host-specific settings; only root needs to read it (Lynis FILE-7524).
+	if [[ -f /etc/ssh/sshd_config && $(stat -c '%a' /etc/ssh/sshd_config) != 600 ]]; then
+		chmod 600 /etc/ssh/sshd_config
+		files_note_change "permissions of /etc/ssh/sshd_config"
+	fi
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	_ssh_moduli
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
@@ -220,6 +225,7 @@ mod_remove() {
 	file_remove "${SSH_BANNER}"
 	# Back to a neutral console greeting (\S is the system name, \l the terminal).
 	file_write 0644 root:root /etc/issue <<<'\S \l'
+	[[ ! -f /etc/ssh/sshd_config ]] || chmod 644 /etc/ssh/sshd_config
 	file_write 0644 root:root /etc/issue.net <<<'\S'
 	sshd -t || die "ssh-hardening: sshd configuration is invalid without the lss settings."
 	svc_reload "$(_ssh_unit)"

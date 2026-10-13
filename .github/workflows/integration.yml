@@ -90,9 +90,10 @@ jobs:
         with:
           persist-credentials: false
       # The whole profile at once, as on a real server, then the Lynis audit. minimal-secure reached a hardening index
-      # of 75 here (October 2026); the minimum leaves room for small changes between Lynis versions.
+      # of 78 here (October 2026); the runner image itself (Docker, PostgreSQL, its sudoers file) costs the rest. The
+      # minimum leaves room for small changes between Lynis versions.
       - name: Install the profile, verify, reinstall, audit
-        run: tests/integration/run.sh host --profile minimal-secure 70
+        run: tests/integration/run.sh host --profile minimal-secure 75
 
   vm:
     name: ${{ matrix.system }} VM / ${{ matrix.run }}
@@ -117,8 +118,9 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      # Kernel modules as on the runner VM, then the whole profile with a Lynis audit. The minimum index is set low
-      # until the first measurements on these systems are in (stage 1b, issue #12).
+      # Kernel modules as on the runner VM, then the whole profile with a Lynis audit. minimal-secure reached a
+      # hardening index of 87 on Debian 12 and 85 on Debian 13 (October 2026); the RHEL family keeps a low minimum
+      # until its first measurements are in (stage 1b, issue #12).
       - name: Install, verify, reinstall, remove
         env:
           SYSTEM: vm-${{ matrix.system }}
@@ -127,5 +129,9 @@ jobs:
           if [[ $RUN == kernel ]]; then
             tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard
           else
-            tests/integration/run.sh "$SYSTEM" --profile minimal-secure 60
+            case $SYSTEM in
+            vm-debian-*) minimum=82 ;;
+            *) minimum=60 ;;
+            esac
+            tests/integration/run.sh "$SYSTEM" --profile minimal-secure "$minimum"
           fi
