@@ -24,6 +24,53 @@ touches the system, restores its files when something fails, and can prove with 
 x86_64 and arm64 (aarch64). CI runs on x86_64: on every pull request it installs, verifies, installs again and removes
 every module on each tested system.
 
+## System requirements
+
+| Setup                                   | RAM                                       | Free disk | Install time            |
+| --------------------------------------- | ----------------------------------------- | --------- | ----------------------- |
+| Profile `minimal-secure`                | 1 GB; 2 GB on the RHEL family             | 4 GB      | 3 to 5 min plus AIDE    |
+| `minimal-secure` with `crowdsec`        | 1.5 GB; 2 GB on the RHEL family           | 4.5 GB    | about 30 s more         |
+| `minimal-secure` with `clamav`          | 2.5 GB                                    | 4.5 GB    | about 1 min more        |
+
+One CPU core is enough; more cores mainly shorten the first AIDE database build. The disk figure includes the swap
+file (`LSS_SWAP_SIZE`, 1 GB in the measurement), the journal (up to `LSS_LOGGING_MAX_USE`, 1 GB) and the audit logs
+(up to 10 × 32 MiB). The RHEL family needs more memory because dnf loads its repository metadata during every install,
+up to 0.7 GB.
+
+The first AIDE run reads every file under the directories it watches, so its time depends on the server: 12 to 90
+seconds on a fresh system, 16 minutes on a CI machine full of preinstalled toolchains. It runs with the lowest CPU and
+I/O priority.
+
+What each module costs, measured by the integration tests on all seven systems (largest value across them, rounded
+up). Peak RAM covers install and `lss verify`; "while running" is what stays resident afterwards.
+
+| Module             | Install and verify | Peak RAM                  | Disk    | While running                                       |
+| ------------------ | ------------------ | ------------------------- | ------- | --------------------------------------------------- |
+| `system`           | 20 s               | 170 MiB                   | 120 MiB | –                                                   |
+| `time`             | 10 s               | 120 MiB                   | 125 MiB | chronyd                                             |
+| `swap`             | 20 s               | –                         | swap file size | –                                            |
+| `admin-user`       | 5 s                | 70 MiB                    | –       | –                                                   |
+| `tools`            | 20 s               | 550 MiB (dnf), else 180 MiB | 170 MiB | –                                                 |
+| `logging`          | 5 s                | 70 MiB                    | 10 MiB  | journal up to 1 GB                                  |
+| `ssh-hardening`    | 35 s               | 190 MiB                   | 125 MiB | –                                                   |
+| `ssh-2fa`          | 45 s               | 560 MiB (dnf), else 130 MiB | 75 MiB | –                                                  |
+| `firewall`         | 5 s                | 30 MiB                    | –       | –                                                   |
+| `fail2ban`         | 15 s               | 160 MiB                   | 55 MiB  | about 35 MiB                                        |
+| `crowdsec`         | 30 s               | 310 MiB                   | 410 MiB | about 200 MiB (agent and firewall bouncer)          |
+| `kernel-hardening` | 5 s                | 40 MiB                    | –       | –                                                   |
+| `mac`              | 10 s               | 100 MiB                   | 5 MiB   | –                                                   |
+| `auditd`           | 10 s               | 70 MiB                    | 5 MiB   | audit logs up to 320 MiB                            |
+| `auto-updates`     | 15 s               | 260 MiB                   | 110 MiB | daily update run                                    |
+| `password-policy`  | 25 s               | 250 MiB                   | –       | –                                                   |
+| `aide`             | 90 s and more, see above | 190 MiB             | 130 MiB and the database | daily check                       |
+| `rkhunter`         | 105 s              | 720 MiB (dnf), else 210 MiB | 110 MiB | daily check                                       |
+| `clamav`           | 70 s               | 1.6 GiB                   | 215 MiB | freshclam about 20 MiB; every scan peaks at 1.6 GiB |
+| `lynis`            | 25 s               | 80 MiB                    | 5 MiB   | weekly audit                                        |
+| `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
+| `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
+
+The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
+
 ## Quick start
 
 ```bash
