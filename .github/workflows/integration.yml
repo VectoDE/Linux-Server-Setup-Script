@@ -134,8 +134,8 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       # Kernel modules as on the runner VM, then the whole profile with a Lynis audit. minimal-secure reached a
-      # hardening index of 87 on Debian 12 and 85 on Debian 13 (October 2026); the RHEL family keeps a low minimum
-      # until its first measurements are in (stage 1b, issue #12).
+      # hardening index of 87 on Debian 12 and 85 on Debian 13, 85 on Rocky Linux 9 and 84 on AlmaLinux 10 (October
+      # 2026). The minimums leave room for small changes between Lynis versions.
       - name: Install, verify, reinstall, remove
         env:
           SYSTEM: vm-${{ matrix.system }}
@@ -146,7 +146,7 @@ jobs:
           else
             case $SYSTEM in
             vm-debian-*) minimum=82 ;;
-            *) minimum=60 ;;
+            *) minimum=80 ;;
             esac
             tests/integration/run.sh "$SYSTEM" --profile "${RUN#profile }" "$minimum"
           fi
