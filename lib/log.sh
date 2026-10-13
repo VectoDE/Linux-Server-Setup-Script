@@ -71,6 +71,28 @@ log_ok() { _log OK '32' "$*"; }
 log_warn() { _log WARN '33' "$*"; }
 log_error() { _log ERROR '31' "$*"; }
 
+# log_command COMMAND...: runs a command whose output only matters when it fails (package managers, database
+# builds). The output goes to the run log, and to the terminal with --verbose; when the command fails, its last 40
+# lines are shown. Returns the status of the command.
+log_command() {
+	local output status=0
+	output=$(mktemp)
+	"$@" >"${output}" 2>&1 </dev/null || status=$?
+	if [[ -n ${LSS_LOG_FILE} ]]; then
+		_log_sanitize "$(<"${output}")" >>"${LSS_LOG_FILE}" 2>/dev/null || true
+		printf '\n' >>"${LSS_LOG_FILE}" 2>/dev/null || true
+	fi
+	if [[ ${LSS_VERBOSE} == 1 ]]; then
+		_log_sanitize "$(<"${output}")" >&2
+		printf '\n' >&2
+	elif [[ ${status} -ne 0 ]]; then
+		_log_sanitize "$(tail -n 40 "${output}")" >&2
+		printf '\n' >&2
+	fi
+	rm -f -- "${output}"
+	return "${status}"
+}
+
 die() {
 	log_error "$*"
 	exit 1

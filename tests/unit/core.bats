@@ -102,6 +102,21 @@ write_release() {
 	[[ ${output} == *"DEBUG shown"* ]]
 }
 
+@test "command output goes to the log, and to the terminal only on failure or with LSS_VERBOSE=1" {
+	log_mask 'S3cr3t-Value'
+	run log_command bash -c 'echo "Setting up S3cr3t-Value"'
+	[ "${status}" -eq 0 ]
+	[ -z "${output}" ]
+	grep -q 'Setting up \*\*\*' "${LSS_LOG_FILE}"
+	run ! grep -q S3cr3t "${LSS_LOG_FILE}"
+	run log_command bash -c 'for i in $(seq 50); do echo "line $i"; done; exit 3'
+	[ "${status}" -eq 3 ]
+	[[ ${output} == *"line 50"* && ${output} == *"line 11"* ]]
+	[[ ${output} != *"line 10"* ]]
+	LSS_VERBOSE=1 run log_command echo shown
+	[[ ${output} == *shown* ]]
+}
+
 @test "colour only when forced or on a terminal" {
 	LSS_COLOR=always run log_warn "careful"
 	[[ ${output} == *$'\033[33mWARN \033[0m careful'* ]]

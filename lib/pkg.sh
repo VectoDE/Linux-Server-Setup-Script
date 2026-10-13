@@ -16,9 +16,9 @@ _pkg_apt() {
 
 pkg_update() {
 	if os_is_debian; then
-		_pkg_apt update
+		log_command _pkg_apt update
 	else
-		dnf -y -q makecache
+		log_command dnf -y -q makecache
 	fi
 	LSS_PKG_UPDATED=1
 	if [[ -n ${LSS_RUN_ID:-} ]]; then
@@ -56,9 +56,9 @@ pkg_install() {
 	log_info "Installing ${missing[*]}"
 	if os_is_debian; then
 		pkg_update_once
-		_pkg_apt install --no-install-recommends "${missing[@]}"
+		log_command _pkg_apt install --no-install-recommends "${missing[@]}"
 	else
-		dnf -y -q install "${missing[@]}"
+		log_command dnf -y -q install "${missing[@]}"
 	fi
 	files_note_change "installed ${missing[*]}"
 }
@@ -82,10 +82,10 @@ pkg_remove() {
 	[[ ${#present[@]} -gt 0 ]] || return 0
 	log_info "Removing ${present[*]}"
 	if os_is_debian; then
-		_pkg_apt purge "${present[@]}"
-		_pkg_apt autoremove --purge
+		log_command _pkg_apt purge "${present[@]}"
+		log_command _pkg_apt autoremove --purge
 	else
-		dnf -y -q remove "${present[@]}"
+		log_command dnf -y -q remove "${present[@]}"
 	fi
 	files_note_change "removed ${present[*]}"
 }
@@ -104,9 +104,9 @@ pkg_remove_family() {
 pkg_upgrade() {
 	if os_is_debian; then
 		pkg_update
-		_pkg_apt full-upgrade
+		log_command _pkg_apt full-upgrade
 	else
-		dnf -y -q upgrade --refresh
+		log_command dnf -y -q upgrade --refresh
 	fi
 }
 
@@ -116,10 +116,10 @@ pkg_enable_epel() {
 	pkg_is_installed epel-release && return 0
 	if [[ ${OS_ID} == rhel ]]; then
 		subscription-manager repos --enable "codeready-builder-for-rhel-${OS_MAJOR}-$(uname -m)-rpms" >/dev/null 2>&1 || true
-		dnf -y -q install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${OS_MAJOR}.noarch.rpm"
+		log_command dnf -y -q install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${OS_MAJOR}.noarch.rpm"
 	else
 		dnf config-manager --set-enabled crb >/dev/null 2>&1 || true
-		dnf -y -q install epel-release
+		log_command dnf -y -q install epel-release
 	fi
 	files_note_change "enabled EPEL"
 }

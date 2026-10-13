@@ -72,13 +72,12 @@ mod_configure() {
 	fi
 	local changed=${LSS_FILE_CHANGED}
 	if [[ ! -s $(_aide_db) || ${changed} == 1 ]]; then
-		log_info "Building the AIDE database; this reads every system file and takes minutes on large systems."
-		log_info "Directories with large data can be left out with LSS_AIDE_EXCLUDE."
+		log_debug "Building the AIDE database; directories with large data can be left out with LSS_AIDE_EXCLUDE."
 		local start=${SECONDS}
 		if os_is_debian; then
-			nice -n 19 ionice -c 2 -n 7 aideinit --yes --force >/dev/null
+			log_command nice -n 19 ionice -c 2 -n 7 aideinit --yes --force
 		else
-			nice -n 19 ionice -c 2 -n 7 aide --init --config /etc/aide.conf >/dev/null
+			log_command nice -n 19 ionice -c 2 -n 7 aide --init --config /etc/aide.conf
 			mv -f /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
 		fi
 		log_info "AIDE database built in $((SECONDS - start)) seconds."
