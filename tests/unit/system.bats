@@ -529,14 +529,14 @@ EOF
 }
 
 @test "svc_unit writes an own unit and reloads systemd only on change" {
-	local root=${BATS_TEST_TMPDIR}/root
-	file_write() { mkdir -p "${root}"; cat >"${root}/unit"; LSS_FILE_CHANGED=${WRITE_CHANGED}; }
-	WRITE_CHANGED=1 svc_unit test.swap <<<"[Swap]"
+	record_writes
+	svc_unit test.swap <<<"[Swap]"
+	grep -qxF '== 0644 root:root /etc/systemd/system/test.swap' "${BATS_TEST_TMPDIR}/writes"
+	grep -qxF '[Swap]' "${BATS_TEST_TMPDIR}/writes"
 	grep -q 'systemctl daemon-reload' "${STUB_LOG}"
 	: >"${STUB_LOG}"
-	WRITE_CHANGED=0 svc_unit test.swap <<<"[Swap]"
+	TEST_FILE_CHANGED=0 svc_unit test.swap <<<"[Swap]"
 	run ! grep -q 'daemon-reload' "${STUB_LOG}"
-	[ "$(cat "${root}/unit")" = "[Swap]" ]
 }
 
 @test "fw_ssh_port falls back to 22 when sshd fails" {
