@@ -153,21 +153,16 @@ _au_remove_reboot_timer() {
 mod_verify() {
 	if os_is_debian; then
 		svc_is_enabled apt-daily-upgrade.timer || die "auto-updates: apt-daily-upgrade.timer is not enabled."
-		local output='' ok=0 i
-		# A running unattended-upgrade holds its lock; the dry run then fails for a reason that has nothing to do
-		# with the configuration, so wait for it.
-		for ((i = 0; i < 40; i++)); do
-			if output=$(unattended-upgrade --dry-run --debug 2>&1); then
-				ok=1
-				break
-			fi
-			grep -q 'Lock could not be acquired' <<<"${output}" || break
-			sleep 15
-		done
-		if [[ ${ok} != 1 ]]; then
-			printf '%s\n' "${output}" | tail -n 40 >&2
-			die "auto-updates: unattended-upgrade --dry-run fails (output above)."
+		command -v unattended-upgrade >/dev/null || die "auto-updates: unattended-upgrade is not installed."
+		# apt-config parses every file in apt.conf.d and fails on a syntax error. A dry run of unattended-upgrade
+		# would need the dpkg lock and hang for as long as a real update holds it.
+		local config
+		if ! config=$(apt-config dump 2>&1); then
+			printf '%s\n' "${config}" >&2
+			die "auto-updates: the apt configuration does not parse (output above)."
 		fi
+		grep -q '^Unattended-Upgrade::Origins-Pattern:: ' <<<"${config}" || die "auto-updates: no update origins are configured."
+		grep -qx 'APT::Periodic::Unattended-Upgrade "1";' <<<"${config}" || die "auto-updates: daily upgrades are switched off."
 	else
 		svc_is_enabled dnf-automatic.timer || die "auto-updates: dnf-automatic.timer is not enabled."
 	fi
