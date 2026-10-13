@@ -32,6 +32,9 @@ Docker, databases and its own sudo rules) 78. CI checks that it stays at 82 on D
 | `logging`          | Persistent journal with size and age limits, optional forwarding to a syslog server over TLS                                                     | Logging                               |
 | `time`             | chrony with NTS-authenticated servers, no NTP port open                                                                                          | Time synchronisation                  |
 | `guard`            | Runs `lss verify` every day, repairs modules that failed or were changed outside lss, reports failed units, full disks, pending security updates, vulnerable packages, a needed reboot, a low Lynis index, AIDE/rkhunter/ClamAV findings and failed SSH logins; notes logins and bans | (operations)                          |
+| `nginx`, `apache`, `caddy` | One web server owns ports 80 and 443: HTTPS only with TLS 1.2 and 1.3 (Mozilla intermediate, ECDHE only), HSTS for two years, `nosniff`, `SAMEORIGIN` framing, a strict referrer and permissions policy, no version banner; unknown host names get no answer; dot files are never served; admin interfaces only on 127.0.0.1:8090 unless `LSS_<SERVER>_ADMIN_PUBLIC=true` (then TLS and a password); the service runs in a systemd sandbox; fail2ban or CrowdSec read its logs | CIS Apache/nginx benchmarks, Mozilla TLS guidelines, OWASP Secure Headers |
+| `tls`              | Certificates from Let's Encrypt (or any ACME server) with ECDSA keys, renewed by a timer; private keys readable by root and the web server group only; OCSP stapling where the certificate names a responder; guard warns 14 days before a certificate expires | Mozilla TLS guidelines |
+| `haproxy`          | Statistics only on 127.0.0.1, admin socket readable by root only, chroot, systemd sandbox, ports in the firewall only for services that are not `local` | (operations) |
 
 ## Deliberate deviations
 

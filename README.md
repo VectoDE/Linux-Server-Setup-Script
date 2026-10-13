@@ -118,6 +118,8 @@ LSS_SSH_HARDENING_PORT=2222
 LSS_TIME_TIMEZONE=Europe/Berlin
 LSS_FIREWALL_ALLOW=8443/tcp 51820/udp
 LSS_GUARD_WEBHOOK=https://ntfy.sh/your-topic
+LSS_TLS_DOMAINS=server.example.com
+LSS_VHOST_SITES=shop:php:shop.example.com,www.shop.example.com api:proxy:api.example.com:http://127.0.0.1:3000
 ```
 
 `--set` wins over the environment, which wins over the file, which wins over the profile, which wins over the
@@ -133,9 +135,24 @@ change, run `lss configure MODULE`.
 (AppArmor or SELinux), `auditd`, `auto-updates`, `password-policy`, `aide`, `rkhunter`, `clamav`, `lynis`,
 `usbguard`, `guard`.
 
+**Web:** `nginx`, `apache` or `caddy`, `tls` (certificates from Let's Encrypt), `vhost` (sites), `haproxy`.
+
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
-and where lss deliberately deviates. Web servers, runtimes, databases, containers, backup, monitoring and mail follow
-as further module groups.
+and where lss deliberately deviates. Containers, backup, monitoring and mail follow as further module groups.
+
+### Web sites
+
+One web server owns ports 80 and 443. It answers only for the sites you set up; requests for any other host name get
+no answer, and port 80 serves nothing but ACME challenges and redirects to HTTPS. A site is one entry in
+`LSS_VHOST_SITES`: a name, `static`, `php` or `proxy`, its host names and, if needed, a document root or backend URL.
+With the `tls` module each site gets its own certificate from Let's Encrypt; until it arrives, and without `tls`, the
+site uses a self-signed certificate. The names must point to the server and port 80 must be reachable from the
+internet for Let's Encrypt to issue one.
+
+Admin interfaces such as phpMyAdmin listen on `127.0.0.1:8090`. Reach them through an SSH tunnel
+(`ssh -L 8090:127.0.0.1:8090 server`, then `http://localhost:8090/phpmyadmin/`) or set
+`LSS_<SERVER>_ADMIN_PUBLIC=true` to publish port 8090 with TLS and the password from
+`lss secrets show web-admin-password`.
 
 ## Guard
 
