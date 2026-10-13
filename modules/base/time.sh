@@ -74,7 +74,7 @@ mod_configure() {
 }
 
 mod_verify() {
-	local i
+	local i server
 	[[ $(readlink /etc/localtime) == "/usr/share/zoneinfo/$(opt timezone)" ]] ||
 		die "time: the time zone is not $(opt timezone)."
 	os_in_container && return 0
@@ -85,8 +85,13 @@ mod_verify() {
 		sleep 1
 	done
 	chronyc -n tracking >/dev/null || die "time: chronyc gets no answer from chronyd."
-	chronyc -N sources | grep -qF "$(opt servers | cut -d ' ' -f 1)" ||
-		die "time: chronyd does not use the configured servers."
+	# chronyd resolves the server names in the background, so a source appears a few seconds after the start.
+	server=$(opt servers | cut -d ' ' -f 1)
+	for ((i = 0; i < 30; i++)); do
+		chronyc -N sources 2>/dev/null | grep -qF "${server}" && return 0
+		sleep 1
+	done
+	die "time: chronyd does not use the configured servers."
 }
 
 mod_remove() {
