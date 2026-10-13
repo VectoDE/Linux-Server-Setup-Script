@@ -56,8 +56,10 @@ EOF
 		cscli console enroll --name "$(hostname)" "${key}" >/dev/null
 		files_note_change "crowdsec console enrolment"
 	fi
+	# A restart, not a reload: the reload (SIGHUP) restarts the local API in the background, and the bouncer and
+	# the checks below would race it.
 	if [[ ${changed} == 1 || $(files_changes_of crowdsec) != 0 ]]; then
-		svc_reload crowdsec
+		svc_restart crowdsec
 	fi
 	svc_wait_port 127.0.0.1 8080 60 || die "crowdsec: the local API does not listen on 127.0.0.1:8080."
 	_cs_bouncer_key
@@ -90,15 +92,22 @@ _cs_bouncer_key() {
 }
 
 mod_verify() {
-	local i
+	local i ok=0 output=''
 	svc_is_active crowdsec || die "crowdsec: the engine is not running."
 	svc_is_active "${CS_BOUNCER}" || die "crowdsec: the firewall bouncer is not running."
-	# A reload restarts the local API for a few seconds.
+	# The local API needs a few seconds after a start.
 	for ((i = 0; i < 30; i++)); do
-		cscli lapi status >/dev/null 2>&1 && break
+		if output=$(cscli lapi status 2>&1); then
+			ok=1
+			break
+		fi
 		sleep 1
 	done
-	cscli lapi status >/dev/null 2>&1 || die "crowdsec: the local API does not answer."
+	if [[ ${ok} != 1 ]]; then
+		printf '%s\n' "${output}" >&2
+		journalctl -u crowdsec -n 30 --no-pager >&2 || true
+		die "crowdsec: the local API does not answer."
+	fi
 	cscli bouncers list -o raw 2>/dev/null | grep -q 'firewall' || die "crowdsec: the firewall bouncer is not registered."
 	cscli collections list -o raw 2>/dev/null | grep -q '^crowdsecurity/sshd,' || die "crowdsec: the sshd collection is missing."
 }

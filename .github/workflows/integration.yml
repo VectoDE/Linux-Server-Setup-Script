@@ -79,6 +79,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The whole profile at once, as on a real server, then the Lynis audit with a minimum hardening index.
+      # The whole profile at once, as on a real server, then the Lynis audit. minimal-secure reached a hardening index
+      # of 75 here (October 2026); the minimum leaves room for small changes between Lynis versions.
       - name: Install the profile, verify, reinstall, audit
-        run: tests/integration/run.sh host --profile minimal-secure 0
+        run: tests/integration/run.sh host --profile minimal-secure 70

@@ -4,7 +4,8 @@ This page lists what the security modules change, which part of the CIS Benchmar
 Enterprise Linux each one covers, and where lss deliberately does something else. Every value below can be checked on
 a server with `lss verify`; the `lynis` module gives a second opinion with `lss audit`.
 
-The profile `minimal-secure` installs everything in this list except the modules marked opt-in.
+The profile `minimal-secure` installs everything in this list except the modules marked opt-in. On an Ubuntu 24.04
+virtual machine it reaches a Lynis hardening index of 75; CI checks that it stays at 70 or above.
 
 ## What the modules do
 
