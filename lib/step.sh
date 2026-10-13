@@ -11,7 +11,9 @@
 # settings of the calling lss process, written by module_run).
 
 set -Eeuo pipefail
-shopt -s inherit_errexit
+# lastpipe: in "generator | file_write ..." the last command runs in this shell, so LSS_FILE_CHANGED and the
+# change notes it sets reach the caller.
+shopt -s inherit_errexit lastpipe
 
 for library in log os config files template secrets state pkg repo fetch service firewall web module; do
 	# shellcheck source=/dev/null

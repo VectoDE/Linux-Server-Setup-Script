@@ -6,7 +6,9 @@
 # lss: modular, hardened Linux server setup. See README.md and docs/.
 
 set -Eeuo pipefail
-shopt -s inherit_errexit
+# lastpipe: in "generator | file_write ..." the last command runs in this shell, so LSS_FILE_CHANGED and the
+# change notes it sets reach the caller.
+shopt -s inherit_errexit lastpipe
 
 LSS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
 LSS_VERSION=$(<"${LSS_ROOT}/VERSION")
