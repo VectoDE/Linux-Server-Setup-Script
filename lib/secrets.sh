@@ -20,7 +20,8 @@ secret_path() {
 secret_random() {
 	local length=${1:-32} value=''
 	while [[ ${#value} -lt ${length} ]]; do
-		value+=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$((length - ${#value}))" || true)
+		# head closes the pipe early; tr's broken-pipe error is expected and silenced.
+		value+=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c "$((length - ${#value}))" || true)
 	done
 	printf '%s' "${value}"
 }
@@ -35,6 +36,7 @@ _secrets_prepare_dir() {
 # secret_get NAME [LENGTH]: prints the secret, creating it if needed.
 secret_get() {
 	local name=$1 length=${2:-32} path value
+	secret_valid_name "${name}" || die "Invalid secret name '${name}'."
 	path=$(secret_path "${name}")
 	_secrets_prepare_dir
 	if [[ ! -s ${path} ]]; then
@@ -55,7 +57,7 @@ secret_get() {
 # registration survives (a command substitution would lose it).
 secret_load() {
 	local value
-	value=$(secret_get "$1" "${3:-32}")
+	value=$(secret_get "$1" "${3:-32}") || die "Could not read secret '$1'."
 	log_mask "${value}"
 	printf -v "$2" '%s' "${value}"
 }
@@ -63,6 +65,7 @@ secret_load() {
 # secret_set NAME VALUE: stores a given secret (from configuration), for example an API token.
 secret_set() {
 	local path
+	secret_valid_name "$1" || die "Invalid secret name '$1'."
 	path=$(secret_path "$1")
 	_secrets_prepare_dir
 	(

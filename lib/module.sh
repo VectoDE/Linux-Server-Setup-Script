@@ -131,27 +131,40 @@ module_mode() {
 	fi
 }
 
-# module_run NAME STEP: runs mod_STEP of the module in a subshell. Returns the step's exit status.
-#
-# The subshell is started asynchronously and then awaited. Callers use module_run in conditions (if !, ||), and
-# bash ignores set -e for everything inside such a condition, even inside a subshell; an asynchronous subshell is
-# not part of the condition, so a failing command in a module always stops that step.
-module_run() {
-	local name=$1 step=$2 file pid
-	file=$(module_file "${name}") || die "Unknown module '${name}'."
+# Variables handed to every module step (module_run). Settings, masks and paths; nothing else of the caller leaks.
+LSS_CONTEXT_VARIABLES=(LSS_CFG_SET LSS_CFG_FILE LSS_CFG_PROFILE LSS_MASKED LSS_ROOT LSS_VERSION LSS_RUN_ID
+	LSS_STATE_DIR LSS_SECRETS_DIR LSS_LOG_FILE LSS_JOURNAL LSS_COLOR LSS_VERBOSE LSS_DRY_RUN LSS_YES LSS_PURGE
+	LSS_MODULE_DIRS LSS_OS_RELEASE LSS_ARCH)
+
+# Writes the context of this process to a private file and prints its path.
+_module_context() {
+	local dir file variable
+	dir="${LSS_STATE_DIR}/runs/${LSS_RUN_ID:?LSS_RUN_ID is not set}"
+	mkdir -p "${dir}"
+	chmod 700 "${dir}"
+	file="${dir}/context"
 	(
-		set -Eeuo pipefail
-		LSS_MODULE=${name}
-		LSS_MODULE_MODE=$(module_mode "${name}")
-		export LSS_MODULE LSS_MODULE_MODE
-		trap 'log_error "${LSS_MODULE}: ${step} failed at ${BASH_SOURCE[0]##*/}:${LINENO}: ${BASH_COMMAND}"' ERR
-		# shellcheck source=/dev/null
-		source "${file}"
-		declare -F "mod_${step}" >/dev/null || exit 0
-		"mod_${step}"
-	) <&0 &
-	pid=$!
-	wait "${pid}"
+		umask 077
+		local declaration flags
+		for variable in "${LSS_CONTEXT_VARIABLES[@]}"; do
+			declaration=$(declare -p "${variable}" 2>/dev/null) || continue
+			# "declare -A NAME=(...)" becomes "declare -gA NAME=(...)", so it stays global when sourced in a function.
+			flags=${declaration#declare -}
+			flags=${flags%% *}
+			printf 'declare -g%s %s\n' "${flags//-/}" "${declaration#declare -"${flags}" }"
+		done >"${file}"
+	)
+	printf '%s' "${file}"
+}
+
+# module_run NAME STEP: runs mod_STEP of the module in a fresh bash process (lib/step.sh) and returns its status.
+# The module therefore cannot change the core, and set -e always applies inside the module.
+module_run() {
+	local name=$1 step=$2 file context
+	file=$(module_file "${name}") || die "Unknown module '${name}'."
+	context=$(_module_context)
+	LSS_STEP_MODULE=${name} LSS_STEP_NAME=${step} LSS_STEP_FILE=${file} LSS_STEP_CONTEXT=${context} \
+		bash "${LSS_ROOT}/lib/step.sh"
 }
 
 # module_apply NAME: install, configure and verify one module; restores its files on failure.

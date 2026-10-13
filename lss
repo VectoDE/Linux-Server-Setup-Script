@@ -219,7 +219,7 @@ selected_modules() {
 
 cmd_install() {
 	local requested resolved name
-	requested=$(selected_modules)
+	requested=$(selected_modules) || exit 1
 	# shellcheck disable=SC2086 # one module name per word
 	resolved=$(module_resolve ${requested}) || exit 1
 	local -a order=()

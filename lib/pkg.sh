@@ -19,11 +19,17 @@ pkg_update() {
 		dnf -y -q makecache
 	fi
 	LSS_PKG_UPDATED=1
+	if [[ -n ${LSS_RUN_ID:-} ]]; then
+		mkdir -p "${LSS_STATE_DIR:-/var/lib/lss}/runs/${LSS_RUN_ID}"
+		: >"${LSS_STATE_DIR:-/var/lib/lss}/runs/${LSS_RUN_ID}/pkg-updated"
+	fi
 }
 
 # Refreshes the package index once per run (after a repository was added, call pkg_update directly).
 pkg_update_once() {
-	[[ ${LSS_PKG_UPDATED} == 1 ]] || pkg_update
+	[[ ${LSS_PKG_UPDATED} == 1 ]] && return 0
+	[[ -n ${LSS_RUN_ID:-} && -f ${LSS_STATE_DIR:-/var/lib/lss}/runs/${LSS_RUN_ID}/pkg-updated ]] && return 0
+	pkg_update
 }
 
 pkg_is_installed() {

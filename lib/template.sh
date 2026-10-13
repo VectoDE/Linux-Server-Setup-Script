@@ -43,6 +43,6 @@ template_install() {
 	rendered=$(
 		template_render "$(template_path "$1" "$2")"
 		printf x
-	)
+	) || die "Rendering template $1/$2 failed."
 	file_write "$3" "$4" "$5" < <(printf '%s' "${rendered%x}")
 }
