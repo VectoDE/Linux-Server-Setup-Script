@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Direct downloads (lib/fetch.sh): <name> <arch|any> <sha256> <url>. Every checksum is the one the vendor publishes;
+# the source of each is noted above its lines. Raising a version means replacing the URL and the checksum together.
+
+# Composer 2.10.3: https://getcomposer.org/download/2.10.3/composer.phar.sha256sum (2026-10-13).
+composer any 7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6 https://getcomposer.org/download/2.10.3/composer.phar
