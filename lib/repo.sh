@@ -63,7 +63,9 @@ repo_add() {
 	if os_is_debian; then
 		local url suites components
 		url=$(_repo_value "${conf}" DEB_URL)
-		suites=$(_repo_value "${conf}" DEB_SUITE)
+		# DEB_SUITE_<codename> overrides the suite for one release (vendors without packages for it yet).
+		suites=$(_repo_value "${conf}" "DEB_SUITE_${OS_CODENAME}")
+		[[ -n ${suites} ]] || suites=$(_repo_value "${conf}" DEB_SUITE)
 		components=$(_repo_value "${conf}" DEB_COMPONENTS)
 		[[ -n ${url} ]] || die "Repository ${name} has no packages for ${OS_ID}."
 		keyring="/etc/apt/keyrings/lss-${name}.gpg"
@@ -83,9 +85,12 @@ EOF
 			pkg_update
 		fi
 	else
-		local baseurl repo_gpgcheck
+		local baseurl gpgcheck repo_gpgcheck
 		baseurl=$(_repo_value "${conf}" RPM_BASEURL)
+		gpgcheck=$(_kv "${conf}" RPM_GPGCHECK)
 		repo_gpgcheck=$(_kv "${conf}" RPM_REPO_GPGCHECK)
+		# At least one signature must be checked: the packages, the metadata or both.
+		[[ ${gpgcheck:-1} == 1 || ${repo_gpgcheck:-0} == 1 ]] || die "Repository ${name} checks no signature."
 		[[ -n ${baseurl} ]] || die "Repository ${name} has no packages for ${OS_ID}."
 		keyring="/etc/pki/rpm-gpg/lss-${name}.asc"
 		file_write 0644 root:root "${keyring}" <"${key}"
@@ -95,7 +100,7 @@ EOF
 name=${name} (added by lss)
 baseurl=${baseurl}
 enabled=1
-gpgcheck=1
+gpgcheck=${gpgcheck:-1}
 repo_gpgcheck=${repo_gpgcheck:-0}
 gpgkey=file://${keyring}
 EOF

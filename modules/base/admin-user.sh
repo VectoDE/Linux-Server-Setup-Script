@@ -21,8 +21,11 @@ _admin_group() {
 	if os_is_debian; then printf 'sudo'; else printf 'wheel'; fi
 }
 
+# Home directory of the administrator; empty if the account does not exist yet.
 _admin_home() {
-	getent passwd "$(_admin_name)" | cut -d ':' -f 6
+	local entry
+	entry=$(getent passwd "$(_admin_name)") || return 0
+	cut -d ':' -f 6 <<<"${entry}"
 }
 
 # Prints the wanted public keys, one per line, after validating each.

@@ -546,3 +546,25 @@ EOF
 	STUB_OUT_sshd=$'port 2222\nport 2223' run fw_ssh_port
 	[ "${output}" = 2222 ]
 }
+
+@test "repo_add uses a per-release suite and the package signature switch" {
+	repo_root
+	printf 'DEB_SUITE_trixie=bookworm\nRPM_GPGCHECK=0\n' >>"${LSS_ROOT}/data/repos/demo.conf"
+	use_os debian-13
+	repo_add demo
+	grep -qxF 'Suites: bookworm' "${BATS_TEST_TMPDIR}/writes"
+	use_os rocky-9
+	repo_add demo
+	grep -qxF 'gpgcheck=0' "${BATS_TEST_TMPDIR}/writes"
+	grep -qxF 'repo_gpgcheck=1' "${BATS_TEST_TMPDIR}/writes"
+}
+
+@test "repo_add refuses a repository that checks no signature" {
+	repo_root
+	sed -i 's/^RPM_REPO_GPGCHECK=1$/RPM_REPO_GPGCHECK=0/' "${LSS_ROOT}/data/repos/demo.conf"
+	printf 'RPM_GPGCHECK=0\n' >>"${LSS_ROOT}/data/repos/demo.conf"
+	use_os rocky-9
+	run repo_add demo
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Repository demo checks no signature."* ]]
+}

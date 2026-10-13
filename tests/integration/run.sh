@@ -24,7 +24,7 @@ in_target() {
 	if [[ ${system} == host ]]; then
 		sudo --preserve-env=SSH_CONNECTION bash -c "$1"
 	else
-		docker exec "${container}" bash -c "$1"
+		docker exec -i "${container}" bash -c "$1"
 	fi
 }
 

@@ -31,12 +31,14 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, rocky-9, almalinux-10]
-        group: [base, security]
+        group: [base, security, scanners]
         include:
           - group: base
             modules: system time admin-user tools logging
           - group: security
-            modules: ssh-hardening
+            modules: ssh-hardening ssh-2fa fail2ban crowdsec password-policy auto-updates guard
+          - group: scanners
+            modules: aide rkhunter clamav lynis
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -63,4 +65,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Install, verify, reinstall, remove
-        run: tests/integration/run.sh host swap firewall
+        run: tests/integration/run.sh host swap firewall kernel-hardening mac auditd usbguard

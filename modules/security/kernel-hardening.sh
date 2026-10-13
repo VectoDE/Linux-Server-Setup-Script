@@ -77,22 +77,22 @@ mod_check() {
 
 mod_configure() {
 	local module modules
-	{
+	file_write 0644 root:root "${KH_SYSCTL}" < <(
 		printf '# Managed by lss (module kernel-hardening). Later files (70-lss-*.conf) may relax single values,\n'
 		printf '# for example net.ipv4.ip_forward for containers and VPNs.\n'
 		_kh_settings
-	} | file_write 0644 root:root "${KH_SYSCTL}"
+	)
 	# -e: a key this kernel does not have is skipped instead of failing the run.
 	sysctl -q -e -p "${KH_SYSCTL}" >/dev/null
 
 	modules="${KH_MODULES} $(opt extra_blocked_modules)"
 	opt_bool block_usb_storage && modules+=" usb-storage uas"
-	{
+	file_write 0644 root:root "${KH_MODPROBE}" < <(
 		printf '# Managed by lss (module kernel-hardening).\n'
 		for module in ${modules}; do
 			printf 'install %s /bin/false\nblacklist %s\n' "${module}" "${module}"
 		done
-	} | file_write 0644 root:root "${KH_MODPROBE}"
+	)
 
 	file_write 0644 root:root "${KH_COREDUMP}" <<'EOF'
 # Managed by lss (module kernel-hardening). Core dumps can contain passwords and keys.

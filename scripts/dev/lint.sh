@@ -11,6 +11,7 @@ mapfile -t files < <(
 	{
 		printf '%s\n' lss
 		[[ ! -f bootstrap.sh ]] || printf '%s\n' bootstrap.sh
+		find libexec -type f 2>/dev/null
 		find lib modules scripts tests -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.bats' \) 2>/dev/null
 	} | sort -u
 )
