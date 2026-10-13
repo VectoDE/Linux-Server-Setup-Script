@@ -18,6 +18,11 @@ docker run --rm --security-opt seccomp=unconfined \
 	-v "${PWD}:/src" -v "${bats_dir}:/bats:ro" -v "$(cd "${out}" && pwd):/out" -w /src \
 	"${image}" kcov --include-path=/src/lib --bash-dont-parse-binary-dir /out /bats/bin/bats tests/unit >/dev/null
 report=$(find "${out}" -name coverage.json -path '*bats*' | head -1)
+python3 - "${report}" <<'PY'
+import json, sys
+for entry in sorted(json.load(open(sys.argv[1]))["files"], key=lambda e: float(e["percent_covered"])):
+    print(f'{float(entry["percent_covered"]):6.1f} %  {entry["covered_lines"]:>4}/{entry["total_lines"]:<4} {entry["file"].replace("/src/", "")}')
+PY
 percent=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["percent_covered"])' "${report}")
 echo "Line coverage of lib/: ${percent} % (threshold ${threshold} %)"
 python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "${percent}" "${threshold}" || {
