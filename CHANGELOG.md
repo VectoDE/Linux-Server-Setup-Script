@@ -30,6 +30,8 @@ now or later.
 - guard reports vulnerable packages (debsecan, `dnf updateinfo`), failed SSH logins above a threshold and what the
   daily AIDE, rkhunter and ClamAV runs found, which their units had only written to the journal; successful logins
   and active bans appear as notes.
+- More hardening towards a Lynis index of 85: the login banner also in `/etc/issue` and `/etc/issue.net`, costlier
+  password hashes, libpam-tmpdir, process accounting, debsums and apt-show-versions.
 - System requirements in the README: RAM, disk and install time for the profile and every module, measured by the
   integration tests on every supported system.
 - Package repositories of vendors are added only with a pinned key fingerprint.

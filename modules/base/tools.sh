@@ -8,7 +8,7 @@ MOD_DESCRIPTION="Administration tools: editor, shell multiplexer, network and di
 MOD_REQUIRES="system"
 MOD_OPTIONS="extra||More packages to install, separated by spaces (names as in the distribution)"
 
-TOOLS_DEB="vim-tiny nano less htop tmux jq git rsync unzip zip lsof bind9-dnsutils tcpdump traceroute ncdu tree bash-completion psmisc"
+TOOLS_DEB="vim-tiny nano less htop tmux jq git rsync unzip zip lsof bind9-dnsutils tcpdump traceroute ncdu tree bash-completion psmisc apt-show-versions"
 TOOLS_RPM="vim-minimal nano less htop tmux jq git rsync unzip zip lsof bind-utils tcpdump traceroute ncdu tree bash-completion psmisc"
 
 _tools_wanted() {

@@ -11,7 +11,7 @@ allow_groups|ssh-users|Groups allowed to log in besides the administrators (sudo
 tcp_forwarding|local|Port forwarding: no, local (ssh -L, for admin interfaces bound to localhost) or yes
 max_sessions|4|Sessions per connection
 idle_timeout|900|Seconds without traffic before an idle session is closed
-banner|Authorised access only. All activity is logged.|Text shown before login"
+banner|Authorised access only. This system is private and monitored; all activity is logged, and unauthorised use is prohibited and subject to legal action.|Text shown before login (SSH, console and /etc/issue.net)"
 
 SSH_CONFIG=/etc/ssh/sshd_config.d/00-lss.conf
 SSH_BANNER=/etc/ssh/lss-banner
@@ -174,6 +174,8 @@ mod_configure() {
 	fi
 
 	file_write 0644 root:root "${SSH_BANNER}" <<<"$(opt banner)"
+	file_write 0644 root:root /etc/issue <<<"$(opt banner)"
+	file_write 0644 root:root /etc/issue.net <<<"$(opt banner)"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	file_write 0600 root:root "${SSH_CONFIG}" < <(_ssh_render)
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
@@ -216,6 +218,9 @@ mod_verify() {
 mod_remove() {
 	file_remove "${SSH_CONFIG}"
 	file_remove "${SSH_BANNER}"
+	# Back to a neutral console greeting (\S is the system name, \l the terminal).
+	file_write 0644 root:root /etc/issue <<<'\S \l'
+	file_write 0644 root:root /etc/issue.net <<<'\S'
 	sshd -t || die "ssh-hardening: sshd configuration is invalid without the lss settings."
 	svc_reload "$(_ssh_unit)"
 	return

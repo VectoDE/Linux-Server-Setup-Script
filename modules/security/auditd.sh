@@ -25,7 +25,13 @@ mod_check() {
 }
 
 mod_install() {
-	pkg_install_family "auditd audispd-plugins" "audit audit-libs"
+	pkg_install_family "auditd audispd-plugins acct" "audit audit-libs psacct"
+	return
+}
+
+# Process accounting service: acct on Debian and Ubuntu, psacct on the RHEL family.
+_auditd_acct_unit() {
+	if os_is_debian; then printf 'acct'; else printf 'psacct'; fi
 	return
 }
 
@@ -117,6 +123,7 @@ mod_configure() {
 	_auditd_boot_args
 
 	svc_enable auditd
+	svc_enable "$(_auditd_acct_unit)"
 	if [[ ${conf_changed} == 1 ]]; then
 		# auditd refuses "systemctl restart" on the RHEL family; SIGHUP rereads auditd.conf.
 		pkill -HUP -x auditd || true
@@ -134,12 +141,14 @@ mod_configure() {
 
 mod_verify() {
 	svc_is_active auditd || die "auditd: the service is not running."
+	svc_is_active "$(_auditd_acct_unit)" || die "auditd: process accounting ($(_auditd_acct_unit)) is not running."
 	auditctl -s | grep -qE '^enabled [12]' || die "auditd: kernel auditing is off."
 	auditctl -l | grep -qE -- '(-k |key=)identity' || die "auditd: the lss rules are not loaded."
 	return
 }
 
 mod_remove() {
+	pkg_remove_family acct psacct
 	file_remove "${AUDIT_RULES}"
 	file_remove "${AUDIT_FINAL}"
 	if [[ -f /etc/default/grub.d/60-lss-audit.cfg ]]; then

@@ -150,6 +150,10 @@ if [[ $1 == --profile ]]; then
 	group_start "${system}: Lynis audit"
 	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
 	group_end
+	# What Lynis would still change, as the starting point for raising the hardening index.
+	group_start "${system}: Lynis details"
+	in_target "grep -iE 'different value than expected|weak configuration state|incorrect file permissions|permissions .* (not|too)|Result: .*(unsafe|not hardened|exposed)' /var/log/lynis.log | sed -E 's/^[0-9: -]+//' | sort -u | head -n 150" || true
+	group_end
 	echo "${system}: profile ${profile} passed"
 	exit 0
 fi

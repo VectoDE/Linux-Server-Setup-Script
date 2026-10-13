@@ -32,7 +32,7 @@ mod_check() {
 }
 
 mod_install() {
-	pkg_install_family "aide aide-common" "aide"
+	pkg_install_family "aide aide-common debsums" "aide"
 	return
 }
 
