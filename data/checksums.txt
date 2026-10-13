@@ -7,3 +7,7 @@
 
 # Composer 2.10.3: https://getcomposer.org/download/2.10.3/composer.phar.sha256sum (2026-10-13).
 composer any 7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6 https://getcomposer.org/download/2.10.3/composer.phar
+
+# Go 1.27.2: https://go.dev/dl/?mode=json and https://dl.google.com/go/go1.27.2.linux-<arch>.tar.gz.sha256 (2026-10-13).
+go x86_64 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 https://go.dev/dl/go1.27.2.linux-amd64.tar.gz
+go aarch64 94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 https://go.dev/dl/go1.27.2.linux-arm64.tar.gz
