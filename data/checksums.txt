@@ -22,3 +22,12 @@ adminer-6.1.2 any b32316156bd18ffa99c1a27617142c2e5ad72260e37f15da4e9937a3dbb15f
 # https://pypi.org/pypi/gunicorn/26.2.0/json, checked 2026-10-13).
 pgadmin4-9.18 any 9ea084fc416265e4fc95c9fb6e6ae0f6668d34da8670c9b65c79cea054124356 https://files.pythonhosted.org/packages/0e/80/86d7e7123e2b6de41890bd1edc3e27348e2572acea337088faa0ec41c7f5/pgadmin4-9.18-py3-none-any.whl
 gunicorn-26.2.0 any bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3 https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl
+
+# Files lss downloads directly, read by fetch_verified (lib/fetch.sh): <name> <arch|any> <sha256> <url>.
+
+# MySQL 8.4.11 LTS, Oracle's generic glibc 2.28 build for Debian on arm64 (repo.mysql.com has amd64 packages only).
+# Oracle publishes an MD5 sum and a GnuPG signature, no SHA-256: the archive matched the MD5 on
+# https://dev.mysql.com/downloads/mysql/8.4.html (b22fb0240514099ff95251b1c8ed2127) and its signature by the MySQL
+# Release Engineering key BCA43417C3B485DD128EC6D4B7B3B788A8D3785C (data/keys/mysql.asc); the SHA-256 below was taken
+# from that verified file on 2026-10-13.
+mysql-generic aarch64 04b2f9791d314167a9eb83abcb476f45a7cd9e4aa88fa7a638cba40d1bc2a109 https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-linux-glibc2.28-aarch64.tar.xz
