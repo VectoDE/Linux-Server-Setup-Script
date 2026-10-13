@@ -103,11 +103,19 @@ install_again() {
 }
 
 stop_target() {
-	local status=$?
+	local status=$? diagnostics=0
+	# Diagnostics must never end the cleanup early.
+	set +e
 	if [[ ${status} -ne 0 ]]; then
-		group_start "Diagnostics"
-		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null; systemctl --failed --no-pager; journalctl -p warning -n 80 --no-pager' || true
-		group_end
+		echo "Diagnostics (exit status ${status}):"
+		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null
+			systemctl --failed --no-pager
+			for unit in $(systemctl list-units --failed --plain --no-legend | cut -d " " -f 1); do
+				echo "--- ${unit}"
+				journalctl -u "${unit}" -n 40 --no-pager
+			done
+			journalctl -p warning -n 80 --no-pager' </dev/null 2>&1 || diagnostics=$?
+		echo "Diagnostics finished (status ${diagnostics})."
 	fi
 	if [[ ${system} == vm-* ]]; then
 		vm_stop
@@ -156,6 +164,11 @@ start_target
 
 if [[ $1 == --profile ]]; then
 	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
+	if grep -qE '^LSS_MODULES=.*tls' "profiles/${profile}.conf"; then
+		group_start "${system}: Pebble (ACME test server)"
+		pebble_start
+		group_end
+	fi
 	group_start "${system}: profile ${profile}"
 	before=$(resources_snapshot)
 	started=${SECONDS}
