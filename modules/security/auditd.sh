@@ -25,7 +25,12 @@ mod_check() {
 }
 
 mod_install() {
-	pkg_install_family "auditd audispd-plugins acct" "audit audit-libs psacct"
+	local rpm="audit audit-libs psacct"
+	# From RHEL 10 on, augenrules and the sample rules are in their own package.
+	if os_is_rhel && ((OS_MAJOR >= 10)); then
+		rpm+=" audit-rules"
+	fi
+	pkg_install_family "auditd audispd-plugins acct" "${rpm}"
 	return
 }
 
