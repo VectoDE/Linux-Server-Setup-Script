@@ -33,6 +33,12 @@ WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
 WEB_CERT_HOOK=/etc/letsencrypt/renewal-hooks/deploy/lss-deploy
 # CA certificate of a private ACME server (LSS_TLS_CA_BUNDLE, for example Pebble or step-ca); certbot trusts it.
 WEB_ACME_CA=/etc/letsencrypt/lss-acme-ca.pem
+# certbot's certificate lineages (one directory per certificate name).
+WEB_CERT_LIVE=/etc/letsencrypt/live
+# The fail2ban jails and the CrowdSec log acquisition for the installed web server.
+WEB_FAIL2BAN_JAIL=/etc/fail2ban/jail.d/lss-web.local
+WEB_FAIL2BAN_FILTER=/etc/fail2ban/filter.d/lss-caddy-auth.conf
+WEB_CROWDSEC_ACQUIS=/etc/crowdsec/acquis.d/lss-web.yaml
 # shellcheck disable=SC2034 # read by the web server and haproxy modules
 WEB_TLS_CIPHERS=ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
 
@@ -149,7 +155,7 @@ web_cert_has_ocsp() {
 web_default_cert() {
 	local dir="${WEB_TLS_DIR}/default" name tmp
 	# The tls module's certificate for the host names (lineage "default") takes this place; certbot renews it.
-	[[ ! -s /etc/letsencrypt/live/default/fullchain.pem || ! -s ${dir}/fullchain.pem ]] || return 0
+	[[ ! -s ${WEB_CERT_LIVE}/default/fullchain.pem || ! -s ${dir}/fullchain.pem ]] || return 0
 	if [[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] &&
 		openssl x509 -checkend $((30 * 86400)) -noout -in "${dir}/fullchain.pem" >/dev/null 2>&1; then
 		return 0
@@ -196,7 +202,7 @@ web_cert_domains() {
 web_cert_issue() {
 	local name=$1 live wanted current
 	shift
-	live="/etc/letsencrypt/live/${name}/fullchain.pem"
+	live="${WEB_CERT_LIVE}/${name}/fullchain.pem"
 	wanted=$(printf '%s\n' "$@" | sort -u)
 	current=''
 	[[ ! -s ${live} ]] || current=$(web_cert_domains "${live}")
@@ -214,7 +220,7 @@ web_cert_issue() {
 		files_note_change "certificate ${name}"
 	fi
 	if ! cmp -s "${live}" "${WEB_TLS_DIR}/${name}/fullchain.pem"; then
-		RENEWED_LINEAGE="/etc/letsencrypt/live/${name}" "${WEB_CERT_HOOK}"
+		RENEWED_LINEAGE="${WEB_CERT_LIVE}/${name}" "${WEB_CERT_HOOK}"
 		files_note_change "installed certificate ${name}"
 	fi
 	return
@@ -649,9 +655,9 @@ web_ids_configure() {
 	local server logs
 	server=$(web_server)
 	if [[ -z ${server} ]]; then
-		file_remove /etc/fail2ban/jail.d/lss-web.local
-		file_remove /etc/fail2ban/filter.d/lss-caddy-auth.conf
-		file_remove /etc/crowdsec/acquis.d/lss-web.yaml
+		file_remove "${WEB_FAIL2BAN_JAIL}"
+		file_remove "${WEB_FAIL2BAN_FILTER}"
+		file_remove "${WEB_CROWDSEC_ACQUIS}"
 		return 0
 	fi
 	logs=$(web_log_dir "${server}")
@@ -667,15 +673,15 @@ web_ids_configure() {
 
 # web_ids_remove: drops the web server's jails and log acquisition (when the web server is removed).
 web_ids_remove() {
-	if [[ -e /etc/fail2ban/jail.d/lss-web.local ]]; then
-		file_remove /etc/fail2ban/jail.d/lss-web.local
-		file_remove /etc/fail2ban/filter.d/lss-caddy-auth.conf
+	if [[ -e ${WEB_FAIL2BAN_JAIL} ]]; then
+		file_remove "${WEB_FAIL2BAN_JAIL}"
+		file_remove "${WEB_FAIL2BAN_FILTER}"
 		if svc_is_active fail2ban; then
 			svc_restart fail2ban
 		fi
 	fi
-	if [[ -e /etc/crowdsec/acquis.d/lss-web.yaml ]]; then
-		file_remove /etc/crowdsec/acquis.d/lss-web.yaml
+	if [[ -e ${WEB_CROWDSEC_ACQUIS} ]]; then
+		file_remove "${WEB_CROWDSEC_ACQUIS}"
 		if svc_is_active crowdsec; then
 			svc_restart crowdsec
 		fi
@@ -693,7 +699,7 @@ _web_fail2ban() {
 	[[ -e ${error} ]] || install -m 0640 /dev/null "${error}"
 	case ${server} in
 	nginx)
-		file_write 0644 root:root /etc/fail2ban/jail.d/lss-web.local <<EOF
+		file_write 0644 root:root "${WEB_FAIL2BAN_JAIL}" <<EOF
 # Managed by lss (web server nginx).
 [nginx-http-auth]
 enabled = true
@@ -707,7 +713,7 @@ logpath = ${access}
 EOF
 		;;
 	apache)
-		file_write 0644 root:root /etc/fail2ban/jail.d/lss-web.local <<EOF
+		file_write 0644 root:root "${WEB_FAIL2BAN_JAIL}" <<EOF
 # Managed by lss (web server apache).
 [apache-auth]
 enabled = true
@@ -721,7 +727,7 @@ logpath = ${access}
 EOF
 		;;
 	*)
-		file_write 0644 root:root /etc/fail2ban/filter.d/lss-caddy-auth.conf <<'EOF'
+		file_write 0644 root:root "${WEB_FAIL2BAN_FILTER}" <<'EOF'
 # Managed by lss (web server caddy). Caddy logs JSON; a 401 answer is a failed basic-auth login.
 [Definition]
 failregex = ^.*"remote_ip":"<HOST>".*"status":401\b
@@ -729,7 +735,7 @@ ignoreregex =
 datepattern = "ts":{EPOCH}
 EOF
 		[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
-		file_write 0644 root:root /etc/fail2ban/jail.d/lss-web.local <<EOF
+		file_write 0644 root:root "${WEB_FAIL2BAN_JAIL}" <<EOF
 # Managed by lss (web server caddy).
 [lss-caddy-auth]
 enabled = true
@@ -766,7 +772,7 @@ _web_crowdsec() {
 		printf '# Managed by lss (web server %s).\nfilenames:\n' "${server}"
 		printf '  - %s\n' "${files[@]}"
 		printf 'labels:\n  type: %s\n' "${type}"
-	} | file_write 0644 root:root /etc/crowdsec/acquis.d/lss-web.yaml
+	} | file_write 0644 root:root "${WEB_CROWDSEC_ACQUIS}"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	if [[ ${changed} == 1 ]] && svc_is_active crowdsec; then
 		svc_restart crowdsec

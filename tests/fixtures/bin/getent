@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# getent stub: "getent DATABASE KEY" succeeds for the DATABASE:KEY pairs listed in $STUB_GETENT.
+printf 'getent %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+[[ " ${STUB_GETENT:-} " == *" $1:$2 "* ]] || exit 2
+printf '%s:x:0:\n' "$2"
+exit 0
