@@ -58,8 +58,14 @@ repo_add() {
 	local name=$1 conf key fingerprints keyring
 	conf="${LSS_ROOT}/data/repos/${name}.conf"
 	[[ -r ${conf} ]] || die "Unknown repository ${name}."
-	key="${LSS_ROOT}/data/keys/$(_kv "${conf}" KEY)"
+	key=$(_kv "${conf}" KEY)
 	fingerprints=$(_kv "${conf}" FINGERPRINTS)
+	# RPM_KEY and RPM_FINGERPRINTS: vendors that sign their RPM packages with another key than their apt repository.
+	if ! os_is_debian && [[ -n $(_kv "${conf}" RPM_KEY) ]]; then
+		key=$(_kv "${conf}" RPM_KEY)
+		fingerprints=$(_kv "${conf}" RPM_FINGERPRINTS)
+	fi
+	key="${LSS_ROOT}/data/keys/${key}"
 	pkg_install_family 'gnupg ca-certificates' 'gnupg2 ca-certificates'
 	repo_key_verify "${key}" "${fingerprints}" || die "Refusing repository ${name}: its key does not match the pinned fingerprints."
 

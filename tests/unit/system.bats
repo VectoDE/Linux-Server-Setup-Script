@@ -443,6 +443,23 @@ EOF
 	grep -qxF 'gpgkey=file:///etc/pki/rpm-gpg/lss-demo.asc' "${writes}"
 }
 
+@test "repo_add uses the RPM key of vendors that sign packages with another key" {
+	repo_root
+	printf 'RPMKEYDATA\n' >"${LSS_ROOT}/data/keys/demo-rpm.asc"
+	printf 'KEY=demo.asc\nFINGERPRINTS=BBBB2222\nRPM_KEY=demo-rpm.asc\nRPM_FINGERPRINTS=AAAA1111\n' >"${LSS_ROOT}/data/repos/split.conf"
+	printf 'DEB_URL=https://repo.example.invalid\nDEB_SUITE=stable\nDEB_COMPONENTS=main\n' >>"${LSS_ROOT}/data/repos/split.conf"
+	printf 'RPM_BASEURL=https://repo.example.invalid/el\n' >>"${LSS_ROOT}/data/repos/split.conf"
+	use_os rocky-9
+	repo_add split
+	grep -qxF 'RPMKEYDATA' "${BATS_TEST_TMPDIR}/writes"
+	run ! grep -qxF 'KEYDATA' "${BATS_TEST_TMPDIR}/writes"
+	# The apt key is pinned to BBBB2222, which the key stub does not contain.
+	use_os debian-12
+	run repo_add split
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Refusing repository split"* ]]
+}
+
 @test "repo_add refuses unknown repositories, foreign keys and missing packages" {
 	repo_root
 	use_os debian-12
