@@ -50,8 +50,9 @@ jobs:
         env:
           SYSTEM: ${{ matrix.system }}
           MODULES: ${{ matrix.modules }}
-        # shellcheck disable=SC2086 # one module per word
-        run: tests/integration/run.sh "$SYSTEM" $MODULES
+        run: |
+          read -ra modules <<<"$MODULES"
+          tests/integration/run.sh "$SYSTEM" "${modules[@]}"
 
   host:
     name: ubuntu-24.04 VM / kernel

@@ -12,6 +12,7 @@ enroll_key||Optional key to enrol this engine in the CrowdSec console (app.crowd
 MOD_SECRETS="crowdsec-enroll-key"
 
 CS_BOUNCER=crowdsec-firewall-bouncer
+CS_BOUNCER_CONFIG=/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
 
 mod_check() {
 	local collection
@@ -58,7 +59,34 @@ EOF
 	if [[ ${changed} == 1 || $(files_changes_of crowdsec) != 0 ]]; then
 		svc_reload crowdsec
 	fi
+	svc_wait_port 127.0.0.1 8080 60 || die "crowdsec: the local API does not listen on 127.0.0.1:8080."
+	_cs_bouncer_key
 	svc_enable "${CS_BOUNCER}"
+}
+
+# The bouncer package registers itself only when cscli is already installed; dnf installs both packages in one
+# transaction in any order, so the key may be missing. Register it here then. The key goes from cscli straight into
+# the bouncer configuration (mode 0600) and is never printed.
+_cs_bouncer_key() {
+	local key
+	[[ -f ${CS_BOUNCER_CONFIG} && ! -L ${CS_BOUNCER_CONFIG} ]] || die "crowdsec: ${CS_BOUNCER_CONFIG} is missing."
+	grep -Eq '^api_key: *[A-Za-z0-9+/=_-]{16,} *$' "${CS_BOUNCER_CONFIG}" && return 0
+	cscli bouncers delete lss-firewall-bouncer >/dev/null 2>&1 || true
+	key=$(cscli bouncers add lss-firewall-bouncer -o raw)
+	[[ ${key} =~ ^[A-Za-z0-9+/=_-]{16,}$ ]] || die "crowdsec: cscli returned no bouncer key."
+	files_backup "${CS_BOUNCER_CONFIG}"
+	# Through the environment, not argv, so the key never shows in the process list.
+	(
+		umask 077
+		CS_KEY=${key} awk '/^api_key:/ { print "api_key: " ENVIRON["CS_KEY"]; found = 1; next } { print }
+			END { if (!found) print "api_key: " ENVIRON["CS_KEY"] }' \
+			"${CS_BOUNCER_CONFIG}" >"${CS_BOUNCER_CONFIG}.lss-new"
+	)
+	mv -f -- "${CS_BOUNCER_CONFIG}.lss-new" "${CS_BOUNCER_CONFIG}"
+	files_note_change "crowdsec bouncer registered"
+	if svc_is_active "${CS_BOUNCER}"; then
+		svc_restart "${CS_BOUNCER}"
+	fi
 }
 
 mod_verify() {

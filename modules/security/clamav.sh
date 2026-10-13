@@ -32,26 +32,27 @@ _clam_db_ready() {
 mod_configure() {
 	local i
 	if os_is_rhel; then
-		# The RHEL package ships freshclam.conf with an "Example" line that disables it; lss writes its own.
+		# The RHEL package ships freshclam.conf with an "Example" line that disables it; lss writes its own. The
+		# daemon runs as clamupdate, which cannot create files in /var/log, so it logs to the journal only.
 		file_write 0644 root:root /etc/freshclam.conf <<'EOF'
 # Managed by lss (module clamav).
 DatabaseDirectory /var/lib/clamav
-UpdateLogFile /var/log/freshclam.log
 LogSyslog yes
 DatabaseOwner clamupdate
 DatabaseMirror database.clamav.net
 Checks 12
 EOF
 	fi
-	# The first download runs in the foreground so a failure shows its reason; the mirror sometimes refuses briefly.
-	# The Debian package starts the daemon at once, which would hold the database lock.
-	for ((i = 1; i <= 3; i++)); do
-		_clam_db_ready && break
-		systemctl stop "${CLAM_FRESHCLAM}" >/dev/null 2>&1 || true
-		freshclam --stdout >&2 || sleep $((i * 30))
-	done
-	_clam_db_ready || die "clamav: freshclam could not download the signatures; check that database.clamav.net is reachable."
 	svc_enable "${CLAM_FRESHCLAM}"
+	# The first download takes a while; scans need the signatures.
+	for ((i = 0; i < 90; i++)); do
+		_clam_db_ready && break
+		sleep 5
+	done
+	if ! _clam_db_ready; then
+		journalctl -u "${CLAM_FRESHCLAM}" -n 30 --no-pager >&2 || true
+		die "clamav: no signatures after 7 minutes; check that database.clamav.net is reachable."
+	fi
 
 	svc_unit "${CLAM_UNIT}.service" <<EOF
 # Managed by lss (module clamav). Infected files are listed in the journal (exit code 1 = found something).

@@ -86,7 +86,9 @@ EOF
 		fi
 	else
 		local baseurl gpgcheck repo_gpgcheck
-		baseurl=$(_repo_value "${conf}" RPM_BASEURL)
+		# RPM_BASEURL_<major> overrides the URL for one major release (vendors without packages for it yet).
+		baseurl=$(_repo_value "${conf}" "RPM_BASEURL_${OS_MAJOR}")
+		[[ -n ${baseurl} ]] || baseurl=$(_repo_value "${conf}" RPM_BASEURL)
 		gpgcheck=$(_kv "${conf}" RPM_GPGCHECK)
 		repo_gpgcheck=$(_kv "${conf}" RPM_REPO_GPGCHECK)
 		# At least one signature must be checked: the packages, the metadata or both.

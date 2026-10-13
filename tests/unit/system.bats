@@ -559,6 +559,22 @@ EOF
 	grep -qxF 'repo_gpgcheck=1' "${BATS_TEST_TMPDIR}/writes"
 }
 
+@test "repo_add uses a per-major base URL when the conf has one" {
+	repo_root
+	printf 'RPM_BASEURL_10=https://repo.example.invalid/el/9/{{arch}}\n' >>"${LSS_ROOT}/data/repos/demo.conf"
+	use_os almalinux-10
+	repo_add demo
+	grep -qxF 'baseurl=https://repo.example.invalid/el/9/amd64' "${BATS_TEST_TMPDIR}/writes"
+	: >"${BATS_TEST_TMPDIR}/writes"
+	use_os rocky-9
+	repo_add demo
+	grep -qxF 'baseurl=https://repo.example.invalid/el/9/amd64' "${BATS_TEST_TMPDIR}/writes"
+	use_os rhel-9
+	printf 'RPM_BASEURL_9=https://other.example.invalid/\n' >>"${LSS_ROOT}/data/repos/demo.conf"
+	repo_add demo
+	grep -qxF 'baseurl=https://other.example.invalid/' "${BATS_TEST_TMPDIR}/writes"
+}
+
 @test "repo_add refuses a repository that checks no signature" {
 	repo_root
 	sed -i 's/^RPM_REPO_GPGCHECK=1$/RPM_REPO_GPGCHECK=0/' "${LSS_ROOT}/data/repos/demo.conf"

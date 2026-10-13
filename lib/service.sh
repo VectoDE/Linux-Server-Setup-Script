@@ -24,6 +24,7 @@ svc_enable() {
 	fi
 	systemctl enable --now "${unit}" >/dev/null 2>&1 || {
 		systemctl status --no-pager "${unit}" >&2 || true
+		journalctl -u "${unit}" -n 30 --no-pager >&2 || true
 		die "Could not start ${unit}."
 	}
 	files_note_change "enabled ${unit}"
