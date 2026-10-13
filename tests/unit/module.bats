@@ -1,0 +1,116 @@
+#!/usr/bin/env bats
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+setup() {
+	load helpers
+	lss_test_setup
+	export LSS_MODULE_DIRS=${REPO_ROOT}/tests/fixtures/modules
+	export TEST_TARGET=${BATS_TEST_TMPDIR}/target
+	mkdir -p "${TEST_TARGET}"
+}
+
+@test "modules are listed with their group" {
+	run module_list --groups
+	[[ ${output} == *"test alpha"* ]]
+	[[ ${output} == *"test web-b"* ]]
+}
+
+@test "requirements come first, each module once" {
+	run module_resolve beta alpha gamma
+	[ "${status}" -eq 0 ]
+	[ "${output}" = $'alpha\nbeta\nweb-a\ngamma' ]
+}
+
+@test "an alternative uses the requested one" {
+	run module_resolve gamma web-b
+	[ "${status}" -eq 0 ]
+	[[ ${output} == *web-b* ]]
+	[[ ${output} != *web-a* ]]
+}
+
+@test "an alternative uses the installed one" {
+	state_set web-b status installed
+	run module_resolve gamma
+	[[ ${output} == *web-b* ]]
+}
+
+@test "conflicts are refused before anything runs" {
+	run module_resolve web-a web-b
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"'web-a' and 'web-b' cannot be installed together"* ]]
+	state_set web-a status installed
+	run module_resolve web-b
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"conflicts with the installed module 'web-a'"* ]]
+}
+
+@test "cycles and unknown modules are named" {
+	run module_resolve cycle-a
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Dependency cycle involving 'cycle-a'"* ]]
+	run module_resolve nope
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Unknown module 'nope'"* ]]
+	run module_resolve '../../etc'
+	[ "${status}" -eq 1 ]
+}
+
+@test "apply installs, records state, and a second run is unchanged" {
+	run module_apply alpha
+	[ "${status}" -eq 0 ]
+	[[ ${output} == *"alpha: done (1 changes)"* ]]
+	[ "$(cat "${TEST_TARGET}/alpha.conf")" = hello ]
+	[ "$(state_get alpha status)" = installed ]
+	LSS_RUN_ID=second-run run module_apply alpha
+	[[ ${output} == *"alpha: unchanged"* ]]
+}
+
+@test "options reach the module" {
+	config_set LSS_ALPHA_VALUE 'from --set'
+	module_apply alpha
+	[ "$(cat "${TEST_TARGET}/alpha.conf")" = 'from --set' ]
+}
+
+@test "a failing configure restores the module's files and marks it failed" {
+	module_apply alpha
+	LSS_RUN_ID=run-2 run module_apply failing
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"failing: installation failed; changed files were restored"* ]]
+	[ "$(cat "${TEST_TARGET}/alpha.conf")" = hello ]
+	[ ! -e "${TEST_TARGET}/failing.conf" ]
+	[ "$(state_get failing status)" = failed ]
+}
+
+@test "a module cannot leak variables or functions into the core" {
+	module_run alpha configure
+	[ -z "${MOD_NAME:-}" ]
+	run ! declare -F mod_configure
+}
+
+@test "remove refuses while another installed module needs it" {
+	module_apply alpha
+	module_apply beta
+	run module_remove alpha
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"'beta' needs it"* ]]
+	module_remove beta
+	module_remove alpha
+	[ ! -e "${TEST_TARGET}/alpha.conf" ]
+	[ -z "$(state_get alpha status)" ]
+}
+
+@test "mode falls back to what the module supports" {
+	config_set LSS_MODE docker
+	[ "$(module_mode alpha)" = native ]
+}
+
+@test "a failing command in the middle of a step stops it, also inside a condition" {
+	run module_apply midfail
+	[ "${status}" -eq 1 ]
+	[ ! -e "${TEST_TARGET}/midfail.conf" ]
+	if module_run midfail configure; then
+		false
+	fi
+}

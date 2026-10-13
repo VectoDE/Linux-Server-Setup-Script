@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{sh,bash,bats}]
+indent_style = tab
+shell_variant = bash
+switch_case_indent = false
+
+[lss]
+indent_style = tab
+shell_variant = bash
+
+[*.{yml,yaml,md,json,toml}]
+indent_style = space
+indent_size = 2

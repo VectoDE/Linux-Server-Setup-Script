@@ -1,0 +1,5 @@
+NAME="Red Hat Enterprise Linux"
+VERSION_ID="9.5"
+ID="rhel"
+ID_LIKE="fedora"
+PRETTY_NAME="Red Hat Enterprise Linux 9.5"
