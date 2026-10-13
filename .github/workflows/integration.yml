@@ -93,3 +93,39 @@ jobs:
       # of 75 here (October 2026); the minimum leaves room for small changes between Lynis versions.
       - name: Install the profile, verify, reinstall, audit
         run: tests/integration/run.sh host --profile minimal-secure 70
+
+  vm:
+    name: ${{ matrix.system }} VM / ${{ matrix.run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [debian-12, debian-13, rocky-9, almalinux-10]
+        run: [kernel, profile minimal-secure]
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install QEMU and allow access to KVM
+        run: |
+          sudo apt-get -q update
+          sudo apt-get -q install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # Kernel modules as on the runner VM, then the whole profile with a Lynis audit. The minimum index is set low
+      # until the first measurements on these systems are in (stage 1b, issue #12).
+      - name: Install, verify, reinstall, remove
+        env:
+          SYSTEM: vm-${{ matrix.system }}
+          RUN: ${{ matrix.run }}
+        run: |
+          if [[ $RUN == kernel ]]; then
+            tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard
+          else
+            tests/integration/run.sh "$SYSTEM" --profile minimal-secure 60
+          fi

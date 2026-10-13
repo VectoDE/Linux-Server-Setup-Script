@@ -8,8 +8,9 @@
 #
 # For every module: install (with its requirements), verify, install again (every module in the run must report
 # "unchanged"), and remove. With --profile: install the whole profile, verify, install again, then run the Lynis
-# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container);
-# "host" runs on the machine itself (for modules that need a real kernel, used on throwaway CI virtual machines only).
+# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container),
+# vm-NAME for a KVM virtual machine from tests/integration/vm-images.conf, or "host" for the machine itself (modules
+# that need a real kernel; used on throwaway CI virtual machines only).
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
@@ -21,6 +22,8 @@ shift
 }
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
+# shellcheck source=tests/integration/vm.sh
+source tests/integration/vm.sh
 
 # Collapsible sections in the GitHub Actions log.
 group_start() {
@@ -37,6 +40,8 @@ in_target() {
 	local script=$1
 	if [[ ${system} == host ]]; then
 		sudo --preserve-env=SSH_CONNECTION bash -c "${script}"
+	elif [[ ${system} == vm-* ]]; then
+		vm_run "${script}"
 	else
 		docker exec -i "${container}" bash -c "${script}"
 	fi
@@ -47,6 +52,8 @@ start_target() {
 	if [[ ${system} == host ]]; then
 		sudo rm -rf /opt/lss-src
 		sudo cp -a "${PWD}" /opt/lss-src
+	elif [[ ${system} == vm-* ]]; then
+		vm_start "${system#vm-}"
 	else
 		[[ -d tests/integration/images/${system} ]] || {
 			echo "Unknown system ${system}" >&2
@@ -90,7 +97,9 @@ stop_target() {
 		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null; systemctl --failed --no-pager; journalctl -p warning -n 80 --no-pager' || true
 		group_end
 	fi
-	if [[ ${system} != host ]]; then
+	if [[ ${system} == vm-* ]]; then
+		vm_stop
+	elif [[ ${system} != host ]]; then
 		docker rm -f "${container}" >/dev/null 2>&1 || true
 	fi
 	exit "${status}"
