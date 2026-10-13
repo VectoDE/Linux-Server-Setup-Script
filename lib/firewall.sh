@@ -114,7 +114,7 @@ fw_available() {
 
 # Applies the rules every module recorded (used by the firewall module after installing the backend).
 fw_apply_all() {
-	local registry spec module
+	local registry spec module network interface
 	for registry in "${LSS_STATE_DIR:-/var/lib/lss}"/firewall/*; do
 		[[ -f ${registry} ]] || continue
 		module=${registry##*/}
@@ -127,9 +127,9 @@ fw_apply_all() {
 	for registry in "${LSS_STATE_DIR:-/var/lib/lss}"/firewall-trusted/*; do
 		[[ -f ${registry} ]] || continue
 		module=${registry##*/}
-		while IFS= read -r spec; do
-			[[ -n ${spec} ]] || continue
-			LSS_MODULE=${module} _fw_trust_apply add "${spec}"
+		while read -r network interface; do
+			[[ -n ${network} && -n ${interface} ]] || continue
+			LSS_MODULE=${module} _fw_trust_apply add "${network}" "${interface}"
 		done <"${registry}"
 	done
 	return
@@ -180,28 +180,82 @@ _fw_trust_registry() {
 	return
 }
 
-# _fw_check_network CIDR: an IPv4 or IPv6 network with a prefix length.
-_fw_check_network() {
-	local network=$1
-	if [[ ${network} =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]]; then
-		return 0
-	fi
-	[[ ${network} =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ && ${network} == *:*:* ]] ||
-		die "Invalid network '${network}' (expected an address with a prefix length, such as 10.42.0.0/16)."
+# _fw_ipv4_int ADDRESS: the IPv4 address as a number.
+_fw_ipv4_int() {
+	local address=$1 a b c d
+	IFS=. read -r a b c d <<<"${address}"
+	printf '%s' "$(((10#${a} << 24) | (10#${b} << 16) | (10#${c} << 8) | 10#${d}))"
 	return
 }
 
-# _fw_trust_apply add|remove NETWORK: ufw accepts everything from NETWORK; firewalld binds it to the trusted zone.
+# _fw_host_addresses: the IPv4 address this server sends from on its default route (its public or LAN address).
+_fw_host_addresses() {
+	local route
+	route=$(ip -4 -o route get 192.0.2.1 2>/dev/null) || return 0
+	sed -n 's/.* src \([0-9.]*\).*/\1/p' <<<"${route}"
+	return
+}
+
+# _fw_check_network CIDR: an IPv4 network with a prefix of 8 to 32 or an IPv6 network with a prefix of 32 to 128.
+# Broader networks (0.0.0.0/0, ::/0) and networks that contain the address of this server's default route are
+# refused: trusting them would open the server to the internet or the local network.
+_fw_check_network() {
+	local network=$1 address prefix octet host base value
+	local -a octets=()
+	[[ ${network} =~ ^[0-9A-Fa-f.:]+/[0-9]{1,3}$ ]] ||
+		die "Invalid network '${network}' (expected an address with a prefix length, such as 10.42.0.0/16)."
+	address=${network%/*}
+	prefix=$((10#${network##*/}))
+	if [[ ${address} =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+		IFS=. read -ra octets <<<"${address}"
+		for octet in "${octets[@]}"; do
+			((10#${octet} <= 255)) || die "Invalid network '${network}': ${octet} is not an address byte."
+		done
+		((prefix <= 32)) || die "Invalid network '${network}': an IPv4 prefix is at most 32."
+		((prefix >= 8)) || die "The network '${network}' is too broad to trust (a prefix of at least /8 is needed)."
+		base=$(_fw_ipv4_int "${address}")
+		for host in $(_fw_host_addresses); do
+			[[ ${host} =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || continue
+			value=$(_fw_ipv4_int "${host}")
+			((value >> (32 - prefix) != base >> (32 - prefix))) ||
+				die "The network '${network}' contains ${host}, the address of this server; it cannot be trusted."
+		done
+	elif [[ ${address} =~ ^[0-9A-Fa-f:]+$ && ${address} == *:*:* ]]; then
+		((prefix <= 128)) || die "Invalid network '${network}': an IPv6 prefix is at most 128."
+		((prefix >= 32)) || die "The network '${network}' is too broad to trust (a prefix of at least /32 is needed)."
+	else
+		die "Invalid network '${network}' (expected an address with a prefix length, such as 10.42.0.0/16)."
+	fi
+	return
+}
+
+# _fw_check_interface NAME: a network interface name (at most 15 characters, no wildcards).
+_fw_check_interface() {
+	local interface=$1
+	[[ ${interface} =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || die "Invalid network interface '${interface}'."
+	return
+}
+
+# _fw_trust_apply add|remove NETWORK INTERFACE: accepts traffic that arrives on INTERFACE from NETWORK. ufw matches
+# both; firewalld binds INTERFACE to its trusted zone (a zone cannot match both, and the interface is the part a
+# neighbour cannot forge). Adding fails loudly; removing a rule that is already gone is fine.
 _fw_trust_apply() {
-	local action=$1 network=$2 output
+	local action=$1 network=$2 interface=$3 output
+	local -a rule=(in on "${interface}" from "${network}")
 	if [[ $(fw_backend) == ufw ]]; then
 		if [[ ${action} == add ]]; then
-			ufw allow from "${network}" comment "lss:${LSS_MODULE:-core}" >/dev/null
-		elif ! output=$(ufw delete allow from "${network}" 2>&1) && [[ ${output} != *non-existent* ]]; then
-			die "Could not remove the firewall rule for ${network}: ${output}"
+			output=$(ufw allow "${rule[@]}" comment "lss:${LSS_MODULE:-core}" 2>&1) ||
+				die "Could not trust ${network} on ${interface}: ${output}"
+		elif ! output=$(ufw delete allow "${rule[@]}" 2>&1) && [[ ${output} != *non-existent* ]]; then
+			die "Could not remove the firewall rule for ${network} on ${interface}: ${output}"
 		fi
 	else
-		output=$(_fw_firewalld --zone=trusted "--${action}-source=${network}" 2>&1) || die "firewalld: ${output}"
+		if [[ ${action} == add ]]; then
+			output=$(_fw_firewalld --zone=trusted "--change-interface=${interface}" 2>&1) || die "firewalld: ${output}"
+		elif ! output=$(_fw_firewalld --zone=trusted "--remove-interface=${interface}" 2>&1) &&
+			[[ ${output} != *NOT_ENABLED* && ${output} != *UNKNOWN_INTERFACE* ]]; then
+			die "firewalld: ${output}"
+		fi
 		if svc_is_active firewalld; then
 			firewall-cmd --reload >/dev/null
 		fi
@@ -209,36 +263,36 @@ _fw_trust_apply() {
 	return
 }
 
-# fw_trust NETWORK...: accepts all traffic from NETWORK on the host, for networks that belong to the server itself,
-# such as the pod and service networks of Kubernetes. Recorded per module like ports: the firewall module applies the
-# record when it comes later, and removing the module drops the rule.
+# fw_trust NETWORK INTERFACE: accepts all traffic from NETWORK that arrives on INTERFACE, for networks that belong to
+# the server itself, such as the pod network of Kubernetes on its bridge. Recorded per module like ports ("NETWORK
+# INTERFACE"): the firewall module applies the record when it comes later, and removing the module drops the rule.
 fw_trust() {
-	local network registry
+	local network=${1:-} interface=${2:-} registry entry
+	_fw_check_network "${network}"
+	_fw_check_interface "${interface}"
+	entry="${network} ${interface}"
 	registry=$(_fw_trust_registry)
-	for network in "$@"; do
-		_fw_check_network "${network}"
-		if [[ -f ${registry} ]] && grep -qxF -- "${network}" "${registry}"; then
-			continue
-		fi
-		if fw_available; then
-			_fw_trust_apply add "${network}"
-		fi
-		mkdir -p "$(dirname "${registry}")"
-		printf '%s\n' "${network}" >>"${registry}"
-		files_note_change "firewall trust ${network}"
-	done
+	if [[ -f ${registry} ]] && grep -qxF -- "${entry}" "${registry}"; then
+		return 0
+	fi
+	if fw_available; then
+		_fw_trust_apply add "${network}" "${interface}"
+	fi
+	mkdir -p "$(dirname "${registry}")"
+	printf '%s\n' "${entry}" >>"${registry}"
+	files_note_change "firewall trust ${network} on ${interface}"
 	return
 }
 
 _fw_trust_remove_module() {
-	local registry network
+	local registry network interface
 	registry=$(_fw_trust_registry)
 	[[ -f ${registry} ]] || return 0
 	if fw_available; then
-		while IFS= read -r network; do
-			[[ -n ${network} ]] || continue
-			_fw_trust_apply remove "${network}"
-			files_note_change "firewall distrust ${network}"
+		while read -r network interface; do
+			[[ -n ${network} && -n ${interface} ]] || continue
+			_fw_trust_apply remove "${network}" "${interface}"
+			files_note_change "firewall distrust ${network} on ${interface}"
 		done <"${registry}"
 	fi
 	rm -f -- "${registry}"

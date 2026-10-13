@@ -281,6 +281,63 @@ time.sleep(30)' >"${port_file}" 2>/dev/null 3>&- &
 	[ "${status}" -eq 1 ]
 }
 
+@test "trusted networks must be valid, narrow and bound to an interface" {
+	use_os debian-12
+	LSS_MODULE=k3s
+	# shellcheck disable=SC2329 # called by fw_trust
+	_fw_host_addresses() {
+		printf '192.168.1.10
+'
+	}
+	local spec
+	for spec in '0.0.0.0/0 cni0' '::/0 cni0' '300.1.1.1/24 cni0' '10.0.0.0/33 cni0' '10.0.0.0/7 cni0' '2001:db8::/16 cni0' 		'fd00::/129 cni0' '10.42.0.0 cni0' '10.42.0.0/16' '10.42.0.0/16 cni*' '10.42.0.0/16 a-very-long-interface' 		'192.168.0.0/16 eth0' '192.168.1.10/32 eth0'; do
+		# shellcheck disable=SC2086 # NETWORK and INTERFACE as two words
+		run fw_trust ${spec}
+		[ "${status}" -eq 1 ]
+	done
+	run fw_trust 192.168.0.0/16 eth0
+	[[ ${output} == *"contains 192.168.1.10, the address of this server"* ]]
+	run fw_trust 0.0.0.0/0 cni0
+	[[ ${output} == *"too broad to trust"* ]]
+	[ ! -e "${LSS_STATE_DIR}/firewall-trusted/k3s" ]
+	fw_trust 10.42.0.0/16 cni0
+	fw_trust fd00:42::/48 cni0
+	[ "$(cat "${LSS_STATE_DIR}/firewall-trusted/k3s")" = $'10.42.0.0/16 cni0
+fd00:42::/48 cni0' ]
+}
+
+@test "ufw: a trusted network is accepted on its interface only, once, and removed with the module" {
+	use_os ubuntu-24.04
+	LSS_MODULE=k3s
+	fw_trust 10.42.0.0/16 cni0
+	fw_trust 10.42.0.0/16 cni0
+	[ "$(grep -c 'ufw allow in on cni0 from 10.42.0.0/16 comment lss:k3s' "${STUB_LOG}")" = 1 ]
+	fw_remove_module
+	grep -q 'ufw delete allow in on cni0 from 10.42.0.0/16' "${STUB_LOG}"
+	[ ! -e "${LSS_STATE_DIR}/firewall-trusted/k3s" ]
+}
+
+@test "a trust rule that ufw rejects stops the run and is not recorded" {
+	use_os debian-13
+	LSS_MODULE=k3s
+	export STUB_EXIT_ufw=1 STUB_OUT_ufw='ERROR: Bad interface name'
+	run fw_trust 10.42.0.0/16 cni0
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Could not trust 10.42.0.0/16 on cni0: ERROR: Bad interface name"* ]]
+	[ ! -e "${LSS_STATE_DIR}/firewall-trusted/k3s" ]
+}
+
+@test "firewalld: the interface joins the trusted zone; removing it again is idempotent" {
+	use_os almalinux-10
+	LSS_MODULE=k3s
+	fw_trust 10.42.0.0/16 cni0
+	grep -q 'firewall-offline-cmd --zone=trusted --change-interface=cni0' "${STUB_LOG}"
+	export STUB_EXIT_firewall_offline_cmd=1 STUB_OUT_firewall_offline_cmd='Error: NOT_ENABLED: cni0'
+	fw_remove_module
+	grep -q 'firewall-offline-cmd --zone=trusted --remove-interface=cni0' "${STUB_LOG}"
+	[ ! -e "${LSS_STATE_DIR}/firewall-trusted/k3s" ]
+}
+
 @test "the rollback timer is armed only over SSH" {
 	use_os debian-12
 	unset SSH_CONNECTION

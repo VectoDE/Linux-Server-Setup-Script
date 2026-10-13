@@ -25,8 +25,10 @@ K3S_DATA=/var/lib/rancher/k3s
 K3S_AUDIT_DIR=${K3S_DATA}/server/logs
 K3S_SYSCTL=/etc/sysctl.d/70-lss-k3s.conf
 K3S_MODULES=/etc/modules-load.d/lss-k3s.conf
-# Pod and service networks (the k3s defaults). The host accepts everything from them, as the k3s documentation asks.
-K3S_NETWORKS="10.42.0.0/16 10.43.0.0/16"
+# The pod network (the k3s default) and the bridge its pods use on this node. The host accepts what pods send it (DNS,
+# the API through the kubernetes service), as the k3s documentation asks, but only when it arrives on that bridge.
+K3S_POD_NETWORK=10.42.0.0/16
+K3S_POD_BRIDGE=cni0
 
 mod_check() {
 	[[ $(opt api_access) =~ ^(local|vpn|public)$ ]] || die "LSS_K3S_API_ACCESS must be local, vpn or public."
@@ -223,8 +225,7 @@ WantedBy=multi-user.target
 EOF
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	ctr_firewall_setup
-	# shellcheck disable=SC2086 # one network per word
-	fw_trust ${K3S_NETWORKS}
+	fw_trust "${K3S_POD_NETWORK}" "${K3S_POD_BRIDGE}"
 	fw_allow "6443/tcp:$(opt api_access)"
 	if opt_bool traefik; then
 		fw_allow 80/tcp 443/tcp
