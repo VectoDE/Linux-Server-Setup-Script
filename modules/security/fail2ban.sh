@@ -14,6 +14,8 @@ findtime|10m|Window for counting failures
 ignoreip||Addresses or networks never banned, separated by spaces"
 
 FAIL2BAN_JAIL=/etc/fail2ban/jail.d/00-lss.local
+FAIL2BAN_SERVER=/etc/fail2ban/fail2ban.d/00-lss.local
+FAIL2BAN_LOG=/var/log/fail2ban.log
 
 mod_check() {
 	local value address
@@ -38,8 +40,17 @@ _fail2ban_ssh_port() {
 }
 
 mod_configure() {
-	local ignore
+	local ignore changed
 	ignore="127.0.0.1/8 ::1 $(opt ignoreip)"
+	# The recidive jail reads fail2ban's own log; RHEL sends it to the journal by default, so pin it to a file.
+	file_write 0644 root:root "${FAIL2BAN_SERVER}" <<EOF
+# Managed by lss (module fail2ban).
+[Definition]
+logtarget = ${FAIL2BAN_LOG}
+EOF
+	changed=${LSS_FILE_CHANGED}
+	[[ ! -L ${FAIL2BAN_LOG} ]] || die "fail2ban: ${FAIL2BAN_LOG} is a symbolic link."
+	[[ -e ${FAIL2BAN_LOG} ]] || install -m 0640 -o root -g root /dev/null "${FAIL2BAN_LOG}"
 	file_write 0644 root:root "${FAIL2BAN_JAIL}" <<EOF
 # Managed by lss (module fail2ban). Other modules add their jails as /etc/fail2ban/jail.d/lss-*.local.
 [DEFAULT]
@@ -62,11 +73,11 @@ mode = aggressive
 [recidive]
 enabled = true
 backend = auto
-logpath = /var/log/fail2ban.log
+logpath = ${FAIL2BAN_LOG}
 bantime = 1w
 findtime = 1d
 EOF
-	local changed=${LSS_FILE_CHANGED}
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	# The Debian default jail reads /var/log/auth.log, which does not exist on journal-only systems.
 	fail2ban-client --test >/dev/null 2>&1 || {
 		fail2ban-client --test >&2 || true
@@ -92,5 +103,6 @@ mod_verify() {
 mod_remove() {
 	svc_disable fail2ban
 	file_remove "${FAIL2BAN_JAIL}"
+	file_remove "${FAIL2BAN_SERVER}"
 	pkg_remove_family "fail2ban" "fail2ban-server"
 }
