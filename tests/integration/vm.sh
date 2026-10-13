@@ -5,7 +5,7 @@
 # shellcheck shell=bash
 # KVM virtual machines for tests/integration/run.sh (systems named vm-NAME, see vm-images.conf). Needs qemu-system-x86,
 # qemu-utils, cloud-image-utils and access to /dev/kvm. The VM gets a test user with a fresh key in the administrator
-# group, so the SSH hardening keeps letting it in.
+# group, so the SSH hardening keeps letting it in. A USB controller with a keyboard gives usbguard a device to allow.
 
 VM_DIR=''
 VM_PORT=${LSS_VM_SSH_PORT:-2222}
@@ -69,6 +69,7 @@ EOF
 	qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 4096 -smp 2 \
 		-drive "file=${VM_DIR}/disk.qcow2,if=virtio" -drive "file=${VM_DIR}/seed.iso,if=virtio,format=raw" \
 		-nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:${VM_PORT}-:22" \
+		-device qemu-xhci -device usb-kbd \
 		-display none -serial "file:${VM_DIR}/console.log" -daemonize -pidfile "${VM_DIR}/qemu.pid"
 	for ((i = 0; i < 60; i++)); do
 		vm_ssh true 2>/dev/null && break

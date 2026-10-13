@@ -8,6 +8,14 @@ MOD_DESCRIPTION="USBGuard: only USB devices present at installation are allowed,
 MOD_REQUIRES="system"
 
 USBGUARD_RULES=/etc/usbguard/rules.conf
+USBGUARD_BUS=/sys/bus/usb/devices
+
+# The USB bus exists once usbcore is loaded; kernels built for clouds load it only when a controller shows up.
+_usbguard_bus() {
+	[[ -d ${USBGUARD_BUS} ]] || modprobe -q usbcore 2>/dev/null || true
+	[[ -d ${USBGUARD_BUS} ]]
+	return
+}
 
 mod_check() {
 	if os_in_container; then
@@ -22,6 +30,8 @@ mod_install() {
 }
 
 mod_configure() {
+	local bus=0
+	! _usbguard_bus || bus=1
 	# The policy is generated once from the devices connected now; later devices need an explicit rule
 	# (usbguard allow-device ... -p), so a keyboard plugged in later cannot type commands.
 	if [[ ! -s ${USBGUARD_RULES} ]] || ! grep -q 'lss' "${USBGUARD_RULES}"; then
@@ -31,21 +41,35 @@ mod_configure() {
 		)
 	fi
 	local changed=${LSS_FILE_CHANGED:-0}
-	svc_enable usbguard
-	if [[ ${changed} == 1 ]]; then
-		svc_restart usbguard
+	# usbguard-daemon stops at once without a USB bus; systemd then starts it on the first boot that has one, and the
+	# rules above (empty on such a machine) block every device until it is allowed explicitly.
+	svc_dropin usbguard.service lss <<<$'# Managed by lss (module usbguard).\n[Unit]\nConditionPathIsDirectory='"${USBGUARD_BUS}"
+	if [[ ${bus} == 1 ]]; then
+		svc_enable usbguard
+		if [[ ${changed} == 1 ]]; then
+			svc_restart usbguard
+		fi
+	elif ! svc_is_enabled usbguard; then
+		systemctl enable usbguard >/dev/null 2>&1 || die "usbguard: could not enable usbguard.service."
+		files_note_change "enabled usbguard"
 	fi
 	return
 }
 
 mod_verify() {
-	svc_is_active usbguard || die "usbguard: the service is not running."
-	usbguard list-rules >/dev/null || die "usbguard: the daemon does not answer."
+	svc_is_enabled usbguard || die "usbguard: the service is disabled."
+	if _usbguard_bus; then
+		svc_is_active usbguard || die "usbguard: the service is not running."
+		usbguard list-rules >/dev/null || die "usbguard: the daemon does not answer."
+	else
+		[[ -f /etc/systemd/system/usbguard.service.d/lss.conf ]] || die "usbguard: the start condition of lss is missing."
+	fi
 	return
 }
 
 mod_remove() {
 	svc_disable usbguard
+	svc_dropin_remove usbguard.service lss
 	file_remove "${USBGUARD_RULES}"
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove usbguard
