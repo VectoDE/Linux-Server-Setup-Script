@@ -264,12 +264,17 @@ ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;" \
 # _mysql_initialize SQL MYSQLD [OPTION...]: creates the data directory with --initialize (never --initialize-insecure)
 # and runs SQL in the same bootstrap, before the server ever accepts a connection, so root never exists with an empty
 # password. The SQL file (it may hold the root password) lives in a private directory only root and the mysql group
-# can read and is deleted right after. A failed bootstrap leaves no half-initialised data directory behind.
+# can read and is deleted right after. The data directory must be empty (lss refuses to touch one with content), so
+# emptying it again after a failed bootstrap removes only what this bootstrap wrote.
 _mysql_initialize() {
 	local sql=$1 dir status=0
 	shift
+	[[ -d ${MYSQL_DATA} && ! -L ${MYSQL_DATA} ]] || die "mysql: ${MYSQL_DATA} is missing or a symbolic link."
+	[[ -z $(ls -A -- "${MYSQL_DATA}") ]] ||
+		die "mysql: ${MYSQL_DATA} is not empty but holds no MySQL data dictionary; move its content away first."
 	install -d -m 0755 -o mysql -g mysql /run/mysqld
 	dir=$(mktemp -d /run/mysqld/lss-init.XXXXXX)
+	[[ ${dir} == /run/mysqld/lss-init.?* ]] || die "mysql: could not create a private directory in /run/mysqld."
 	chgrp mysql "${dir}"
 	chmod 0750 "${dir}"
 	(
@@ -536,6 +541,28 @@ mod_verify() {
 	return
 }
 
+# _mysql_delete PATH: deletes one of the fixed paths of this module (purge only). Anything else, an empty path or a
+# directory that is a symbolic link stops the step instead; the /opt/mysql link itself is removed as a link.
+_mysql_delete() {
+	local path=$1
+	case ${path} in
+	"${MYSQL_DATA}" | /var/lib/mysql-files | /var/lib/mysql-keyring | "${MYSQL_GENERIC_DIR}") ;;
+	"${MYSQL_GENERIC_LINK}")
+		if [[ -L ${path} ]]; then
+			rm -f -- "${path}"
+			files_note_change "removed the link ${path}"
+		fi
+		return 0
+		;;
+	*) die "mysql: refusing to delete '${path}'." ;;
+	esac
+	[[ -e ${path} || -L ${path} ]] || return 0
+	[[ ! -L ${path} ]] || die "mysql: refusing to delete ${path}: it is a symbolic link."
+	rm -rf -- "${path}"
+	files_note_change "deleted ${path}"
+	return
+}
+
 mod_remove() {
 	local unit path packages
 	unit=$(_mysql_unit)
@@ -558,16 +585,13 @@ mod_remove() {
 		svc_daemon_reload
 		# The unpacked build (about 1 GB) is deleted, not backed up like a configuration file.
 		if [[ -e ${MYSQL_GENERIC_DIR} || -L ${MYSQL_GENERIC_LINK} ]]; then
-			rm -rf -- "${MYSQL_GENERIC_LINK}" "${MYSQL_GENERIC_DIR}"
-			files_note_change "deleted ${MYSQL_GENERIC_DIR}"
+			_mysql_delete "${MYSQL_GENERIC_LINK}"
+			_mysql_delete "${MYSQL_GENERIC_DIR}"
 		fi
 	fi
 	file_remove "${MYSQL_ROOT_CNF}"
 	for path in "${MYSQL_DATA}" /var/lib/mysql-files /var/lib/mysql-keyring; do
-		if [[ -d ${path} ]]; then
-			rm -rf -- "${path}"
-			files_note_change "deleted ${path}"
-		fi
+		_mysql_delete "${path}"
 	done
 	secret_remove mysql-root
 	for path in "${LSS_SECRETS_DIR}"/mysql-user-*; do

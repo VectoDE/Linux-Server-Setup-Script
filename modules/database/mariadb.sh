@@ -287,7 +287,10 @@ mod_remove() {
 	file_remove "$(_mariadb_conf)"
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove_family "mariadb-server mariadb-client" "mariadb-server mariadb"
-		if [[ -d ${MARIADB_DATA} ]]; then
+		# Only the fixed data directory, never through a symbolic link.
+		if [[ -L ${MARIADB_DATA} ]]; then
+			die "mariadb: refusing to delete ${MARIADB_DATA}: it is a symbolic link."
+		elif [[ -d ${MARIADB_DATA} ]]; then
 			rm -rf -- "${MARIADB_DATA}"
 			files_note_change "deleted ${MARIADB_DATA}"
 		fi
