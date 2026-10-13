@@ -126,7 +126,7 @@ mod_verify() {
 		ufw status verbose | grep -q 'Default: deny (incoming)' || die "firewall: inbound traffic is not denied by default."
 	else
 		[[ $(firewall-cmd --get-default-zone) == public ]] || die "firewall: default zone is not public."
-		[[ $(firewall-cmd --zone=public --get-target) =~ ^(default|DROP|REJECT|%%REJECT%%)$ ]] ||
+		[[ $(firewall-cmd --permanent --zone=public --get-target) =~ ^(default|DROP|REJECT|%%REJECT%%)$ ]] ||
 			die "firewall: the public zone accepts everything."
 	fi
 	for spec in $(opt allow); do

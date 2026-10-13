@@ -107,7 +107,9 @@ stop_target() {
 
 # Available memory and used disk space in MiB, for the resource figures in the README.
 resources_snapshot() {
-	in_target 'echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
+	# Dropping the page cache first keeps cached files out of the figure (not possible in containers).
+	in_target 'sync; echo 3 >/proc/sys/vm/drop_caches 2>/dev/null || true
+		echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
 	return
 }
 
@@ -128,7 +130,11 @@ resources_report() {
 	in_target 'touch /run/lss-memwatch.stop; sleep 1'
 	mem_low=$(in_target "awk 'NR == 1 || \$2 < low { low = \$2 } END { print int(low / 1024) }' /run/lss-memwatch
 		rm -f /run/lss-memwatch /run/lss-memwatch.stop")
-	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB after, $((mem_before - mem_low)) MiB peak, disk $((disk_after - disk_before)) MiB"
+	# Other processes on a shared runner can free memory meanwhile; a negative difference means "nothing measurable".
+	local mem_used=$((mem_before - mem_after)) mem_peak=$((mem_before - mem_low))
+	((mem_used > 0)) || mem_used=0
+	((mem_peak > mem_used)) || mem_peak=${mem_used}
+	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM ${mem_used} MiB after, ${mem_peak} MiB peak, disk $((disk_after - disk_before)) MiB"
 	in_target 'ps -eo rss=,comm= --sort=-rss | head -n 8' | awk '{ printf "  %5d MiB  %s\n", $1 / 1024, $2 }'
 	return
 }
