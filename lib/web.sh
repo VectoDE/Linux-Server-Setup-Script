@@ -147,7 +147,7 @@ web_cert_has_ocsp() {
 web_default_cert() {
 	local dir="${WEB_TLS_DIR}/default" name tmp
 	# The tls module's certificate for the host names (lineage "default") takes this place; certbot renews it.
-	[[ ! -s /etc/letsencrypt/live/default/fullchain.pem ]] || return 0
+	[[ ! -s /etc/letsencrypt/live/default/fullchain.pem || ! -s ${dir}/fullchain.pem ]] || return 0
 	if [[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] &&
 		openssl x509 -checkend $((30 * 86400)) -noout -in "${dir}/fullchain.pem" >/dev/null 2>&1; then
 		return 0

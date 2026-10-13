@@ -7,7 +7,8 @@
 #                   tests/integration/run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]
 #
 # For every module: install (with its requirements), verify, install again (every module in the run must report
-# "unchanged"), and remove. With --profile: install the whole profile, verify, install again, then run the Lynis
+# "unchanged"), and remove. A comma joins modules that are tested together (nginx,tls,vhost: installed at once,
+# removed in reverse order). With --profile: install the whole profile, verify, install again, then run the Lynis
 # audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container),
 # vm-NAME for a KVM virtual machine from tests/integration/vm-images.conf, or "host" for the machine itself (modules
 # that need a real kernel; used on throwaway CI virtual machines only).
@@ -24,6 +25,8 @@ settings=tests/integration/settings.conf
 container="lss-test-${system}"
 # shellcheck source=tests/integration/vm.sh
 source tests/integration/vm.sh
+# shellcheck source=tests/integration/pebble.sh
+source tests/integration/pebble.sh
 
 # Collapsible sections in the GitHub Actions log.
 group_start() {
@@ -176,18 +179,28 @@ if [[ $1 == --profile ]]; then
 	exit 0
 fi
 
-for module in "$@"; do
-	group_start "${system}: ${module}"
+# The tls module gets its certificates from Pebble.
+if [[ " $* " == *[\ ,]tls[\ ,]* ]]; then
+	group_start "${system}: Pebble (ACME test server)"
+	pebble_start
+	group_end
+fi
+
+for item in "$@"; do
+	IFS=',' read -ra set <<<"${item}"
+	group_start "${system}: ${set[*]}"
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
-	in_target "lss --yes --no-color install ${module}"
+	in_target "lss --yes --no-color install ${set[*]}"
 	in_target "lss --yes --no-color verify"
-	resources_report "${system} ${module}" "${before}" "${started}"
-	install_again "${module}"
+	resources_report "${system} ${set[*]}" "${before}" "${started}"
+	install_again "${set[@]}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
-		in_target "lss --yes --no-color remove ${module}"
-		in_target "! lss status | grep -q '^${module} '"
+		for ((i = ${#set[@]} - 1; i >= 0; i--)); do
+			in_target "lss --yes --no-color remove ${set[i]}"
+			in_target "! lss status | grep -q '^${set[i]} '"
+		done
 	fi
 	group_end
 done
