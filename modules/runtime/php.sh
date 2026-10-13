@@ -308,7 +308,7 @@ mod_configure() {
 }
 
 mod_verify() {
-	local i extension modules answer
+	local i extension modules info answer
 	_php_load
 	svc_is_active "${PHP_UNIT}" || die "php: ${PHP_UNIT} is not running."
 	for ((i = 0; i < 10; i++)); do
@@ -325,7 +325,9 @@ mod_verify() {
 	for extension in curl gd intl mbstring xml mysqli pdo_pgsql bcmath 'Zend OPcache'; do
 		grep -qixF "${extension}" <<<"${modules}" || die "php: the extension ${extension} is not loaded."
 	done
-	"${PHP_FPM}" -i 2>/dev/null | grep -q '^expose_php => Off' || die "php: the lss settings (${PHP_INI}) are not in effect."
+	# Captured first: grep -q would stop reading early and fail the pipeline with SIGPIPE.
+	info=$("${PHP_FPM}" -i 2>/dev/null) || true
+	grep -q '^expose_php => Off' <<<"${info}" || die "php: the lss settings (${PHP_INI}) are not in effect."
 	# A real FastCGI request over the socket; the pool answers its ping path without running a script.
 	answer=$("${PHP_CLI}" -n "${LSS_ROOT}/templates/php/fcgi-ping.php" "${WEB_PHP_SOCKET}" "${PHP_PING}" 2>&1) || true
 	[[ ${answer} == *pong* ]] || die "php: the pool does not answer FastCGI requests on ${WEB_PHP_SOCKET}: ${answer}"
