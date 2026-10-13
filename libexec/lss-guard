@@ -9,7 +9,8 @@
 # Checks: lss verify of every installed module (failed modules and files changed outside lss are configured again
 # when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, vulnerable packages (debsecan
 # on Debian, dnf updateinfo on the RHEL family), failed SSH logins and active bans, the results of the daily AIDE,
-# rkhunter and ClamAV runs, the Lynis hardening index, certificates that expire soon.
+# rkhunter and ClamAV runs, the Lynis hardening index, certificates that expire soon, HIGH and CRITICAL vulnerabilities
+# in the container images of Docker and Podman (Trivy).
 # Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
 # Notes (logins, bans) are part of the summary but do not make the run fail.
 set -Eeuo pipefail
@@ -20,6 +21,9 @@ LSS=${LSS_GUARD_LSS:-/usr/local/sbin/lss}
 STATE_DIR=${LSS_STATE_DIR:-/var/lib/lss}
 OS_RELEASE=${LSS_OS_RELEASE:-/etc/os-release}
 TLS_DIR=${LSS_TLS_DIR:-/etc/lss/tls}
+# Installed by the docker and podman modules (lib/container.sh).
+TRIVY=${LSS_GUARD_TRIVY:-/usr/local/bin/trivy}
+TRIVY_CACHE=${LSS_GUARD_TRIVY_CACHE:-/var/cache/lss-trivy}
 # Global also when the script is sourced inside a function (the unit tests).
 declare -ga FINDINGS=() FIXED=() NOTES=()
 
@@ -263,6 +267,67 @@ check_certificates() {
 	return
 }
 
+# images ENGINE: "ID REFERENCE" for every image of ENGINE, once per image; REFERENCE is repository:tag, or the ID for
+# an image without a tag.
+images() {
+	local engine=$1 id repository tag
+	"${engine}" images --format '{{.ID}} {{.Repository}} {{.Tag}}' 2>/dev/null |
+		while read -r id repository tag; do
+			[[ -n ${id} ]] || continue
+			if [[ ${repository} == '<none>' || ${tag} == '<none>' || -z ${tag} ]]; then
+				printf '%s %s
+' "${id}" "${id}"
+			else
+				printf '%s %s:%s
+' "${id}" "${repository}" "${tag}"
+			fi
+		done | awk '!seen[$1]++'
+	return
+}
+
+# scan_image ENGINE ID REFERENCE: one line per HIGH or CRITICAL vulnerability of the image, its severity. Trivy reads
+# Docker images through the daemon; a Podman image is saved to an archive first, which needs no socket.
+scan_image() {
+	local engine=$1 id=$2 ref=$3 tmp status=0
+	# shellcheck disable=SC2016 # a Go template, not a shell expansion
+	local -a scan=("${TRIVY}" image --cache-dir "${TRIVY_CACHE}" --scanners vuln --severity HIGH,CRITICAL --quiet
+		--timeout 15m --format template --template '{{range .Results}}{{range .Vulnerabilities}}{{println .Severity}}{{end}}{{end}}')
+	if [[ ${engine} == docker ]]; then
+		"${scan[@]}" --image-src docker "${ref}"
+		return
+	fi
+	tmp=$(mktemp -d)
+	if podman image save --quiet -o "${tmp}/image.tar" "${id}" >/dev/null 2>&1; then
+		"${scan[@]}" --input "${tmp}/image.tar" || status=$?
+	else
+		status=1
+	fi
+	rm -rf -- "${tmp}"
+	return "${status}"
+}
+
+# Container images with known HIGH or CRITICAL vulnerabilities: one finding per image with the numbers. An image Trivy
+# cannot scan (no network for its database, a broken image) is a note.
+check_containers() {
+	local engine id ref output high critical
+	[[ -x ${TRIVY} ]] || return 0
+	for engine in docker podman; do
+		command -v "${engine}" >/dev/null 2>&1 || continue
+		while read -r id ref; do
+			if ! output=$(scan_image "${engine}" "${id}" "${ref}" 2>/dev/null); then
+				note "Trivy could not scan the ${engine} image ${ref}."
+				continue
+			fi
+			critical=$(grep -c '^CRITICAL$' <<<"${output}" || true)
+			high=$(grep -c '^HIGH$' <<<"${output}" || true)
+			if ((critical + high > 0)); then
+				finding "The ${engine} image ${ref} has ${critical} critical and ${high} high vulnerabilities (trivy image ${ref}); update the image."
+			fi
+		done < <(images "${engine}")
+	done
+	return
+}
+
 json_escape() {
 	local text=$1
 	text=${text//\\/\\\\}
@@ -311,6 +376,7 @@ main() {
 	check_scanners
 	check_lynis
 	check_certificates
+	check_containers
 	local summary host
 	host=$(hostname -f 2>/dev/null || hostname)
 	if [[ ${#FINDINGS[@]} -eq 0 && ${#FIXED[@]} -eq 0 ]]; then
