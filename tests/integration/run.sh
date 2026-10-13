@@ -22,6 +22,15 @@ shift
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
 
+# Collapsible sections in the GitHub Actions log.
+group_start() {
+	echo "::group::$1"
+}
+
+group_end() {
+	echo "::endgroup::"
+}
+
 in_target() {
 	if [[ ${system} == host ]]; then
 		sudo --preserve-env=SSH_CONNECTION bash -c "$1"
@@ -73,9 +82,9 @@ install_again() {
 stop_target() {
 	local status=$?
 	if [[ ${status} -ne 0 ]]; then
-		echo "::group::Diagnostics"
+		group_start "Diagnostics"
 		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null; systemctl --failed --no-pager; journalctl -p warning -n 80 --no-pager' || true
-		echo "::endgroup::"
+		group_end
 	fi
 	if [[ ${system} != host ]]; then
 		docker rm -f "${container}" >/dev/null 2>&1 || true
@@ -88,20 +97,20 @@ start_target
 
 if [[ $1 == --profile ]]; then
 	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
-	echo "::group::${system}: profile ${profile}"
+	group_start "${system}: profile ${profile}"
 	in_target "lss --yes --no-color install --profile ${profile}"
 	in_target "lss --yes --no-color verify"
 	install_again --profile "${profile}"
-	echo "::endgroup::"
-	echo "::group::${system}: Lynis audit"
+	group_end
+	group_start "${system}: Lynis audit"
 	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
-	echo "::endgroup::"
+	group_end
 	echo "${system}: profile ${profile} passed"
 	exit 0
 fi
 
 for module in "$@"; do
-	echo "::group::${system}: ${module}"
+	group_start "${system}: ${module}"
 	in_target "lss --yes --no-color install ${module}"
 	in_target "lss --yes --no-color verify"
 	install_again "${module}"
@@ -109,6 +118,6 @@ for module in "$@"; do
 		in_target "lss --yes --no-color remove ${module}"
 		in_target "! lss status | grep -q '^${module} '"
 	fi
-	echo "::endgroup::"
+	group_end
 done
 echo "${system}: ${*} passed"

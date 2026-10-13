@@ -8,7 +8,7 @@ FROM debian:13@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f
 
 RUN apt-get update -q \
 	&& DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-		systemd systemd-sysv dbus ca-certificates curl gnupg iproute2 procps openssh-server sudo cron rsyslog \
+		ca-certificates cron curl dbus gnupg iproute2 openssh-server procps rsyslog sudo systemd systemd-sysv \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& rm -f /usr/sbin/policy-rc.d /lib/systemd/system/multi-user.target.wants/getty* /etc/systemd/system/getty.target.wants/*
 

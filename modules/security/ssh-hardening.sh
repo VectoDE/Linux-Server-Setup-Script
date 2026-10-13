@@ -173,11 +173,10 @@ mod_configure() {
 	_ssh_moduli
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 
-	if os_is_rhel && [[ ${port} != 22 ]] && command -v semanage >/dev/null 2>&1; then
-		if ! semanage port -l | awk '$1 == "ssh_port_t"' | grep -qwF "${port}"; then
-			semanage port -a -t ssh_port_t -p tcp "${port}" 2>/dev/null || semanage port -m -t ssh_port_t -p tcp "${port}"
-			files_note_change "SELinux ssh port ${port}"
-		fi
+	if os_is_rhel && [[ ${port} != 22 ]] && command -v semanage >/dev/null 2>&1 &&
+		! semanage port -l | awk '$1 == "ssh_port_t"' | grep -qwF "${port}"; then
+		semanage port -a -t ssh_port_t -p tcp "${port}" 2>/dev/null || semanage port -m -t ssh_port_t -p tcp "${port}"
+		files_note_change "SELinux ssh port ${port}"
 	fi
 	# The new port is open in the firewall before sshd moves to it. The rule belongs to the firewall module, so
 	# removing ssh-hardening never closes the SSH port.

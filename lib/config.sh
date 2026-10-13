@@ -17,10 +17,8 @@ config_valid_key() {
 # Strips one pair of matching outer quotes; nothing inside is interpreted.
 _config_unquote() {
 	local value=$1
-	if [[ ${#value} -ge 2 ]]; then
-		if [[ ${value:0:1} == '"' && ${value: -1} == '"' ]] || [[ ${value:0:1} == "'" && ${value: -1} == "'" ]]; then
-			value=${value:1:${#value}-2}
-		fi
+	if [[ ${#value} -ge 2 && ${value:0:1} == "${value: -1}" && ${value:0:1} == [\"\'] ]]; then
+		value=${value:1:${#value}-2}
 	fi
 	printf '%s' "${value}"
 }

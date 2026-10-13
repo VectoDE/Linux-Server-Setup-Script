@@ -98,10 +98,12 @@ usercheck = 1
 difok = 4
 enforce_for_root
 EOF
+	local unlock_seconds
+	unlock_seconds=$(($(opt_int lockout_minutes) * 60))
 	file_write 0644 root:root "${PP_FAILLOCK}" <<EOF
 # Managed by lss (module password-policy).
 deny = $(opt_int lockout_attempts)
-unlock_time = $(($(opt_int lockout_minutes) * 60))
+unlock_time = ${unlock_seconds}
 fail_interval = 900
 audit
 silent
@@ -145,10 +147,8 @@ mod_verify() {
 		grep -q 'pam_pwquality.so' /etc/pam.d/system-auth || die "password-policy: pwquality is not in PAM."
 	fi
 	grep -qE '^UMASK[[:space:]]+027' /etc/login.defs || die "password-policy: UMASK is not 027."
-	if command -v pwscore >/dev/null 2>&1; then
-		if pwscore <<<"password1" >/dev/null 2>&1; then
-			die "password-policy: a weak password is accepted."
-		fi
+	if command -v pwscore >/dev/null 2>&1 && pwscore <<<"password1" >/dev/null 2>&1; then
+		die "password-policy: a weak password is accepted."
 	fi
 }
 
