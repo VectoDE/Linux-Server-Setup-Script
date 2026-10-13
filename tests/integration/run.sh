@@ -92,13 +92,30 @@ stop_target() {
 	exit "${status}"
 }
 
+# Available memory and used disk space in MiB, for the resource figures in the README.
+resources_snapshot() {
+	in_target 'echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
+}
+
+# Prints what an install cost: time, memory taken from MemAvailable, disk space, and the largest processes.
+resources_report() {
+	local label=$1 before=$2 started=$3 mem_before disk_before mem_after disk_after
+	read -r mem_before disk_before <<<"${before}"
+	read -r mem_after disk_after <<<"$(resources_snapshot)"
+	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB, disk $((disk_after - disk_before)) MiB"
+	in_target 'ps -eo rss=,comm= --sort=-rss | head -n 8' | awk '{ printf "  %5d MiB  %s\n", $1 / 1024, $2 }'
+}
+
 trap stop_target EXIT
 start_target
 
 if [[ $1 == --profile ]]; then
 	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
 	group_start "${system}: profile ${profile}"
+	before=$(resources_snapshot)
+	started=${SECONDS}
 	in_target "lss --yes --no-color install --profile ${profile}"
+	resources_report "${system} profile ${profile}" "${before}" "${started}"
 	in_target "lss --yes --no-color verify"
 	install_again --profile "${profile}"
 	group_end
@@ -111,7 +128,10 @@ fi
 
 for module in "$@"; do
 	group_start "${system}: ${module}"
+	before=$(resources_snapshot)
+	started=${SECONDS}
 	in_target "lss --yes --no-color install ${module}"
+	resources_report "${system} ${module}" "${before}" "${started}"
 	in_target "lss --yes --no-color verify"
 	install_again "${module}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
