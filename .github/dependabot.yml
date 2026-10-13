@@ -27,6 +27,7 @@ updates:
       - /tests/integration/images/rocky-9
       - /tests/integration/images/ubuntu-22.04
       - /tests/integration/images/ubuntu-24.04
+      - /tests/integration/images/ubuntu-26.04
     schedule:
       interval: weekly
       day: monday

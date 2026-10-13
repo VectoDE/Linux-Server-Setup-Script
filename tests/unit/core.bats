@@ -10,9 +10,9 @@ setup() {
 
 # --- os ---------------------------------------------------------------------------------------------------------
 
-@test "all six supported systems are detected and accepted" {
+@test "every supported system is detected and accepted" {
 	local release family
-	for release in debian-12:debian debian-13:debian ubuntu-22.04:debian ubuntu-24.04:debian rocky-9:rhel almalinux-10:rhel rhel-9:rhel; do
+	for release in debian-12:debian debian-13:debian ubuntu-22.04:debian ubuntu-24.04:debian ubuntu-26.04:debian rocky-9:rhel almalinux-10:rhel rhel-9:rhel; do
 		family=${release#*:}
 		use_os "${release%%:*}"
 		[ "${OS_FAMILY}" = "${family}" ]

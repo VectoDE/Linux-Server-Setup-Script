@@ -62,13 +62,13 @@ os_detect() {
 os_unsupported_reason() {
 	case ${OS_ID}:${OS_MAJOR} in
 	debian:12 | debian:13) ;;
-	ubuntu:22 | ubuntu:24)
-		[[ ${OS_VERSION} == 22.04 || ${OS_VERSION} == 24.04 ]] ||
-			printf '%s %s is not an LTS release; use Ubuntu 22.04 or 24.04.' "${OS_ID}" "${OS_VERSION}"
+	ubuntu:22 | ubuntu:24 | ubuntu:26)
+		[[ ${OS_VERSION} == "${OS_MAJOR}.04" ]] ||
+			printf '%s %s is not an LTS release; use Ubuntu 22.04, 24.04 or 26.04.' "${OS_ID}" "${OS_VERSION}"
 		;;
 	rhel:9 | rhel:10 | rocky:9 | rocky:10 | almalinux:9 | almalinux:10) ;;
 	*)
-		printf '%s is not supported. Supported: Debian 12 and 13, Ubuntu 22.04 and 24.04, RHEL, Rocky Linux and AlmaLinux 9 and 10.' \
+		printf '%s is not supported. Supported: Debian 12 and 13, Ubuntu 22.04, 24.04 and 26.04, RHEL, Rocky Linux and AlmaLinux 9 and 10.' \
 			"${OS_NAME:-${OS_ID} ${OS_VERSION}}"
 		return 0
 		;;

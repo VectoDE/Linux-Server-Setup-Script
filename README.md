@@ -15,11 +15,11 @@ touches the system, restores its files when something fails, and can prove with 
 
 ## Supported systems
 
-| Distribution                     | Releases     | Tested in CI          |
-| -------------------------------- | ------------ | --------------------- |
-| Debian                           | 12, 13       | 12, 13                |
-| Ubuntu                           | 22.04, 24.04 | 22.04, 24.04          |
-| Rocky Linux, AlmaLinux, RHEL     | 9, 10        | Rocky 9, AlmaLinux 10 |
+| Distribution                 | Releases            | Tested in CI          |
+| ---------------------------- | ------------------- | --------------------- |
+| Debian                       | 12, 13              | 12, 13                |
+| Ubuntu                       | 22.04, 24.04, 26.04 | 22.04, 24.04, 26.04   |
+| Rocky Linux, AlmaLinux, RHEL | 9, 10               | Rocky 9, AlmaLinux 10 |
 
 x86_64 and arm64 (aarch64). CI runs on x86_64: on every pull request it installs, verifies, installs again and removes
 every module on each tested system.

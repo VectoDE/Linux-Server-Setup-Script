@@ -1,0 +1,5 @@
+PRETTY_NAME="Ubuntu 26.04 LTS"
+VERSION_ID="26.04"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian

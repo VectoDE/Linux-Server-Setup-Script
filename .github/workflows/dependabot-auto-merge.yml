@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # Dependabot pull requests for patch and minor updates (actions, test images) merge on their own once every required
-# check on main has passed, the integration tests on all six distributions included. Major updates wait for a review.
+# check on main has passed, the integration tests on every distribution included. Major updates wait for a review.
 name: Dependabot auto-merge
 
 on: pull_request

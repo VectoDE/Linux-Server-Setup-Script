@@ -28,8 +28,8 @@ now or later.
 - Quiet output: the output of apt, dnf and long-running tools such as the AIDE database build goes to the run log,
   and appears on the terminal only with `--verbose` or, with its last 40 lines, when the command fails.
 - Package repositories of vendors are added only with a pinned key fingerprint.
-- Supported systems: Debian 12 and 13, Ubuntu 22.04 and 24.04, Rocky Linux 9, AlmaLinux 10. CI installs, verifies,
-  reinstalls and removes every module on each of them.
+- Supported systems: Debian 12 and 13, Ubuntu 22.04, 24.04 and 26.04, Rocky Linux 9, AlmaLinux 10. CI installs,
+  verifies, reinstalls and removes every module on each of them.
 - OpenSSF Scorecard, signed-off commits (DCO), REUSE licensing, security policy and governance.
 
 ### Removed

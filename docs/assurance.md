@@ -72,9 +72,9 @@ that SSH still answers. A failed step restores every file it changed.
 
 ### This repository and its releases
 
-Every change reaches `main` through a pull request with 28 required checks (lint, unit tests with coverage, workflow
-and licence checks, secret scanning, sign-off and the integration tests on six distributions); force pushes and
-deletion of `main` are blocked. Workflows run with read-only tokens by default, pin every action to a commit SHA and
+Every change reaches `main` through a pull request whose checks are all required (lint, unit tests with coverage,
+workflow and licence checks, secret scanning, sign-off and the integration tests on every supported distribution);
+force pushes and deletion of `main` are blocked. Workflows run with read-only tokens by default, pin every action to a commit SHA and
 are checked by actionlint and zizmor. From 2.0.0 on, releases are built only by the release workflow and carry a
 signed build attestation that `lss update` verifies before it installs a version.
 
@@ -110,7 +110,7 @@ signed build attestation that `lss update` verifies before it installs a version
 
 - Unit tests (bats) cover the CLI, the libraries and the module runner, including link refusal, setting validation,
   restore on failure and the repository signature checks; line coverage of `lib/` is above 90 % and enforced in CI.
-- The integration tests install, verify, reinstall (which must change nothing) and remove every module on six
-  distributions, and run the `minimal-secure` profile on a virtual machine followed by a Lynis audit that must
+- The integration tests install, verify, reinstall (which must change nothing) and remove every module on every
+  supported distribution, and run the `minimal-secure` profile on a virtual machine followed by a Lynis audit that must
   reach a hardening index of 70.
 - ShellCheck, shfmt, SonarQube Cloud, actionlint, zizmor, gitleaks and the REUSE check run on every pull request.
