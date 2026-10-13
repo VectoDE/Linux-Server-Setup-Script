@@ -11,16 +11,16 @@ listen|localhost|listen_addresses: localhost, * or addresses separated by commas
 port|5432|TCP port
 access|local|Firewall: local (no rule), vpn (WireGuard network only) or public
 allow||Networks that may connect from other hosts (TLS and password only), CIDR, separated by spaces
-databases||Databases to create, separated by spaces
-users||Application users as user:database, separated by spaces; each owns its database and gets a generated password (lss secrets show postgresql-user-USER)"
+databases||Databases to create, owned by postgres, separated by spaces
+users||Application users as user:database, separated by spaces; each owns its database, can reach only that one and gets a generated password (lss secrets show postgresql-user-USER)"
 MOD_PORTS="5432/tcp on localhost"
 MOD_SECRETS="postgresql-user-<user>"
 
 # Versions without a version option: Debian 12: 15, Debian 13: 17, Ubuntu 22.04: 14, 24.04: 16, 26.04: 18,
 # RHEL 9: 16 (module stream; the default 13 is past its upstream end of life), RHEL 10: 16.
 
-PG_SETTINGS=zz-lss.conf
-PG_HBA=lss_hba.conf
+PG_SETTINGS=/etc/lss/postgresql/postgresql.conf
+PG_HBA=/etc/lss/postgresql/pg_hba.conf
 PG_INITDB_OPTIONS="--auth-local=peer --auth-host=scram-sha-256"
 
 _pg_name_ok() {
@@ -126,6 +126,7 @@ mod_check() {
 		[[ ${listen} != localhost && ${listen} != 127.0.0.1 ]] ||
 			die "LSS_POSTGRESQL_ACCESS=${access} needs LSS_POSTGRESQL_LISTEN set to an address other hosts can reach."
 		[[ -n $(opt allow) ]] || die "LSS_POSTGRESQL_ACCESS=${access} needs the client networks in LSS_POSTGRESQL_ALLOW."
+		[[ -n $(opt users) ]] || die "LSS_POSTGRESQL_ACCESS=${access} needs the remote roles in LSS_POSTGRESQL_USERS."
 	fi
 	for database in $(opt databases); do
 		_pg_name_ok "${database}" || die "LSS_POSTGRESQL_DATABASES: '${database}' is not a valid name (a-z, 0-9, _)."
@@ -219,7 +220,7 @@ _pg_tls() {
 		return 0
 	fi
 	data=$(_pg_data)
-	if [[ ! -s ${data}/server.crt || ! -s ${data}/server.key ]]; then
+	if ! _pg_as_postgres test -s "${data}/server.crt" || ! _pg_as_postgres test -s "${data}/server.key"; then
 		name=$(hostname -f 2>/dev/null || hostname)
 		(
 			umask 077
@@ -232,39 +233,63 @@ _pg_tls() {
 	return
 }
 
+# _pg_as_postgres COMMAND...: runs a command as the postgres user from /. Everything lss does inside directories that
+# postgres owns (data directory, /etc/postgresql/VERSION/main) goes through here, so a link planted there can never
+# make root write, chmod or chown another file.
+_pg_as_postgres() {
+	(cd / && runuser -u postgres -- "$@")
+	return
+}
+
+# _pg_include FILE: appends "include_if_exists = '/etc/lss/postgresql/postgresql.conf'" to the cluster's
+# postgresql.conf once, as the postgres user. The line is harmless after the module is removed (the file is gone).
+_pg_include() {
+	local file=$1 line
+	line="include_if_exists = '${PG_SETTINGS}'"
+	_pg_as_postgres grep -qxF -- "${line}" "${file}" && return 0
+	_pg_as_postgres sh -c 'printf "%s\n" "$2" >>"$1"' sh "${file}" "${line}" ||
+		die "postgresql: could not add the lss settings to ${file}."
+	files_note_change "included ${PG_SETTINGS} in ${file}"
+	return
+}
+
+# pg_hba: only the postgres system user logs in without a password (peer); each application role reaches only its
+# own database, with its SCRAM password, on the local socket, over loopback and (TLS only) from LSS_POSTGRESQL_ALLOW.
+# No "all" for application roles and no trust anywhere.
 _pg_hba_content() {
-	local network
+	local entry user database network
 	cat <<'EOF'
-# Managed by lss (module postgresql). Only the postgres system user logs in without a password (peer, as the
-# postgres role); every other role needs its SCRAM password, also on the local socket. No trust anywhere. Change
-# LSS_POSTGRESQL_ALLOW and run lss configure postgresql.
-# TYPE   DATABASE     USER      ADDRESS        METHOD
-local    all          postgres                 peer
-local    all          all                      scram-sha-256
-host     all          all       127.0.0.1/32   scram-sha-256
-host     all          all       ::1/128        scram-sha-256
-local    replication  postgres                 peer
-host     replication  all       127.0.0.1/32   scram-sha-256
-host     replication  all       ::1/128        scram-sha-256
+# Managed by lss (module postgresql). Change LSS_POSTGRESQL_USERS or LSS_POSTGRESQL_ALLOW and run
+# lss configure postgresql.
+# TYPE   DATABASE     USER      ADDRESS          METHOD
+local    all          postgres                   peer
+local    replication  postgres                   peer
 EOF
-	for network in $(opt allow); do
-		printf 'hostssl  all          all       %-14s scram-sha-256\n' "${network}"
+	for entry in $(opt users); do
+		user=${entry%%:*}
+		database=${entry#*:}
+		printf '%-8s %-12s %-9s %-16s %s\n' local "${database}" "${user}" '' scram-sha-256 \
+			host "${database}" "${user}" 127.0.0.1/32 scram-sha-256 host "${database}" "${user}" ::1/128 scram-sha-256
+		for network in $(opt allow); do
+			printf '%-8s %-12s %-9s %-16s %s\n' hostssl "${database}" "${user}" "${network}" scram-sha-256
+		done
 	done
 	return
 }
 
-# _pg_sql: runs the SQL on standard input as the postgres user over the local socket and prints the rows.
+# _pg_sql [DATABASE]: runs the SQL on standard input as the postgres user over the local socket and prints the rows.
 _pg_sql() {
-	local psql port
+	local database=${1:-postgres} psql port
 	psql=$(_pg_psql)
 	port=$(opt_int port)
-	(cd / && runuser -u postgres -- "${psql}" -X -q -A -t -v ON_ERROR_STOP=1 -p "${port}" -d postgres)
+	_pg_as_postgres "${psql}" -X -q -A -t -v ON_ERROR_STOP=1 -p "${port}" -d "${database}"
 	return
 }
 
+# _pg_query SQL [DATABASE]
 _pg_query() {
-	local sql=$1
-	_pg_sql <<<"${sql}"
+	local sql=$1 database=${2:-postgres}
+	_pg_sql "${database}" <<<"${sql}"
 	return
 }
 
@@ -296,7 +321,39 @@ _pg_selinux_port() {
 	return
 }
 
-# Databases of LSS_POSTGRESQL_DATABASES (owned by postgres) and of LSS_POSTGRESQL_USERS (owned by their user).
+# Nobody but the owner (and superusers) may connect to a database lss created: CONNECT is revoked from PUBLIC.
+_pg_private() {
+	local database=$1 public
+	public=$(_pg_query "SELECT count(*) FROM pg_database d, aclexplode(COALESCE(d.datacl, acldefault('d', d.datdba))) a
+		WHERE d.datname = '${database}' AND a.grantee = 0 AND a.privilege_type = 'CONNECT'")
+	if [[ ${public} != 0 ]]; then
+		_pg_query "REVOKE CONNECT ON DATABASE \"${database}\" FROM PUBLIC"
+		files_note_change "revoked CONNECT on ${database} from PUBLIC"
+	fi
+	return
+}
+
+# Before PostgreSQL 15 every role may create objects in the public schema of every database; lss revokes that and
+# hands the schema to the database's user, which is what PostgreSQL 15 and later do by default.
+_pg_public_schema() {
+	local database=$1 owner=$2 result
+	result=$(_pg_query "SELECT has_schema_privilege('public', 'public', 'CREATE')" "${database}")
+	if [[ ${result} == t ]]; then
+		_pg_query 'REVOKE CREATE ON SCHEMA public FROM PUBLIC' "${database}"
+		files_note_change "revoked CREATE on the public schema of ${database} from PUBLIC"
+	fi
+	[[ -n ${owner} ]] || return 0
+	result=$(_pg_query "SELECT pg_catalog.pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'public'" \
+		"${database}")
+	if [[ ${result} != "${owner}" && ${result} != pg_database_owner ]]; then
+		_pg_query "ALTER SCHEMA public OWNER TO \"${owner}\"" "${database}"
+		files_note_change "the public schema of ${database} belongs to ${owner}"
+	fi
+	return
+}
+
+# Databases of LSS_POSTGRESQL_DATABASES (owned by postgres) and of LSS_POSTGRESQL_USERS (owned by their user), each
+# private to its owner.
 _pg_databases() {
 	local database entry owner current
 	for database in $(opt databases); do
@@ -304,6 +361,8 @@ _pg_databases() {
 			_pg_query "CREATE DATABASE \"${database}\""
 			files_note_change "created database ${database}"
 		fi
+		_pg_private "${database}"
+		_pg_public_schema "${database}" ''
 	done
 	for entry in $(opt users); do
 		owner=${entry%%:*}
@@ -316,54 +375,61 @@ _pg_databases() {
 			_pg_query "ALTER DATABASE \"${database}\" OWNER TO \"${owner}\""
 			files_note_change "database ${database} belongs to ${owner}"
 		fi
+		_pg_private "${database}"
+		_pg_public_schema "${database}" "${owner}"
 	done
 	return
 }
 
 # Each role is created once with its generated password, sent on standard input and hashed by the server with SCRAM.
+# Application roles never get superuser, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS; every run takes them away again.
 _pg_users() {
-	local entry user password
+	local entry user password powers
 	for entry in $(opt users); do
 		user=${entry%%:*}
-		[[ -z $(_pg_query "SELECT 1 FROM pg_roles WHERE rolname = '${user}'") ]] || continue
-		secret_load "postgresql-user-${user}" password
-		_pg_sql <<<"SET password_encryption = 'scram-sha-256'; CREATE ROLE \"${user}\" LOGIN PASSWORD '${password}';"
-		files_note_change "created database role ${user}"
-		log_info "Password of ${user}: lss secrets show postgresql-user-${user}"
+		if [[ -z $(_pg_query "SELECT 1 FROM pg_roles WHERE rolname = '${user}'") ]]; then
+			secret_load "postgresql-user-${user}" password
+			_pg_sql <<<"SET password_encryption = 'scram-sha-256';
+CREATE ROLE \"${user}\" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${password}';"
+			files_note_change "created database role ${user}"
+			log_info "Password of ${user}: lss secrets show postgresql-user-${user}"
+		fi
+		powers=$(_pg_query "SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls
+			FROM pg_roles WHERE rolname = '${user}'")
+		if [[ ${powers} == t ]]; then
+			_pg_query "ALTER ROLE \"${user}\" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+			files_note_change "took the extra powers of role ${user} away"
+		fi
 	done
 	return
 }
 
 mod_configure() {
-	local before changed=0 port unit confdir data tls cert key
+	local before changed=0 port unit tls cert key hba
 	port=$(opt_int port)
 	before=$(files_changes_of postgresql)
 	_pg_cluster
 	unit=$(_pg_unit)
-	confdir=$(_pg_confdir)
-	data=$(_pg_data)
 	_pg_selinux_port "${port}"
 	tls=$(_pg_tls)
 	cert=${tls% *}
 	key=${tls#* }
-	if os_is_rhel; then
-		# The RHEL configuration has no include directory; one line in postgresql.conf adds conf.d.
-		[[ ! -L ${data}/conf.d ]] || die "postgresql: ${data}/conf.d is a symbolic link."
-		install -d -m 0700 -o postgres -g postgres "${data}/conf.d"
-		file_ensure_lines 0600 postgres:postgres "${data}/postgresql.conf" <<<"include_dir = 'conf.d'"
-	fi
-	file_write 0640 postgres:postgres "${confdir}/${PG_HBA}" < <(_pg_hba_content)
-	file_write 0644 postgres:postgres "${confdir}/conf.d/${PG_SETTINGS}" <<EOF
+	# The lss files live in /etc/lss/postgresql (root-owned, readable by the postgres group); only the include line
+	# goes into postgresql.conf, written as the postgres user.
+	hba=$(_pg_hba_content)
+	file_write 0640 root:postgres "${PG_HBA}" <<<"${hba}"
+	file_write 0640 root:postgres "${PG_SETTINGS}" <<EOF
 # Managed by lss (module postgresql). Change LSS_POSTGRESQL_* in /etc/lss/lss.conf and run lss configure postgresql.
 listen_addresses = '$(opt listen)'
 port = ${port}
-hba_file = '${confdir}/${PG_HBA}'
+hba_file = '${PG_HBA}'
 password_encryption = 'scram-sha-256'
 ssl = on
 ssl_cert_file = '${cert}'
 ssl_key_file = '${key}'
 ssl_min_protocol_version = 'TLSv1.2'
 EOF
+	_pg_include "$(_pg_confdir)/postgresql.conf"
 	if os_is_debian; then
 		svc_sandbox "${unit}.service" ReadWritePaths=/var/lib/postgresql
 	else
@@ -415,23 +481,28 @@ mod_verify() {
 	result=$(_pg_query 'SHOW password_encryption')
 	[[ ${result} == scram-sha-256 ]] || die "postgresql: password_encryption is ${result}, expected scram-sha-256."
 	[[ $(_pg_query 'SHOW ssl') == on ]] || die "postgresql: TLS is off."
-	result=$(_pg_query "SELECT count(*) FROM pg_hba_file_rules WHERE auth_method NOT IN ('peer', 'scram-sha-256')
-		OR (auth_method = 'peer' AND user_name <> '{postgres}')")
-	[[ ${result} == 0 ]] || die "postgresql: pg_hba allows more than peer for postgres and SCRAM passwords."
+	[[ $(_pg_query 'SHOW hba_file') == "${PG_HBA}" ]] || die "postgresql: the server does not use ${PG_HBA}."
+	result=$(_pg_query "SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL
+		OR auth_method NOT IN ('peer', 'scram-sha-256')
+		OR (auth_method = 'peer' AND user_name <> '{postgres}')
+		OR (user_name <> '{postgres}' AND ('all' = ANY (user_name) OR 'all' = ANY (database)))")
+	[[ ${result} == 0 ]] ||
+		die "postgresql: pg_hba allows more than peer for postgres and SCRAM for each role on its own database."
 	_pg_check_listen "$(opt_int port)" "$(opt listen)"
 	return
 }
 
 mod_remove() {
-	local unit confdir path version
+	local unit path version
 	version=$(opt version)
 	unit=$(_pg_unit)
-	confdir=$(_pg_confdir)
 	svc_disable "${unit}"
 	svc_dropin_remove "${unit}.service" lss-sandbox
-	# Without these two files the cluster falls back to the configuration and pg_hba.conf of the distribution.
-	file_remove "${confdir}/conf.d/${PG_SETTINGS}"
-	file_remove "${confdir}/${PG_HBA}"
+	# Without these files the include line in postgresql.conf finds nothing, and the cluster falls back to the
+	# configuration and pg_hba.conf of the distribution.
+	file_remove "${PG_SETTINGS}"
+	file_remove "${PG_HBA}"
+	rmdir "${PG_SETTINGS%/*}" 2>/dev/null || true
 	[[ ${LSS_PURGE:-0} == 1 ]] || return 0
 	pkg_remove_family "$(_pg_packages) postgresql-common" "$(_pg_packages)"
 	if [[ -n ${version} ]]; then
