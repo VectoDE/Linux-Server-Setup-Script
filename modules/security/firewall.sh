@@ -61,7 +61,12 @@ _fw_defaults_firewalld() {
 	fi
 	for service in cockpit dhcpv6-client ssh; do
 		if _fw_firewalld --zone=public --query-service="${service}" >/dev/null 2>&1; then
-			_fw_firewalld --zone=public --remove-service="${service}" >/dev/null
+			# firewall-offline-cmd reads --remove-service as a lokkit option, which cannot be combined with --zone.
+			if svc_is_active firewalld; then
+				firewall-cmd --permanent --zone=public --remove-service="${service}" >/dev/null
+			else
+				firewall-offline-cmd --zone=public --remove-service-from-zone="${service}" >/dev/null
+			fi
 			files_note_change "firewalld: closed service ${service}"
 		fi
 	done
