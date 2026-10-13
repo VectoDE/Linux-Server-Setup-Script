@@ -251,12 +251,14 @@ _mongo_login() {
 # The administrator is created once, through the localhost exception that MongoDB grants while no user exists.
 _mongo_admin() {
 	local password=$1 output
-	output=$(_mongo_js <<EOF || true
+	output=$(
+		_mongo_js <<EOF || true
 try { $(_mongo_login "${password}") print('lss:auth-ok'); } catch (e) { print('lss:auth-failed'); }
 EOF
 	)
 	[[ ${output} != *lss:auth-ok* ]] || return 0
-	output=$(_mongo_js <<EOF
+	output=$(
+		_mongo_js <<EOF
 db.getSiblingDB('admin').createUser({ user: '${MONGO_ADMIN}', pwd: $(_mongo_quote "${password}"), roles: ['root'] });
 print('lss:created');
 EOF
@@ -273,7 +275,8 @@ _mongo_users() {
 		user=${entry%%:*}
 		database=${entry#*:}
 		secret_load "mongodb-user-${user}" password
-		output=$(_mongo_js <<EOF
+		output=$(
+			_mongo_js <<EOF
 $(_mongo_login "${admin}")
 const target = db.getSiblingDB('${database}');
 const roles = [{ role: 'readWrite', db: '${database}' }];
@@ -345,7 +348,8 @@ mod_verify() {
 	svc_is_active "${MONGO_UNIT}" || die "mongodb: the service ${MONGO_UNIT} is not running."
 	_mongo_wait
 	secret_load mongodb-admin password
-	output=$(_mongo_js <<EOF
+	output=$(
+		_mongo_js <<EOF
 $(_mongo_login "${password}")
 const options = db.adminCommand({ getCmdLineOpts: 1 }).parsed;
 print('lss:ping=' + db.adminCommand({ ping: 1 }).ok);
