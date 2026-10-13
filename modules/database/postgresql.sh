@@ -247,6 +247,7 @@ _pg_include() {
 	local file=$1 line
 	line="include_if_exists = '${PG_SETTINGS}'"
 	_pg_as_postgres grep -qxF -- "${line}" "${file}" && return 0
+	# shellcheck disable=SC2016 # $1 and $2 belong to the inner sh, which gets the file and the line as arguments.
 	_pg_as_postgres sh -c 'printf "%s\n" "$2" >>"$1"' sh "${file}" "${line}" ||
 		die "postgresql: could not add the lss settings to ${file}."
 	files_note_change "included ${PG_SETTINGS} in ${file}"
