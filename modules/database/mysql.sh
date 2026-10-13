@@ -210,7 +210,7 @@ mod_install() {
 }
 
 # The generic build has no package scripts: lss writes its base configuration and unit and creates the data
-# directory once (root starts with an empty password and is switched to auth_socket right after).
+# directory once, with root on auth_socket from the start.
 _mysql_generic_configure() {
 	install -d -m 0750 -o mysql -g mysql "${MYSQL_DATA}" /var/lib/mysql-files
 	install -d -m 0750 -o mysql -g adm /var/log/mysql
@@ -254,10 +254,47 @@ RestartPreventExitStatus=1
 WantedBy=multi-user.target
 EOF
 	if [[ ! -e ${MYSQL_DATA}/mysql.ibd ]]; then
-		log_command "${MYSQL_GENERIC_LINK}/bin/mysqld" "--defaults-file=${MYSQL_GENERIC_CNF}" --initialize-insecure \
-			--user=mysql || die "mysql: initialising ${MYSQL_DATA} failed (see /var/log/mysql/error.log)."
-		files_note_change "initialised ${MYSQL_DATA}"
+		_mysql_initialize "INSTALL PLUGIN auth_socket SONAME 'auth_socket.so';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket;" \
+			"${MYSQL_GENERIC_LINK}/bin/mysqld" "--defaults-file=${MYSQL_GENERIC_CNF}"
 	fi
+	return
+}
+
+# _mysql_initialize SQL MYSQLD [OPTION...]: creates the data directory with --initialize (never --initialize-insecure)
+# and runs SQL in the same bootstrap, before the server ever accepts a connection, so root never exists with an empty
+# password. The SQL file (it may hold the root password) lives in a private directory only root and the mysql group
+# can read and is deleted right after. A failed bootstrap leaves no half-initialised data directory behind.
+_mysql_initialize() {
+	local sql=$1 dir status=0
+	shift
+	install -d -m 0755 -o mysql -g mysql /run/mysqld
+	dir=$(mktemp -d /run/mysqld/lss-init.XXXXXX)
+	chgrp mysql "${dir}"
+	chmod 0750 "${dir}"
+	(
+		umask 027
+		printf '%s\n' "${sql}" >"${dir}/init.sql"
+	)
+	chgrp mysql "${dir}/init.sql"
+	log_command "$@" --initialize --user=mysql "--init-file=${dir}/init.sql" || status=$?
+	rm -rf -- "${dir}"
+	if [[ ${status} -ne 0 ]]; then
+		find "${MYSQL_DATA}" -mindepth 1 -delete
+		die "mysql: initialising ${MYSQL_DATA} failed (see the MySQL error log)."
+	fi
+	files_note_change "initialised ${MYSQL_DATA}"
+	return
+}
+
+# RHEL family: lss creates the data directory itself, with the generated root password, before the first start; the
+# unit's mysql-prepare-db-dir then finds it initialised and skips its --initialize-insecure.
+_mysql_rhel_initialize() {
+	local password
+	[[ ! -e ${MYSQL_DATA}/mysql.ibd ]] || return 0
+	secret_load mysql-root password
+	install -d -m 0751 -o mysql -g mysql "${MYSQL_DATA}"
+	_mysql_initialize "ALTER USER 'root'@'localhost' IDENTIFIED BY '${password}';" /usr/libexec/mysqld
 	return
 }
 
@@ -305,8 +342,9 @@ _mysql_root_socket() {
 	return
 }
 
-# RHEL family: the server creates root with an empty password. lss sets a generated one and writes it to
-# /root/.my.cnf (mode 0600), so the client logs in without a password on the command line.
+# RHEL family: root has the generated password (set at initialisation) and /root/.my.cnf (mode 0600) holds it, so the
+# client logs in without a password on the command line. A data directory an older installation created with an
+# empty root password is repaired here.
 _mysql_root_password() {
 	local password client
 	secret_load mysql-root password
@@ -441,6 +479,8 @@ default-character-set = utf8mb4
 EOF
 	if [[ $(_mysql_source) == generic ]]; then
 		_mysql_generic_configure
+	elif os_is_rhel; then
+		_mysql_rhel_initialize
 	fi
 	svc_sandbox "${unit}.service" "ReadWritePaths=${MYSQL_DATA}" ReadWritePaths=-/var/lib/mysql-files \
 		ReadWritePaths=-/var/lib/mysql-keyring
