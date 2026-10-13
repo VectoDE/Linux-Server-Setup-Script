@@ -31,13 +31,14 @@ _au_debian() {
 	if [[ $(opt scope) == all ]]; then
 		origins='"origin=*";'
 	else
-		# The distribution's security archive, plus ESM where Ubuntu Pro is attached.
-		# shellcheck disable=SC2016 # unattended-upgrades expands ${distro_id} itself
-		origins='"${distro_id}:${distro_codename}-security";
-	"${distro_id}ESMApps:${distro_codename}-apps-security";
-	"${distro_id}ESM:${distro_codename}-infra-security";
-	"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
-	"origin=Debian,codename=${distro_codename},label=Debian-Security";'
+		# The distribution's security archive, plus ESM where Ubuntu Pro is attached. Origins-Pattern entries are
+		# key=value lists; patterns for the other distribution simply match nothing.
+		# shellcheck disable=SC2016 # unattended-upgrades expands ${distro_codename} itself
+		origins='"origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+	"origin=Debian,codename=${distro_codename},label=Debian-Security";
+	"origin=Ubuntu,archive=${distro_codename}-security,label=Ubuntu";
+	"origin=UbuntuESMApps,archive=${distro_codename}-apps-security";
+	"origin=UbuntuESM,archive=${distro_codename}-infra-security";'
 	fi
 	file_write 0644 root:root /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
 // Managed by lss (module auto-updates).

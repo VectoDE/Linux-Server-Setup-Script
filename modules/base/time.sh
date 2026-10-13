@@ -29,8 +29,12 @@ mod_check() {
 	opt_bool nts || true
 }
 
+# A container shares the clock of its host, which keeps it in sync; there the module sets only the time zone.
 mod_install() {
-	pkg_install tzdata chrony
+	pkg_install tzdata
+	if ! os_in_container; then
+		pkg_install chrony
+	fi
 }
 
 mod_configure() {
@@ -45,6 +49,11 @@ mod_configure() {
 	fi
 	if os_is_debian; then
 		file_write 0644 root:root /etc/timezone <<<"${timezone}"
+	fi
+
+	if os_in_container; then
+		log_info "time: container detected; the host keeps the clock in sync, so chrony is not set up."
+		return 0
 	fi
 
 	opt_bool nts && suffix=' nts'
@@ -66,6 +75,9 @@ mod_configure() {
 
 mod_verify() {
 	local i
+	[[ $(readlink /etc/localtime) == "/usr/share/zoneinfo/$(opt timezone)" ]] ||
+		die "time: the time zone is not $(opt timezone)."
+	os_in_container && return 0
 	svc_is_active "$(_time_unit)" || die "time: $(_time_unit) is not running."
 	# chronyc answers once the daemon is up; reaching a server is not required (the network may block NTP).
 	for ((i = 0; i < 10; i++)); do

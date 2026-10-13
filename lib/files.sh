@@ -151,6 +151,11 @@ files_forget() {
 file_ensure_lines() {
 	local mode=$1 owner=$2 dest=$3 line
 	local -a missing=()
+	# DEST may sit in a directory its owner controls (~/.ssh); a planted symlink would make root write to, chmod
+	# and chown another file.
+	if [[ -L ${dest} || -L $(dirname "${dest}") ]]; then
+		die "Refusing to change ${dest}: it or its directory is a symbolic link."
+	fi
 	while IFS= read -r line; do
 		[[ -n ${line} ]] || continue
 		if [[ ! -f ${dest} ]] || ! grep -qxF -- "${line}" "${dest}"; then
@@ -168,7 +173,7 @@ file_ensure_lines() {
 	fi
 	if [[ $(stat -c '%a %U:%G' "${dest}" 2>/dev/null) != "${mode#0} ${owner}" ]]; then
 		chmod "${mode}" "${dest}"
-		chown "${owner}" "${dest}"
+		chown --no-dereference "${owner}" "${dest}"
 	fi
 	if command -v restorecon >/dev/null 2>&1; then
 		restorecon -F "${dest}" 2>/dev/null || true

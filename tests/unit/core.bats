@@ -338,3 +338,18 @@ write_release() {
 	[ "${status}" -eq 1 ]
 	grep -q 'systemd-detect-virt --container --quiet' "${STUB_LOG}"
 }
+
+@test "file_ensure_lines refuses symbolic links" {
+	local target=${BATS_TEST_TMPDIR}/target
+	printf 'secret\n' >"${target}"
+	ln -s "${target}" "${BATS_TEST_TMPDIR}/keys"
+	run file_ensure_lines 0600 "${OWNER}" "${BATS_TEST_TMPDIR}/keys" <<<"key"
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"is a symbolic link"* ]]
+	[ "$(cat "${target}")" = secret ]
+	mkdir "${BATS_TEST_TMPDIR}/real"
+	ln -s "${BATS_TEST_TMPDIR}/real" "${BATS_TEST_TMPDIR}/linked"
+	run file_ensure_lines 0600 "${OWNER}" "${BATS_TEST_TMPDIR}/linked/keys" <<<"key"
+	[ "${status}" -eq 1 ]
+	[ ! -e "${BATS_TEST_TMPDIR}/real/keys" ]
+}

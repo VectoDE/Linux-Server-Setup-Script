@@ -128,7 +128,7 @@ mod_configure() {
 mod_verify() {
 	svc_is_active auditd || die "auditd: the service is not running."
 	auditctl -s | grep -qE '^enabled [12]' || die "auditd: kernel auditing is off."
-	auditctl -l | grep -q 'key=identity' || die "auditd: the lss rules are not loaded."
+	auditctl -l | grep -qE -- '(-k |key=)identity' || die "auditd: the lss rules are not loaded."
 }
 
 mod_remove() {

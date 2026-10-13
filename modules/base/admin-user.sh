@@ -116,6 +116,8 @@ mod_configure() {
 	home=$(_admin_home)
 	primary=$(id -gn "${name}")
 	chmod 0750 "${home}"
+	# install -d would follow a symlink the user planted and hand its target to the user.
+	[[ ! -L ${home}/.ssh ]] || die "admin-user: ${home}/.ssh is a symbolic link; replace it with a directory."
 	install -d -m 0700 -o "${name}" -g "${primary}" "${home}/.ssh"
 	keys=$(_admin_keys)
 	if [[ -n ${keys} ]]; then
@@ -144,7 +146,9 @@ mod_verify() {
 	[[ $(stat -c '%a %U' "${home}/.ssh/authorized_keys") == "600 ${name}" ]] ||
 		die "admin-user: ${home}/.ssh/authorized_keys must be mode 600 and owned by ${name}."
 	visudo -c -q >/dev/null || die "admin-user: the sudoers configuration is invalid."
-	sudo -l -U "${name}" | grep -qE '\(ALL( : ALL)?\) (NOPASSWD: )?ALL' || die "admin-user: ${name} cannot use sudo."
+	# The group rule is read directly: "sudo -l" runs PAM account checks that fail in minimal containers.
+	grep -rqsE "^%$(_admin_group)[[:space:]]+ALL[[:space:]]*=[[:space:]]*\(ALL(:ALL)?\)[[:space:]]+ALL" \
+		/etc/sudoers /etc/sudoers.d || die "admin-user: no sudoers rule grants %$(_admin_group) full sudo rights."
 }
 
 # The account stays (removing it could lock the administrator out); --purge deletes it unless it is in use.

@@ -19,7 +19,7 @@ mod_check() {
 
 mod_install() {
 	pkg_enable_epel
-	pkg_install_family "rkhunter unhide" "rkhunter unhide"
+	pkg_install_family "rkhunter unhide" "rkhunter"
 }
 
 _rkh_config() {

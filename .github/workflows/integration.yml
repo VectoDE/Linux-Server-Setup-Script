@@ -65,4 +65,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Install, verify, reinstall, remove
-        run: tests/integration/run.sh host swap firewall kernel-hardening mac auditd usbguard
+        run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard

@@ -73,7 +73,7 @@ mod_check() {
 }
 
 mod_install() {
-	pkg_install_family "openssh-server" "openssh-server"
+	pkg_install_family "openssh-server openssh-client" "openssh-server openssh-clients"
 	if os_is_rhel && [[ $(opt port) != 22 ]]; then
 		pkg_install policycoreutils-python-utils
 	fi
@@ -116,11 +116,11 @@ UseDNS no
 Compression no
 LogLevel VERBOSE
 Banner ${SSH_BANNER}
-KexAlgorithms $(_ssh_supported kex "${SSH_KEX}")
-Ciphers $(_ssh_supported cipher "${SSH_CIPHERS}")
-MACs $(_ssh_supported mac "${SSH_MACS}")
-HostKeyAlgorithms $(_ssh_supported key "${SSH_HOSTKEYS}")
-PubkeyAcceptedAlgorithms $(_ssh_supported key "${SSH_PUBKEYS}")
+KexAlgorithms ${SSH_KEX_LIST}
+Ciphers ${SSH_CIPHER_LIST}
+MACs ${SSH_MAC_LIST}
+HostKeyAlgorithms ${SSH_HOSTKEY_LIST}
+PubkeyAcceptedAlgorithms ${SSH_PUBKEY_LIST}
 EOF
 }
 
@@ -147,6 +147,15 @@ mod_configure() {
 	local port changed=0 group
 	port=$(opt port)
 	ssh-keygen -A >/dev/null
+	# sshd -t needs its privilege separation directory, which only exists once ssh.service ran (not yet with
+	# socket activation on Ubuntu 24.04).
+	install -d -m 0755 /run/sshd
+	# Computed here, outside the process substitution of _ssh_render, so a failure stops the step.
+	SSH_KEX_LIST=$(_ssh_supported kex "${SSH_KEX}")
+	SSH_CIPHER_LIST=$(_ssh_supported cipher "${SSH_CIPHERS}")
+	SSH_MAC_LIST=$(_ssh_supported mac "${SSH_MACS}")
+	SSH_HOSTKEY_LIST=$(_ssh_supported key "${SSH_HOSTKEYS}")
+	SSH_PUBKEY_LIST=$(_ssh_supported key "${SSH_PUBKEYS}")
 	for group in ssh-users $(opt allow_groups); do
 		if ! getent group "${group}" >/dev/null; then
 			groupadd --system "${group}"

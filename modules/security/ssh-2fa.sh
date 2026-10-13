@@ -65,20 +65,20 @@ _tfa_pam() {
 
 # Creates a TOTP secret for USER once and keeps the otpauth URI as lss secret ssh-2fa-USER.
 _tfa_enrol() {
-	local user=$1 home group file secret uri
+	local user=$1 home file secret uri
 	home=$(getent passwd "${user}") || die "ssh-2fa: user ${user} does not exist."
 	home=$(cut -d ':' -f 6 <<<"${home}")
 	file=${home}/.google_authenticator
-	[[ -s ${file} ]] && return 0
-	group=$(id -gn "${user}")
-	(
-		umask 077
-		google-authenticator --time-based --disallow-reuse --force --rate-limit=3 --rate-time=30 --window-size=3 \
-			--no-confirm --quiet --secret="${file}" --label="${user}@$(hostname)" --issuer=lss >/dev/null
-	)
-	chown "${user}:${group}" "${file}"
-	chmod 0400 "${file}"
-	secret=$(head -n 1 "${file}")
+	# The home directory belongs to the user, who could plant a symlink there; root never follows it. The secret is
+	# created and read with the user's own rights (google-authenticator writes it with mode 0400).
+	[[ ! -L ${file} ]] || die "ssh-2fa: ${file} is a symbolic link; remove it and run lss configure ssh-2fa."
+	if runuser -u "${user}" -- test -s "${file}"; then
+		return 0
+	fi
+	runuser -u "${user}" -- google-authenticator --time-based --disallow-reuse --force --rate-limit=3 --rate-time=30 \
+		--window-size=3 --no-confirm --quiet --secret="${file}" --label="${user}@$(hostname)" --issuer=lss >/dev/null
+	secret=$(runuser -u "${user}" -- head -n 1 "${file}")
+	[[ ${secret} =~ ^[A-Z2-7]{16,}$ ]] || die "ssh-2fa: ${file} does not hold a TOTP secret."
 	log_mask "${secret}"
 	uri="otpauth://totp/lss:${user}@$(hostname)?secret=${secret}&issuer=lss"
 	secret_set "ssh-2fa-${user}" "${uri}"
