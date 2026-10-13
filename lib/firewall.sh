@@ -47,8 +47,20 @@ _fw_parse() {
 		die "Invalid firewall rule '$1' (expected PORT/tcp|udp[:public|vpn|local])."
 }
 
+# firewalld command: the live one while the service runs, the offline one otherwise. Both change the permanent
+# configuration, so a rule added or removed while firewalld is stopped is still right when it starts again.
+_fw_firewalld() {
+	if svc_is_active firewalld; then
+		firewall-cmd --permanent "$@"
+	else
+		firewall-offline-cmd "$@"
+	fi
+}
+
+# _fw_apply add|remove: changes the rule parsed by _fw_parse. Fails loudly; a rule that could not be removed stays
+# in the registry, so lss never forgets an open port.
 _fw_apply() {
-	local action=$1 port=${FW_PORT} range
+	local action=$1 port=${FW_PORT} range output
 	range=${port/-/:}
 	if [[ $(fw_backend) == ufw ]]; then
 		local -a rule=()
@@ -59,18 +71,21 @@ _fw_apply() {
 		fi
 		if [[ ${action} == add ]]; then
 			ufw allow "${rule[@]}" comment "lss:${LSS_MODULE:-core}" >/dev/null
-		else
-			ufw delete allow "${rule[@]}" >/dev/null 2>&1 || true
+		elif ! output=$(ufw delete allow "${rule[@]}" 2>&1) && [[ ${output} != *non-existent* ]]; then
+			die "Could not remove firewall rule ${FW_PORT}/${FW_PROTO}: ${output}"
 		fi
 	else
-		local flag=--add
+		local flag=--add rich
 		[[ ${action} == add ]] || flag=--remove
+		rich="rule family=ipv4 source address=$(fw_vpn_network) port port=${port} protocol=${FW_PROTO} accept"
 		if [[ ${FW_SCOPE} == vpn ]]; then
-			firewall-cmd --permanent "${flag}-rich-rule=rule family=ipv4 source address=$(fw_vpn_network) port port=${port} protocol=${FW_PROTO} accept" >/dev/null 2>&1 || [[ ${flag} == --remove ]]
+			output=$(_fw_firewalld "${flag}-rich-rule=${rich}" 2>&1) || die "firewalld: ${output}"
 		else
-			firewall-cmd --permanent "${flag}-port=${port}/${FW_PROTO}" >/dev/null 2>&1 || [[ ${flag} == --remove ]]
+			output=$(_fw_firewalld "${flag}-port=${port}/${FW_PROTO}" 2>&1) || die "firewalld: ${output}"
 		fi
-		firewall-cmd --reload >/dev/null
+		if svc_is_active firewalld; then
+			firewall-cmd --reload >/dev/null
+		fi
 	fi
 }
 
@@ -79,7 +94,7 @@ fw_available() {
 	if [[ $(fw_backend) == ufw ]]; then
 		command -v ufw >/dev/null 2>&1
 	else
-		command -v firewall-cmd >/dev/null 2>&1 && svc_is_active firewalld
+		command -v firewall-offline-cmd >/dev/null 2>&1
 	fi
 }
 
@@ -128,6 +143,7 @@ fw_remove_module() {
 			files_note_change "firewall remove ${spec}"
 		done <"${registry}"
 	fi
+	# Only reached when every rule is gone (or no firewall tool is installed, so no rule can exist).
 	rm -f -- "${registry}"
 }
 
