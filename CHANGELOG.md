@@ -24,6 +24,7 @@ now or later.
   `rkhunter`, `clamav`, `lynis`, `usbguard` and `guard`, which checks the server on a timer, repairs drift and
   sends notifications.
 - Profile `minimal-secure`.
+- A warning for every setting that no module reads, so a misspelt key does not silently fall back to the default.
 - Package repositories of vendors are added only with a pinned key fingerprint.
 - Supported systems: Debian 12 and 13, Ubuntu 22.04 and 24.04, Rocky Linux 9, AlmaLinux 10. CI installs, verifies,
   reinstalls and removes every module on each of them.

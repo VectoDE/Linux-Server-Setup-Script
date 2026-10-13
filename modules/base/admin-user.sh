@@ -137,7 +137,7 @@ Defaults env_reset"
 }
 
 mod_verify() {
-	local name home
+	local name home check
 	name=$(_admin_name)
 	getent passwd "${name}" >/dev/null || die "admin-user: ${name} does not exist."
 	id -nG "${name}" | tr ' ' '\n' | grep -qxF "$(_admin_group)" || die "admin-user: ${name} is not in $(_admin_group)."
@@ -145,7 +145,12 @@ mod_verify() {
 	[[ -s ${home}/.ssh/authorized_keys ]] || die "admin-user: ${name} has no SSH key."
 	[[ $(stat -c '%a %U' "${home}/.ssh/authorized_keys") == "600 ${name}" ]] ||
 		die "admin-user: ${home}/.ssh/authorized_keys must be mode 600 and owned by ${name}."
-	visudo -c -q >/dev/null || die "admin-user: the sudoers configuration is invalid."
+	visudo -c -q -f /etc/sudoers.d/00-lss >/dev/null || die "admin-user: /etc/sudoers.d/00-lss is invalid."
+	# Files lss did not write (cloud images, CI runners) are reported, not blamed on this module.
+	if ! check=$(visudo -c 2>&1); then
+		log_warn "admin-user: visudo reports a problem in a sudoers file lss does not manage:"
+		printf '%s\n' "${check}" >&2
+	fi
 	# The group rule is read directly: "sudo -l" runs PAM account checks that fail in minimal containers.
 	grep -rqsE "^%$(_admin_group)[[:space:]]+ALL[[:space:]]*=[[:space:]]*\(ALL(:ALL)?\)[[:space:]]+ALL" \
 		/etc/sudoers /etc/sudoers.d || die "admin-user: no sudoers rule grants %$(_admin_group) full sudo rights."
