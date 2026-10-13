@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# GitHub-hosted runner labels newer than the list built into actionlint.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

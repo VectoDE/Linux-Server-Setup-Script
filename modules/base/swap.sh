@@ -68,7 +68,8 @@ mod_configure() {
 			dd if=/dev/zero of="${path}" bs=1M count="${size}" status=none
 		)
 		chmod 600 "${path}"
-		mkswap --quiet "${path}" >/dev/null
+		# mkswap reports on stdout; --quiet exists only from util-linux 2.38 on (Rocky 9 has 2.37).
+		mkswap "${path}" >/dev/null
 		files_note_change "swap file ${path} (${size} MiB)"
 	fi
 	chmod 600 "${path}"

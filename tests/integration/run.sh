@@ -8,8 +8,9 @@
 #
 # For every module: install (with its requirements), verify, install again (every module in the run must report
 # "unchanged"), and remove. With --profile: install the whole profile, verify, install again, then run the Lynis
-# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container);
-# "host" runs on the machine itself (for modules that need a real kernel, used on throwaway CI virtual machines only).
+# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container),
+# vm-NAME for a KVM virtual machine from tests/integration/vm-images.conf, or "host" for the machine itself (modules
+# that need a real kernel; used on throwaway CI virtual machines only).
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
@@ -21,6 +22,8 @@ shift
 }
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
+# shellcheck source=tests/integration/vm.sh
+source tests/integration/vm.sh
 
 # Collapsible sections in the GitHub Actions log.
 group_start() {
@@ -37,6 +40,8 @@ in_target() {
 	local script=$1
 	if [[ ${system} == host ]]; then
 		sudo --preserve-env=SSH_CONNECTION bash -c "${script}"
+	elif [[ ${system} == vm-* ]]; then
+		vm_run "${script}"
 	else
 		docker exec -i "${container}" bash -c "${script}"
 	fi
@@ -47,6 +52,8 @@ start_target() {
 	if [[ ${system} == host ]]; then
 		sudo rm -rf /opt/lss-src
 		sudo cp -a "${PWD}" /opt/lss-src
+	elif [[ ${system} == vm-* ]]; then
+		vm_start "${system#vm-}"
 	else
 		[[ -d tests/integration/images/${system} ]] || {
 			echo "Unknown system ${system}" >&2
@@ -78,6 +85,15 @@ install_again() {
 	}
 	printf '%s\n' "${second}"
 	if grep -E 'OK +[a-z0-9-]+: done' <<<"${second}"; then
+		# What changed: the notes of the run and, for rewritten files, the difference to the version before it.
+		in_target 'run=$(ls -td /var/lib/lss/runs/*/ | head -n 1)
+			cat "${run}changes"
+			for backup in $(find "/var/lib/lss/backup/$(basename "${run}")" -path "*/files/*" -type f 2>/dev/null); do
+				file=/${backup#*/files/}
+				echo "--- ${file}"
+				diff "${backup}" "${file}" | head -n 20
+				stat -c "%a %U:%G" "${backup}" "${file}"
+			done' || true
 		echo "Second install of $* changed something; modules must be idempotent." >&2
 		exit 1
 	fi
@@ -90,7 +106,9 @@ stop_target() {
 		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null; systemctl --failed --no-pager; journalctl -p warning -n 80 --no-pager' || true
 		group_end
 	fi
-	if [[ ${system} != host ]]; then
+	if [[ ${system} == vm-* ]]; then
+		vm_stop
+	elif [[ ${system} != host ]]; then
 		docker rm -f "${container}" >/dev/null 2>&1 || true
 	fi
 	exit "${status}"
@@ -98,7 +116,9 @@ stop_target() {
 
 # Available memory and used disk space in MiB, for the resource figures in the README.
 resources_snapshot() {
-	in_target 'echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
+	# Dropping the page cache first keeps cached files out of the figure (not possible in containers).
+	in_target 'sync; echo 3 >/proc/sys/vm/drop_caches 2>/dev/null || true
+		echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
 	return
 }
 
@@ -119,7 +139,11 @@ resources_report() {
 	in_target 'touch /run/lss-memwatch.stop; sleep 1'
 	mem_low=$(in_target "awk 'NR == 1 || \$2 < low { low = \$2 } END { print int(low / 1024) }' /run/lss-memwatch
 		rm -f /run/lss-memwatch /run/lss-memwatch.stop")
-	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB after, $((mem_before - mem_low)) MiB peak, disk $((disk_after - disk_before)) MiB"
+	# Other processes on a shared runner can free memory meanwhile; a negative difference means "nothing measurable".
+	local mem_used=$((mem_before - mem_after)) mem_peak=$((mem_before - mem_low))
+	((mem_used > 0)) || mem_used=0
+	((mem_peak > mem_used)) || mem_peak=${mem_used}
+	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM ${mem_used} MiB after, ${mem_peak} MiB peak, disk $((disk_after - disk_before)) MiB"
 	in_target 'ps -eo rss=,comm= --sort=-rss | head -n 8' | awk '{ printf "  %5d MiB  %s\n", $1 / 1024, $2 }'
 	return
 }
@@ -140,6 +164,22 @@ if [[ $1 == --profile ]]; then
 	group_end
 	group_start "${system}: Lynis audit"
 	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
+	group_end
+	# The daily and weekly scans run once inside their systemd sandbox; a path the sandbox blocks fails the unit.
+	group_start "${system}: scheduled scans"
+	in_target 'for unit in lss-aide-check lss-rkhunter lss-clamscan lss-lynis; do
+		systemctl cat "${unit}.service" >/dev/null 2>&1 || continue
+		started=${SECONDS}
+		if ! systemctl start --wait "${unit}.service"; then
+			journalctl -u "${unit}.service" -n 60 --no-pager
+			exit 1
+		fi
+		echo "${unit}: $(systemctl show -p ExecMainStatus --value "${unit}.service") after $((SECONDS - started)) s, $(systemd-analyze security "${unit}.service" 2>/dev/null | tail -n 1)"
+	done'
+	group_end
+	# What Lynis would still change, as the starting point for raising the hardening index.
+	group_start "${system}: Lynis details"
+	in_target "grep -iE 'different value than expected|weak configuration state|incorrect file permissions|permissions .* (not|too)|Result: .*(unsafe|not hardened|exposed)' /var/log/lynis.log | sed -E 's/^[0-9: -]+//' | sort -u | head -n 150" || true
 	group_end
 	echo "${system}: profile ${profile} passed"
 	exit 0

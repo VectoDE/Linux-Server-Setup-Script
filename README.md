@@ -86,7 +86,8 @@ That creates the administrator `alice` with the SSH keys of the GitHub account, 
 the firewall, fail2ban, kernel hardening, AppArmor or SELinux, auditing, automatic security updates, integrity checks
 and the daily guard. Keep a second SSH session open the first time.
 
-Without a command, `sudo lss` opens a menu.
+Without a command, `sudo lss` opens a menu. On the RHEL family, sudo looks for commands only in `/usr/sbin` and
+`/usr/bin` until the `admin-user` module has added `/usr/local/sbin`; call `sudo /usr/local/sbin/lss` until then.
 
 ## Commands
 
@@ -139,8 +140,11 @@ as further module groups.
 ## Guard
 
 The `guard` module checks the server every day: it runs `lss verify`, repairs modules that fail or whose files were
-changed (`LSS_GUARD_AUTOFIX`), and reports failed services, full disks, pending security updates, a needed reboot and
-a falling Lynis index. Findings go to a webhook (Slack, Teams, Mattermost, Discord, ntfy) or by e-mail.
+changed (`LSS_GUARD_AUTOFIX`), and reports failed services, full disks, pending security updates, a needed reboot, a
+falling Lynis index and vulnerable packages (debsecan on Debian, `dnf updateinfo` on the RHEL family). It passes on
+what the daily AIDE, rkhunter and ClamAV runs found, and reports more failed SSH logins than
+`LSS_GUARD_LOGIN_THRESHOLD` with their main sources. Successful SSH logins and active fail2ban or CrowdSec bans are
+listed as notes. Findings go to a webhook (Slack, Teams, Mattermost, Discord, ntfy) or by e-mail.
 
 ## Documentation
 

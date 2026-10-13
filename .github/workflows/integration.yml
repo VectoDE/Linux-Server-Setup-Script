@@ -4,7 +4,7 @@
 
 # Installs every module on every supported distribution: install, verify, install again without a change, remove.
 # Containers run systemd as PID 1; modules that change the kernel (firewall, swap, sysctl, ...) run on the runner
-# virtual machine itself, which is thrown away afterwards.
+# virtual machine itself, which is thrown away afterwards. Everything runs on x86_64 and on arm64 (aarch64).
 name: Integration
 
 on:
@@ -24,14 +24,15 @@ concurrency:
 
 jobs:
   container:
-    name: ${{ matrix.system }} / ${{ matrix.group }}
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / ${{ matrix.group }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
         group: [base, security, scanners]
+        arch: [x64, arm64]
         include:
           - group: base
             modules: system time admin-user tools logging
@@ -55,9 +56,13 @@ jobs:
           tests/integration/run.sh "$SYSTEM" "${modules[@]}"
 
   host:
-    name: ubuntu-24.04 VM / kernel
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.runner == 'ubuntu-24.04' && 'ubuntu-24.04 VM' || 'ubuntu-24.04 arm64 VM' }} / kernel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -69,9 +74,14 @@ jobs:
         run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard
 
   profile:
-    name: ubuntu-24.04 VM / profile minimal-secure
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.runner }} VM / profile minimal-secure
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-26.04 runners are in public preview (October 2026).
+        runner: [ubuntu-24.04, ubuntu-26.04]
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -80,6 +90,49 @@ jobs:
         with:
           persist-credentials: false
       # The whole profile at once, as on a real server, then the Lynis audit. minimal-secure reached a hardening index
-      # of 75 here (October 2026); the minimum leaves room for small changes between Lynis versions.
+      # of 78 here (October 2026); the runner image itself (Docker, PostgreSQL, its sudoers file) costs the rest. The
+      # minimum leaves room for small changes between Lynis versions.
       - name: Install the profile, verify, reinstall, audit
-        run: tests/integration/run.sh host --profile minimal-secure 70
+        run: tests/integration/run.sh host --profile minimal-secure 75
+
+  vm:
+    name: ${{ matrix.system }} VM / ${{ matrix.run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [debian-12, debian-13, rocky-9, almalinux-10]
+        run: [kernel, profile minimal-secure]
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install QEMU and allow access to KVM
+        run: |
+          # Quiet: errors still reach the log, the man-db trigger and needrestart summaries do not.
+          sudo apt-get -qq update
+          sudo NEEDRESTART_SUSPEND=1 apt-get -qq install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils >/dev/null
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # Kernel modules as on the runner VM, then the whole profile with a Lynis audit. minimal-secure reached a
+      # hardening index of 87 on Debian 12 and 85 on Debian 13, 85 on Rocky Linux 9 and 84 on AlmaLinux 10 (October
+      # 2026). The minimums leave room for small changes between Lynis versions.
+      - name: Install, verify, reinstall, remove
+        env:
+          SYSTEM: vm-${{ matrix.system }}
+          RUN: ${{ matrix.run }}
+        run: |
+          if [[ $RUN == kernel ]]; then
+            tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard
+          else
+            case $SYSTEM in
+            vm-debian-*) minimum=82 ;;
+            *) minimum=80 ;;
+            esac
+            tests/integration/run.sh "$SYSTEM" --profile minimal-secure "$minimum"
+          fi

@@ -82,6 +82,12 @@ mod_install() {
 	return
 }
 
+# sudo-rs (the default sudo from Ubuntu 25.10 on) knows only part of the sudoers options and logs to the journal.
+_admin_sudo_rs() {
+	sudo --version 2>/dev/null | grep -q '^sudo-rs'
+	return
+}
+
 # Writes a sudoers file only after visudo accepted it; a broken sudoers file would lock every administrator out.
 _admin_sudoers() {
 	local dest=$1 content=$2 tmp
@@ -134,10 +140,16 @@ mod_configure() {
 
 	sudoers="# Managed by lss (module admin-user).
 Defaults use_pty
-Defaults logfile=\"/var/log/sudo.log\"
 Defaults timestamp_timeout=5
 Defaults passwd_tries=3
 Defaults env_reset"
+	if ! _admin_sudo_rs; then
+		sudoers+=$'\n''Defaults logfile="/var/log/sudo.log"'
+	fi
+	# The RHEL family leaves /usr/local/sbin out of the sudo path, so "sudo lss" would not find lss.
+	if os_is_rhel; then
+		sudoers+=$'\n''Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+	fi
 	if opt_bool sudo_nopasswd; then
 		sudoers+=$'\n'"${name} ALL=(ALL:ALL) NOPASSWD: ALL"
 	fi

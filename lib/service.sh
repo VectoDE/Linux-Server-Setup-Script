@@ -105,6 +105,27 @@ svc_wait_port() {
 	return 1
 }
 
+# svc_scanner_sandbox full|strict [PATH...]: [Service] lines that confine lss's own scanner units. They read the whole
+# system but write only to the PATHs (with strict) or below /var (with full). The real /tmp, /proc/kallsyms, the
+# kernel modules and the kernel log stay visible: a private /tmp would hide it from ClamAV and rkhunter, and rkhunter,
+# AIDE and Lynis check the others.
+svc_scanner_sandbox() {
+	local level=$1 path nnp=yes
+	shift
+	# Under SELinux a scanner enters its own domain (aide_t, antivirus_t) on exec. NoNewPrivileges blocks that change;
+	# the scanner then stays in init_t, which may not write its reports.
+	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+		nnp=no
+	fi
+	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=${nnp}" ProtectControlGroups=yes \
+		ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
+		LockPersonality=yes SystemCallArchitectures=native
+	for path in "$@"; do
+		printf 'ReadWritePaths=-%s\n' "${path}"
+	done
+	return
+}
+
 # svc_unit UNIT: writes /etc/systemd/system/UNIT (a unit of lss's own) from stdin and reloads systemd when it
 # changed.
 svc_unit() {

@@ -7,15 +7,20 @@
 # run daily by lss-guard.timer. Settings come from /etc/lss/guard.conf (KEY=value lines, parsed, never sourced).
 #
 # Checks: lss verify of every installed module (failed modules and files changed outside lss are configured again
-# when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, the Lynis hardening index.
+# when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, vulnerable packages (debsecan
+# on Debian, dnf updateinfo on the RHEL family), failed SSH logins and active bans, the results of the daily AIDE,
+# rkhunter and ClamAV runs, the Lynis hardening index.
 # Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
+# Notes (logins, bans) are part of the summary but do not make the run fail.
 set -Eeuo pipefail
 shopt -s inherit_errexit
 
 CONF=${LSS_GUARD_CONF:-/etc/lss/guard.conf}
 LSS=${LSS_GUARD_LSS:-/usr/local/sbin/lss}
 STATE_DIR=${LSS_STATE_DIR:-/var/lib/lss}
-declare -a FINDINGS=() FIXED=()
+OS_RELEASE=${LSS_OS_RELEASE:-/etc/os-release}
+# Global also when the script is sourced inside a function (the unit tests).
+declare -ga FINDINGS=() FIXED=() NOTES=()
 
 setting() {
 	local key=$1 default=${2-} line
@@ -30,9 +35,27 @@ setting() {
 	printf '%s' "${default}"
 }
 
+# Findings can quote text that local users control (file names, log lines). Control characters are replaced, so such
+# text cannot add lines to the summary, end the mail early or forge journal entries.
+clean() {
+	local text=$1
+	printf '%s' "${text//[[:cntrl:]]/?}"
+	return
+}
+
 finding() {
-	FINDINGS+=("$1")
-	logger -t lss-guard -p auth.warning -- "$1"
+	local text
+	text=$(clean "$1")
+	FINDINGS+=("${text}")
+	logger -t lss-guard -p auth.warning -- "${text}"
+	return
+}
+
+note() {
+	local text
+	text=$(clean "$1")
+	NOTES+=("${text}")
+	logger -t lss-guard -p auth.info -- "${text}"
 	return
 }
 
@@ -92,6 +115,127 @@ check_updates() {
 	return
 }
 
+# Failed SSH logins of the last 24 hours (a finding above GUARD_LOGIN_THRESHOLD, with the busiest sources) and the
+# successful logins (a note, so an unexpected one stands out).
+check_logins() {
+	local threshold log failed count sources accepted
+	threshold=$(setting GUARD_LOGIN_THRESHOLD 50)
+	# _COMM and _UID are set by journald itself; a syslog identifier (-t sshd) could be forged with logger.
+	log=$(journalctl --since -24h --no-pager -o cat _COMM=sshd _COMM=sshd-session _UID=0 2>/dev/null) || return 0
+	failed=$(grep -E 'Failed (password|publickey|keyboard-interactive)|Invalid user|maximum authentication attempts' <<<"${log}" || true)
+	count=0
+	[[ -z ${failed} ]] || count=$(wc -l <<<"${failed}")
+	if ((count > threshold)); then
+		sources=$(grep -oE 'from [0-9a-fA-F.:]+' <<<"${failed}" | awk '{ print $2 }' | sort | uniq -c | sort -rn |
+			head -n 3 | awk '{ printf "%s%s (%s)", sep, $2, $1; sep = ", " }')
+		finding "${count} failed SSH logins in the last 24 hours, most from ${sources:-unknown sources}."
+	fi
+	accepted=$(grep -oE 'Accepted [a-z-]+ for [^ ]+ from [0-9a-fA-F.:]+' <<<"${log}" | awk '{ print $4 " from " $6 }' |
+		sort | uniq -c | sort -rn | awk '{ printf "%s%s %s %s (%s)", sep, $2, $3, $4, $1; sep = ", " }' || true)
+	if [[ -n ${accepted} ]]; then
+		note "SSH logins in the last 24 hours: ${accepted}."
+	fi
+	return
+}
+
+# Addresses that fail2ban or CrowdSec block right now.
+check_bans() {
+	local count
+	if command -v fail2ban-client >/dev/null 2>&1; then
+		count=$(fail2ban-client banned 2>/dev/null | grep -oE "'([0-9]{1,3}\.){3}[0-9]{1,3}'|'[0-9a-fA-F]*:[0-9a-fA-F:]+'" |
+			wc -l || true)
+		if ((count > 0)); then
+			note "fail2ban currently bans ${count} address(es)."
+		fi
+	fi
+	if command -v cscli >/dev/null 2>&1; then
+		count=$(cscli decisions list -o raw 2>/dev/null | tail -n +2 | grep -c . || true)
+		if ((count > 0)); then
+			note "CrowdSec currently blocks ${count} address(es)."
+		fi
+	fi
+	return
+}
+
+# Vulnerabilities in installed packages: debsecan on Debian (Ubuntu is covered by the security updates check), the
+# advisories of severity Critical and Important on the RHEL family.
+check_vulnerabilities() {
+	local codename all fixed count
+	if command -v debsecan >/dev/null 2>&1; then
+		codename=$(sed -n 's/^VERSION_CODENAME=//p' "${OS_RELEASE}" 2>/dev/null | tr -d '"')
+		all=$(debsecan --suite "${codename}" --format summary 2>/dev/null | grep -c 'high urgency' || true)
+		fixed=$(debsecan --suite "${codename}" --only-fixed --format summary 2>/dev/null | grep -c 'high urgency' || true)
+		if ((fixed > 0)); then
+			finding "${fixed} high-urgency vulnerabilities in installed packages have a fix: install the security updates."
+		fi
+		if ((all > fixed)); then
+			note "$((all - fixed)) high-urgency vulnerabilities in installed packages have no fix yet (debsecan)."
+		fi
+	elif command -v dnf >/dev/null 2>&1; then
+		count=$(dnf -q updateinfo list --security --sec-severity Critical --sec-severity Important 2>/dev/null |
+			grep -c . || true)
+		if ((count > 0)); then
+			finding "${count} critical or important security advisories apply (dnf updateinfo list --security)."
+		fi
+	fi
+	return
+}
+
+# scan_run UNIT: prints "STATUS EPOCH INVOCATION" of the last run of UNIT.service; nothing when it never ran.
+scan_run() {
+	local unit=$1 status exited invocation epoch
+	systemctl cat "${unit}.service" >/dev/null 2>&1 || return 0
+	exited=$(systemctl show -p ExecMainExitTimestamp --value "${unit}.service" 2>/dev/null || true)
+	[[ -n ${exited} && ${exited} != n/a ]] || return 0
+	status=$(systemctl show -p ExecMainStatus --value "${unit}.service" 2>/dev/null || true)
+	invocation=$(systemctl show -p InvocationID --value "${unit}.service" 2>/dev/null || true)
+	epoch=$(date -d "${exited}" +%s 2>/dev/null || echo 0)
+	printf '%s %s %s\n' "${status:-0}" "${epoch}" "${invocation:--}"
+	return
+}
+
+# The daily scanners report what they find through their exit status, which their units accept as success: AIDE 1-7
+# for added, removed or changed files, rkhunter 1 for warnings, clamscan 1 for infected files.
+check_scanners() {
+	local entry unit label run status epoch invocation output when count detail
+	for entry in lss-aide-check:AIDE lss-rkhunter:rkhunter lss-clamscan:ClamAV; do
+		unit=${entry%%:*}
+		label=${entry#*:}
+		run=$(scan_run "${unit}")
+		[[ -n ${run} ]] || continue
+		read -r status epoch invocation <<<"${run}"
+		when=$(date -d "@${epoch}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown)
+		if ((epoch < $(date +%s) - 2 * 86400)); then
+			finding "The daily ${label} check has not run since ${when} (systemctl status ${unit}.timer)."
+		fi
+		if [[ ! ${status} =~ ^[0-9]+$ ]] || ((status == 0)); then
+			continue
+		fi
+		output=''
+		if [[ ${invocation} != - ]]; then
+			output=$(journalctl --no-pager -o cat "_SYSTEMD_INVOCATION_ID=${invocation}" 2>/dev/null || true)
+		fi
+		case ${label} in
+		AIDE)
+			detail=$(awk -F: '/^ *(Added|Removed|Changed) entries/ { n = $2; gsub(/[^0-9]/, "", n); split($1, w, " "); printf "%s%s %s", sep, n, tolower(w[1]); sep = ", " }' <<<"${output}")
+			finding "AIDE found changed files on ${when}${detail:+ (${detail})}: review them with journalctl -u ${unit}, then accept them by rebuilding the database (aideinit --yes --force on Debian and Ubuntu, aide --init and moving aide.db.new.gz to aide.db.gz in /var/lib/aide on the RHEL family)."
+			;;
+		rkhunter)
+			count=$(grep -c '^Warning:' <<<"${output}" || true)
+			detail=$(grep -m 1 '^Warning:' <<<"${output}" | cut -c 10-120 || true)
+			finding "rkhunter reported ${count} warning(s) on ${when}${detail:+, the first: ${detail}} (journalctl -u ${unit})."
+			;;
+		ClamAV)
+			count=$(grep -c ' FOUND$' <<<"${output}" || true)
+			detail=$(grep ' FOUND$' <<<"${output}" | head -n 3 | sed 's/: .* FOUND$//' | paste -sd ',' - | sed 's/,/, /g' || true)
+			finding "ClamAV found ${count} infected file(s) on ${when}${detail:+: ${detail}} (journalctl -u ${unit})."
+			;;
+		*) ;;
+		esac
+	done
+	return
+}
+
 check_lynis() {
 	local minimum last
 	minimum=$(setting GUARD_LYNIS_MIN 0)
@@ -130,7 +274,7 @@ notify() {
 	fi
 	if [[ -n ${email} ]] && command -v sendmail >/dev/null 2>&1; then
 		printf 'To: %s\nSubject: [lss guard] %s\n\n%s\n' "${email}" "$(hostname -f 2>/dev/null || hostname)" "${summary}" |
-			sendmail -t || logger -t lss-guard -p auth.err -- "Mail delivery failed"
+			sendmail -t -i || logger -t lss-guard -p auth.err -- "Mail delivery failed"
 	fi
 	return
 }
@@ -144,13 +288,20 @@ main() {
 	check_units
 	check_disks
 	check_updates
+	check_vulnerabilities
+	check_logins
+	check_bans
+	check_scanners
 	check_lynis
 	local summary host
 	host=$(hostname -f 2>/dev/null || hostname)
 	if [[ ${#FINDINGS[@]} -eq 0 && ${#FIXED[@]} -eq 0 ]]; then
 		logger -t lss-guard -p auth.info -- "All checks passed"
 		if [[ $(setting GUARD_DAILY_SUMMARY false) == true ]]; then
-			notify "lss guard on ${host}: all checks passed."
+			summary="lss guard on ${host}: all checks passed."
+			local line
+			for line in "${NOTES[@]}"; do summary+=$'\n'"- ${line}"; done
+			notify "${summary}"
 		fi
 		return 0
 	fi
@@ -158,8 +309,12 @@ main() {
 	local line
 	for line in "${FINDINGS[@]}"; do summary+=$'\n'"- ${line}"; done
 	for line in "${FIXED[@]}"; do summary+=$'\n'"- Restored module ${line} (it had been changed outside lss)."; done
+	for line in "${NOTES[@]}"; do summary+=$'\n'"- ${line}"; done
 	notify "${summary}"
 	[[ ${#FINDINGS[@]} -eq 0 ]]
 }
 
-main "$@"
+# The unit tests source this file without running it.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi

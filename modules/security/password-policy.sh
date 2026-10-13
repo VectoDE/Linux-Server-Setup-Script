@@ -27,7 +27,7 @@ mod_check() {
 }
 
 mod_install() {
-	pkg_install_family "libpam-pwquality libpam-modules" "libpwquality authselect"
+	pkg_install_family "libpam-pwquality libpam-modules libpam-tmpdir" "libpwquality authselect"
 	return
 }
 
@@ -119,7 +119,7 @@ EOF
 		_pp_faillock_rhel
 	fi
 	_pp_login_defs PASS_MAX_DAYS "$(opt_int max_days)" PASS_MIN_DAYS 1 PASS_WARN_AGE 14 UMASK 027 \
-		ENCRYPT_METHOD "$(_pp_hash)"
+		ENCRYPT_METHOD "$(_pp_hash)" SHA_CRYPT_MIN_ROUNDS 100000 SHA_CRYPT_MAX_ROUNDS 100000 YESCRYPT_COST_FACTOR 7
 	local timeout
 	timeout=$(opt_int shell_timeout)
 	file_write 0644 root:root "${PP_PROFILE}" < <(
@@ -161,6 +161,7 @@ mod_verify() {
 }
 
 mod_remove() {
+	pkg_remove_family libpam-tmpdir ''
 	file_remove "${PP_PWQUALITY}"
 	file_remove "${PP_PROFILE}"
 	if os_is_debian; then

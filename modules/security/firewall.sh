@@ -61,7 +61,12 @@ _fw_defaults_firewalld() {
 	fi
 	for service in cockpit dhcpv6-client ssh; do
 		if _fw_firewalld --zone=public --query-service="${service}" >/dev/null 2>&1; then
-			_fw_firewalld --zone=public --remove-service="${service}" >/dev/null
+			# firewall-offline-cmd reads --remove-service as a lokkit option, which cannot be combined with --zone.
+			if svc_is_active firewalld; then
+				firewall-cmd --permanent --zone=public --remove-service="${service}" >/dev/null
+			else
+				firewall-offline-cmd --zone=public --remove-service-from-zone="${service}" >/dev/null
+			fi
 			files_note_change "firewalld: closed service ${service}"
 		fi
 	done
@@ -69,7 +74,7 @@ _fw_defaults_firewalld() {
 }
 
 mod_configure() {
-	local ssh_port spec
+	local ssh_port spec i
 	ssh_port=$(fw_ssh_port)
 	# SSH first: recorded and applied before the firewall is switched on.
 	fw_allow "${ssh_port}/tcp"
@@ -91,6 +96,11 @@ mod_configure() {
 			svc_enable ufw
 		else
 			svc_enable firewalld
+			# firewall-cmd prints a waiting notice while firewalld is still starting.
+			for ((i = 0; i < 30; i++)); do
+				firewall-cmd --state >/dev/null 2>&1 && break
+				sleep 1
+			done
 		fi
 		files_note_change "firewall enabled"
 		_fw_is_open "${ssh_port}" || die "firewall: SSH port ${ssh_port} is not open; the firewall stays off."
@@ -121,7 +131,7 @@ mod_verify() {
 		ufw status verbose | grep -q 'Default: deny (incoming)' || die "firewall: inbound traffic is not denied by default."
 	else
 		[[ $(firewall-cmd --get-default-zone) == public ]] || die "firewall: default zone is not public."
-		[[ $(firewall-cmd --zone=public --get-target) =~ ^(default|DROP|REJECT|%%REJECT%%)$ ]] ||
+		[[ $(firewall-cmd --permanent --zone=public --get-target) =~ ^(default|DROP|REJECT|%%REJECT%%)$ ]] ||
 			die "firewall: the public zone accepts everything."
 	fi
 	for spec in $(opt allow); do

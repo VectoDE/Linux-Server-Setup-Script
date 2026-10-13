@@ -85,10 +85,29 @@ _system_cron() {
 	return
 }
 
+# Only root reads the system crontab and the cron directories (CIS 5.1.2 to 5.1.7, Lynis SCHD-7704).
+SYSTEM_CRON_PATHS="/etc/crontab:600 /etc/cron.hourly:700 /etc/cron.daily:700 /etc/cron.weekly:700 /etc/cron.monthly:700 /etc/cron.d:700"
+
+_system_cron_permissions() {
+	local entry path mode
+	for entry in ${SYSTEM_CRON_PATHS}; do
+		path=${entry%:*}
+		mode=${entry#*:}
+		[[ -e ${path} ]] || continue
+		if [[ $(stat -c '%a %U %G' "${path}") != "${mode} root root" ]]; then
+			chown root:root "${path}"
+			chmod "${mode}" "${path}"
+			files_note_change "permissions of ${path}"
+		fi
+	done
+	return
+}
+
 mod_configure() {
 	_system_hostname
 	_system_locale
 	svc_enable "$(_system_cron)"
+	_system_cron_permissions
 	return
 }
 
@@ -104,11 +123,16 @@ mod_verify() {
 	fi
 	getent hosts "$(hostname)" >/dev/null || die "system: the host name $(hostname) does not resolve."
 	svc_is_active "$(_system_cron)" || die "system: cron is not running."
+	local entry
+	for entry in ${SYSTEM_CRON_PATHS}; do
+		[[ ! -e ${entry%:*} || $(stat -c '%a' "${entry%:*}") == "${entry#*:}" ]] ||
+			die "system: ${entry%:*} must be mode ${entry#*:}."
+	done
 	return
 }
 
 # Base packages, host name and locale stay: other software depends on them, and they were set on purpose.
 mod_remove() {
-	log_info "system: base packages, host name and locale stay as they are."
+	log_info "system: base packages, host name, locale and the cron permissions stay as they are."
 	return
 }
