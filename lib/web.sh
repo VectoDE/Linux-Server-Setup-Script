@@ -29,6 +29,9 @@ WEB_ADMIN_PORT=8090
 WEB_ADMIN_HTPASSWD=/etc/lss/web/admin.htpasswd
 WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
 # Mozilla "intermediate" (TLS 1.2 and 1.3) without the DHE suites, which would need a DH parameter file.
+WEB_CERT_HOOK=/etc/letsencrypt/renewal-hooks/deploy/lss-deploy
+# CA certificate of a private ACME server (LSS_TLS_CA_BUNDLE, for example Pebble or step-ca); certbot trusts it.
+WEB_ACME_CA=/etc/letsencrypt/lss-acme-ca.pem
 WEB_TLS_CIPHERS=ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
 
 # The installed web server (nginx, apache or caddy), or nothing.
@@ -143,6 +146,8 @@ web_cert_has_ocsp() {
 # real certificate exists. Renewed when it expires within 30 days; the key is readable by WEB_GROUP.
 web_default_cert() {
 	local dir="${WEB_TLS_DIR}/default" name tmp
+	# The tls module's certificate for the host names (lineage "default") takes this place; certbot renews it.
+	[[ ! -s /etc/letsencrypt/live/default/fullchain.pem ]] || return 0
 	if [[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] &&
 		openssl x509 -checkend $((30 * 86400)) -noout -in "${dir}/fullchain.pem" >/dev/null 2>&1; then
 		return 0
@@ -158,8 +163,6 @@ web_default_cert() {
 	rm -rf -- "${tmp}"
 	return
 }
-
-WEB_CERT_HOOK=/etc/letsencrypt/renewal-hooks/deploy/lss-deploy
 
 # web_cert_placeholder NAME: until NAME has a certificate of its own, its directory holds a copy of the default
 # certificate, so a site can point at WEB_TLS_DIR/NAME from the start and keeps that path after the real one arrives.
@@ -197,8 +200,10 @@ web_cert_issue() {
 		for domain in "$@"; do
 			args+=(-d "${domain}")
 		done
+		local -a env=()
+		[[ ! -s ${WEB_ACME_CA} ]] || env=("REQUESTS_CA_BUNDLE=${WEB_ACME_CA}")
 		log_info "Requesting a certificate for $*"
-		log_command certbot certonly --cert-name "${name}" "${args[@]}" ||
+		log_command env "${env[@]}" certbot certonly --cert-name "${name}" "${args[@]}" ||
 			die "tls: the ACME server refused a certificate for $*; the names must resolve to this server and port 80 must be reachable."
 		files_note_change "certificate ${name}"
 	fi
