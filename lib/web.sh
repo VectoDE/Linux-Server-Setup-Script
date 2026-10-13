@@ -418,8 +418,8 @@ _web_body_apache() {
 		cat <<EOF
 	ProxyPreserveHost On
 	RequestHeader set X-Forwarded-Proto "https"
-	ProxyPass / ${target}
-	ProxyPassReverse / ${target}
+	ProxyPass / ${target%/}/ upgrade=websocket
+	ProxyPassReverse / ${target%/}/
 EOF
 		;;
 	*)
@@ -488,8 +488,8 @@ _web_admin_apache() {
 	if [[ ${kind} == proxy ]]; then
 		cat <<EOF
 <Location /${path}/>
-	ProxyPass ${target}
-	ProxyPassReverse ${target}
+	ProxyPass ${target%/}/${path}/
+	ProxyPassReverse ${target%/}/${path}/
 	RequestHeader set X-Script-Name /${path}
 </Location>
 EOF

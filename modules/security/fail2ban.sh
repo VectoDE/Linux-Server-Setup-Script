@@ -81,6 +81,8 @@ bantime = 1w
 findtime = 1d
 EOF
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	# Jails for the web server, when one is installed (lib/web.sh).
+	web_ids_configure
 	# The Debian default jail reads /var/log/auth.log, which does not exist on journal-only systems.
 	fail2ban-client --test >/dev/null 2>&1 || {
 		fail2ban-client --test >&2 || true

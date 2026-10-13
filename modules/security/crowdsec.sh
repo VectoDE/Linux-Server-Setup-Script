@@ -58,6 +58,8 @@ EOF
 		cscli console enroll --name "$(hostname)" "${key}" >/dev/null
 		files_note_change "crowdsec console enrolment"
 	fi
+	# Web server logs, when a web server is installed (lib/web.sh).
+	web_ids_configure
 	# A restart, not a reload: the reload (SIGHUP) restarts the local API in the background, and the bouncer and
 	# the checks below would race it.
 	if [[ ${changed} == 1 || $(files_changes_of crowdsec) != 0 ]]; then
