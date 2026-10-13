@@ -86,3 +86,12 @@ svc_wait_port() {
 	done
 	return 1
 }
+
+# svc_unit UNIT: writes /etc/systemd/system/UNIT (a unit of lss's own) from stdin and reloads systemd when it
+# changed.
+svc_unit() {
+	file_write 0644 root:root "/etc/systemd/system/$1"
+	if [[ ${LSS_FILE_CHANGED} == 1 ]]; then
+		svc_daemon_reload
+	fi
+}

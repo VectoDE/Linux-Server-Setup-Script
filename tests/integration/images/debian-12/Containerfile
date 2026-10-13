@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# debian-12 with systemd as PID 1, the way a minimal cloud server boots. Used by tests/integration/run.sh.
+FROM debian:12@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858
+
+RUN apt-get update -q \
+	&& DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+		systemd systemd-sysv dbus ca-certificates curl gnupg iproute2 procps openssh-server sudo cron rsyslog \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& rm -f /lib/systemd/system/multi-user.target.wants/getty* /etc/systemd/system/getty.target.wants/*
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

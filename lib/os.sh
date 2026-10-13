@@ -96,3 +96,9 @@ os_deb_arch() {
 	*) printf '%s' "${OS_ARCH}" ;;
 	esac
 }
+
+# True inside a container (Docker, Podman, LXC, systemd-nspawn). Modules that change the kernel or block devices
+# refuse to run there, because the change would hit the host or fail.
+os_in_container() {
+	systemd-detect-virt --container --quiet 2>/dev/null
+}

@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# rocky-9 with systemd as PID 1, the way a minimal cloud server boots. Used by tests/integration/run.sh.
+FROM rockylinux/rockylinux:9@sha256:8101994123cf3d0a8fee517bee7f39e555c7d92bd2d9eb3303cc988a0eeed00f
+
+RUN dnf -y -q --allowerasing install systemd dbus ca-certificates curl gnupg2 iproute procps-ng openssh-server sudo cronie \
+		policycoreutils which tar \
+	&& dnf clean all
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

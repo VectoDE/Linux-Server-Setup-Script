@@ -212,3 +212,35 @@ module_remove() {
 	state_forget "${name}"
 	log_ok "${name}: removed"
 }
+
+# opt OPTION: value of an option of the module running this step (LSS_<MODULE>_<OPTION>), with the default from the
+# module's MOD_OPTIONS. Unknown options are a programming error and stop the step.
+opt() {
+	local wanted=$1 key default _description
+	while IFS='|' read -r key default _description; do
+		if [[ ${key} == "${wanted}" ]]; then
+			config_option "${LSS_MODULE}" "${key}" "${default}"
+			return 0
+		fi
+	done <<<"${MOD_OPTIONS:-}"
+	die "${LSS_MODULE}: unknown option '${wanted}'."
+}
+
+# opt_bool OPTION: true for 1/true/yes/on, false for 0/false/no/off/empty; anything else stops the step.
+opt_bool() {
+	local value
+	value=$(opt "$1") || die "${LSS_MODULE}: unknown option '$1'."
+	case ${value,,} in
+	1 | true | yes | on) return 0 ;;
+	0 | false | no | off | '') return 1 ;;
+	*) die "$(config_key "${LSS_MODULE}" "$1") must be true or false, got '${value}'." ;;
+	esac
+}
+
+# opt_int OPTION: prints the option after checking it is a non-negative integer.
+opt_int() {
+	local value
+	value=$(opt "$1") || die "${LSS_MODULE}: unknown option '$1'."
+	[[ ${value} =~ ^[0-9]+$ ]] || die "$(config_key "${LSS_MODULE}" "$1") must be a number, got '${value}'."
+	printf '%s' "${value}"
+}

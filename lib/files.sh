@@ -145,3 +145,32 @@ files_drifted() {
 files_forget() {
 	rm -f -- "${LSS_STATE_DIR}/managed/$1"
 }
+
+# file_ensure_lines MODE OWNER:GROUP DEST, lines on stdin: appends the lines DEST is missing, for files lss shares
+# with the administrator (authorized_keys, ...). Not checksummed, because others may change the file.
+file_ensure_lines() {
+	local mode=$1 owner=$2 dest=$3 line
+	local -a missing=()
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		if [[ ! -f ${dest} ]] || ! grep -qxF -- "${line}" "${dest}"; then
+			missing+=("${line}")
+		fi
+	done
+	LSS_FILE_CHANGED=0
+	if [[ ${#missing[@]} -gt 0 ]]; then
+		files_backup "${dest}"
+		mkdir -p "$(dirname "${dest}")"
+		printf '%s\n' "${missing[@]}" >>"${dest}"
+		files_note_change "added ${#missing[@]} line(s) to ${dest}"
+		# shellcheck disable=SC2034 # read by callers
+		LSS_FILE_CHANGED=1
+	fi
+	if [[ $(stat -c '%a %U:%G' "${dest}" 2>/dev/null) != "${mode#0} ${owner}" ]]; then
+		chmod "${mode}" "${dest}"
+		chown "${owner}" "${dest}"
+	fi
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon -F "${dest}" 2>/dev/null || true
+	fi
+}
