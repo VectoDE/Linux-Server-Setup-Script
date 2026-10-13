@@ -67,6 +67,19 @@ EOF
 	return
 }
 
+# _vhost_drop NAME: removes a site with its certificate, so certbot neither renews it nor leaves it behind.
+_vhost_drop() {
+	local name=$1
+	web_site_remove "${name}"
+	file_remove "${WEB_TLS_DIR}/${name}"
+	if [[ -d /etc/letsencrypt/live/${name} ]] && command -v certbot >/dev/null 2>&1; then
+		log_command certbot delete --non-interactive --cert-name "${name}" ||
+			die "vhost: certbot could not delete the certificate ${name}."
+		files_note_change "certificate ${name} deleted"
+	fi
+	return
+}
+
 mod_configure() {
 	local spec name previous current=''
 	local -A wanted=()
@@ -83,7 +96,7 @@ mod_configure() {
 	# Sites that were removed from LSS_VHOST_SITES since the last run.
 	previous=$(state_get vhost sites)
 	for name in ${previous}; do
-		[[ -n ${wanted[${name}]+x} ]] || web_site_remove "${name}"
+		[[ -n ${wanted[${name}]+x} ]] || _vhost_drop "${name}"
 	done
 	state_set vhost sites "${current% }"
 	if [[ $(files_changes_of vhost) != 0 ]]; then
@@ -125,8 +138,7 @@ mod_verify() {
 mod_remove() {
 	local name
 	for name in $(state_get vhost sites); do
-		web_site_remove "${name}"
-		file_remove "${WEB_TLS_DIR}/${name}"
+		_vhost_drop "${name}"
 	done
 	web_reload
 	return
