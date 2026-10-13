@@ -67,3 +67,18 @@ jobs:
           persist-credentials: false
       - name: Install, verify, reinstall, remove
         run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard
+
+  profile:
+    name: ubuntu-24.04 VM / profile minimal-secure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The whole profile at once, as on a real server, then the Lynis audit with a minimum hardening index.
+      - name: Install the profile, verify, reinstall, audit
+        run: tests/integration/run.sh host --profile minimal-secure 0

@@ -160,6 +160,11 @@ load_settings() {
 		[[ ${LSS_PROFILE} =~ ^[a-z0-9-]+$ && -f ${file} ]] || die "Unknown profile '${LSS_PROFILE}'. See 'lss profiles'."
 		config_load_profile "${file}"
 	fi
+	local unknown
+	unknown=$(config_unknown_keys)
+	for unknown in ${unknown}; do
+		log_warn "${unknown} is not a setting of any module; check the spelling ('lss info MODULE' lists them)."
+	done
 }
 
 confirm() {

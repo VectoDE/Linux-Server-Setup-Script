@@ -213,6 +213,22 @@ module_remove() {
 	log_ok "${name}: removed"
 }
 
+# config_unknown_keys: prints the given settings that no module reads, usually typos, one per line.
+config_unknown_keys() {
+	# LSS_WIREGUARD_NETWORK is read by the firewall for the vpn scope before the wireguard module exists.
+	local -A known=([LSS_MODULES]=1 [LSS_MODE]=1 [LSS_WIREGUARD_NETWORK]=1)
+	local name key _default _description
+	while IFS= read -r name; do
+		known[$(config_key "${name}" mode)]=1
+		while IFS='|' read -r key _default _description; do
+			[[ -z ${key} ]] || known[$(config_key "${name}" "${key}")]=1
+		done < <(module_meta "${name}" MOD_OPTIONS)
+	done < <(module_list)
+	for key in "${!LSS_CFG_SET[@]}" "${!LSS_CFG_FILE[@]}" "${!LSS_CFG_PROFILE[@]}"; do
+		[[ -n ${known[${key}]+x} ]] || printf '%s\n' "${key}"
+	done | sort -u
+}
+
 # opt OPTION: value of an option of the module running this step (LSS_<MODULE>_<OPTION>), with the default from the
 # module's MOD_OPTIONS. Unknown options are a programming error and stop the step.
 opt() {

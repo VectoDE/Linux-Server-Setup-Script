@@ -182,3 +182,11 @@ setup() {
 	run opt_int missing
 	[[ ${output} == *"unknown option"* ]]
 }
+
+@test "settings that no module reads are reported" {
+	LSS_CFG_FILE=([LSS_ALPHA_VALUE]=x [LSS_ALPHA_VALEU]=y [LSS_MODULES]=alpha)
+	LSS_CFG_SET=([LSS_BETA_MODE]=docker [LSS_NOPE]=1)
+	run config_unknown_keys
+	[ "${status}" -eq 0 ]
+	[ "${output}" = $'LSS_ALPHA_VALEU\nLSS_NOPE' ]
+}

@@ -4,17 +4,19 @@
 # SPDX-License-Identifier: MIT
 
 # Integration test: tests/integration/run.sh SYSTEM|host MODULE...
+#                   tests/integration/run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]
 #
 # For every module: install (with its requirements), verify, install again (every module in the run must report
-# "unchanged"), and remove. SYSTEM is a directory in tests/integration/images (a systemd container); "host" runs on
-# the machine itself (for modules that need a real kernel, used on throwaway CI virtual machines only).
+# "unchanged"), and remove. With --profile: install the whole profile, verify, install again, then run the Lynis
+# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container);
+# "host" runs on the machine itself (for modules that need a real kernel, used on throwaway CI virtual machines only).
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 system=${1:?usage: run.sh SYSTEM|host MODULE...}
 shift
 [[ $# -gt 0 ]] || {
-	echo "usage: run.sh SYSTEM|host MODULE..." >&2
+	echo "usage: run.sh SYSTEM|host MODULE... | --profile NAME [LYNIS_MIN_INDEX]" >&2
 	exit 2
 }
 settings=tests/integration/settings.conf
@@ -48,6 +50,24 @@ start_target() {
 	fi
 	in_target 'ln -sf /opt/lss-src/lss /usr/local/sbin/lss && mkdir -p /etc/lss'
 	in_target "cat > /etc/lss/lss.conf" <"${settings}"
+	# A setting that no module reads is a typo in the test settings.
+	if in_target 'lss --no-color list 2>&1' | grep 'is not a setting'; then
+		exit 1
+	fi
+}
+
+# Fails when a second install changed anything: every step must be idempotent.
+install_again() {
+	local second
+	second=$(in_target "lss --yes --no-color install $* 2>&1") || {
+		printf '%s\n' "${second}"
+		exit 1
+	}
+	printf '%s\n' "${second}"
+	if grep -E 'OK +[a-z0-9-]+: done' <<<"${second}"; then
+		echo "Second install of $* changed something; modules must be idempotent." >&2
+		exit 1
+	fi
 }
 
 stop_target() {
@@ -66,19 +86,25 @@ stop_target() {
 trap stop_target EXIT
 start_target
 
+if [[ $1 == --profile ]]; then
+	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
+	echo "::group::${system}: profile ${profile}"
+	in_target "lss --yes --no-color install --profile ${profile}"
+	in_target "lss --yes --no-color verify"
+	install_again --profile "${profile}"
+	echo "::endgroup::"
+	echo "::group::${system}: Lynis audit"
+	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
+	echo "::endgroup::"
+	echo "${system}: profile ${profile} passed"
+	exit 0
+fi
+
 for module in "$@"; do
 	echo "::group::${system}: ${module}"
 	in_target "lss --yes --no-color install ${module}"
 	in_target "lss --yes --no-color verify"
-	second=$(in_target "lss --yes --no-color install ${module} 2>&1") || {
-		printf '%s\n' "${second}"
-		exit 1
-	}
-	printf '%s\n' "${second}"
-	if grep -E 'OK +[a-z0-9-]+: done' <<<"${second}"; then
-		echo "Second install of ${module} changed something; modules must be idempotent." >&2
-		exit 1
-	fi
+	install_again "${module}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
 		in_target "lss --yes --no-color remove ${module}"
 		in_target "! lss status | grep -q '^${module} '"
