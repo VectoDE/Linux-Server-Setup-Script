@@ -9,6 +9,11 @@
 #   public  open to everyone
 #   vpn     open to the WireGuard network only (LSS_WIREGUARD_NETWORK, default 10.66.0.0/24)
 #   local   no rule; the service listens on localhost only
+#
+# Published container ports (Docker, Podman, Kubernetes NodePorts and hostPorts) are redirected to the container
+# before the INPUT rules of ufw or firewalld see them. The container modules therefore install the container firewall
+# (libexec/lss-container-firewall), which lets such a port through only when a module recorded it here; see
+# fw_container_ports.
 
 fw_backend() {
 	if os_is_debian; then printf 'ufw'; else printf 'firewalld'; fi
@@ -119,6 +124,14 @@ fw_apply_all() {
 			LSS_MODULE=${module} _fw_apply add
 		done <"${registry}"
 	done
+	for registry in "${LSS_STATE_DIR:-/var/lib/lss}"/firewall-trusted/*; do
+		[[ -f ${registry} ]] || continue
+		module=${registry##*/}
+		while IFS= read -r spec; do
+			[[ -n ${spec} ]] || continue
+			LSS_MODULE=${module} _fw_trust_apply add "${spec}"
+		done <"${registry}"
+	done
 	return
 }
 
@@ -138,12 +151,14 @@ fw_allow() {
 		printf '%s\n' "${spec}" >>"${registry}"
 		files_note_change "firewall allow ${spec}"
 	done
+	fw_container_sync
 	return
 }
 
-# fw_remove_module: closes every port the current module opened.
+# fw_remove_module: closes every port the current module opened and drops the networks it trusted.
 fw_remove_module() {
 	local registry spec
+	_fw_trust_remove_module
 	registry=$(_fw_registry)
 	[[ -f ${registry} ]] || return 0
 	if fw_available; then
@@ -156,6 +171,123 @@ fw_remove_module() {
 	fi
 	# Only reached when every rule is gone (or no firewall tool is installed, so no rule can exist).
 	rm -f -- "${registry}"
+	fw_container_sync
+	return
+}
+
+_fw_trust_registry() {
+	printf '%s/firewall-trusted/%s' "${LSS_STATE_DIR:-/var/lib/lss}" "${LSS_MODULE:-core}"
+	return
+}
+
+# _fw_check_network CIDR: an IPv4 or IPv6 network with a prefix length.
+_fw_check_network() {
+	local network=$1
+	if [[ ${network} =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]]; then
+		return 0
+	fi
+	[[ ${network} =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ && ${network} == *:*:* ]] ||
+		die "Invalid network '${network}' (expected an address with a prefix length, such as 10.42.0.0/16)."
+	return
+}
+
+# _fw_trust_apply add|remove NETWORK: ufw accepts everything from NETWORK; firewalld binds it to the trusted zone.
+_fw_trust_apply() {
+	local action=$1 network=$2 output
+	if [[ $(fw_backend) == ufw ]]; then
+		if [[ ${action} == add ]]; then
+			ufw allow from "${network}" comment "lss:${LSS_MODULE:-core}" >/dev/null
+		elif ! output=$(ufw delete allow from "${network}" 2>&1) && [[ ${output} != *non-existent* ]]; then
+			die "Could not remove the firewall rule for ${network}: ${output}"
+		fi
+	else
+		output=$(_fw_firewalld --zone=trusted "--${action}-source=${network}" 2>&1) || die "firewalld: ${output}"
+		if svc_is_active firewalld; then
+			firewall-cmd --reload >/dev/null
+		fi
+	fi
+	return
+}
+
+# fw_trust NETWORK...: accepts all traffic from NETWORK on the host, for networks that belong to the server itself,
+# such as the pod and service networks of Kubernetes. Recorded per module like ports: the firewall module applies the
+# record when it comes later, and removing the module drops the rule.
+fw_trust() {
+	local network registry
+	registry=$(_fw_trust_registry)
+	for network in "$@"; do
+		_fw_check_network "${network}"
+		if [[ -f ${registry} ]] && grep -qxF -- "${network}" "${registry}"; then
+			continue
+		fi
+		if fw_available; then
+			_fw_trust_apply add "${network}"
+		fi
+		mkdir -p "$(dirname "${registry}")"
+		printf '%s\n' "${network}" >>"${registry}"
+		files_note_change "firewall trust ${network}"
+	done
+	return
+}
+
+_fw_trust_remove_module() {
+	local registry network
+	registry=$(_fw_trust_registry)
+	[[ -f ${registry} ]] || return 0
+	if fw_available; then
+		while IFS= read -r network; do
+			[[ -n ${network} ]] || continue
+			_fw_trust_apply remove "${network}"
+			files_note_change "firewall distrust ${network}"
+		done <"${registry}"
+	fi
+	rm -f -- "${registry}"
+	return
+}
+
+# The container firewall: lss-container-firewall.service loads its rules from the list fw_container_list names.
+FW_CONTAINER_UNIT=lss-container-firewall
+
+fw_container_list() {
+	printf '%s/container-ports' "${LSS_STATE_DIR:-/var/lib/lss}"
+	return
+}
+
+# fw_container_ports: "PROTO PORT SOURCE" for every public (SOURCE any) and vpn (SOURCE the WireGuard network) rule
+# any module recorded, sorted. A published container port is reachable from outside exactly when it is listed here.
+fw_container_ports() {
+	local registry spec vpn
+	vpn=$(fw_vpn_network)
+	for registry in "${LSS_STATE_DIR:-/var/lib/lss}"/firewall/*; do
+		[[ -f ${registry} ]] || continue
+		while IFS= read -r spec; do
+			[[ -n ${spec} ]] || continue
+			_fw_parse "${spec}"
+			case ${FW_SCOPE} in
+			public) printf '%s %s any\n' "${FW_PROTO}" "${FW_PORT}" ;;
+			vpn) printf '%s %s %s\n' "${FW_PROTO}" "${FW_PORT}" "${vpn}" ;;
+			*) ;;
+			esac
+		done <"${registry}"
+	done | sort -u
+	return
+}
+
+# fw_container_sync: brings the list of the container firewall up to date and reloads the firewall. Does nothing until
+# a container module has created the list (ctr_firewall_setup in lib/container.sh).
+fw_container_sync() {
+	local list ports current
+	list=$(fw_container_list)
+	[[ -f ${list} ]] || return 0
+	ports=$(fw_container_ports)
+	current=$(<"${list}")
+	[[ ${current} != "${ports}" ]] || return 0
+	printf '%s\n' "${ports}" >"${list}"
+	files_note_change "container firewall ports"
+	if svc_is_active "${FW_CONTAINER_UNIT}.service"; then
+		systemctl reload "${FW_CONTAINER_UNIT}.service" || die "Could not reload ${FW_CONTAINER_UNIT}.service."
+	fi
+	return
 }
 
 # Port sshd listens on (first one), from the effective configuration.
