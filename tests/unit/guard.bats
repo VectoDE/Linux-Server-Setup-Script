@@ -34,6 +34,7 @@ systemctl() {
 	esac
 }
 
+# shellcheck disable=SC2329 # called by the guard functions under test
 journalctl() {
 	printf '%s\n' "${SCAN_OUTPUT}"
 }

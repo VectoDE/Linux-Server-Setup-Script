@@ -19,7 +19,8 @@ CONF=${LSS_GUARD_CONF:-/etc/lss/guard.conf}
 LSS=${LSS_GUARD_LSS:-/usr/local/sbin/lss}
 STATE_DIR=${LSS_STATE_DIR:-/var/lib/lss}
 OS_RELEASE=${LSS_OS_RELEASE:-/etc/os-release}
-declare -a FINDINGS=() FIXED=() NOTES=()
+# Global also when the script is sourced inside a function (the unit tests).
+declare -ga FINDINGS=() FIXED=() NOTES=()
 
 setting() {
 	local key=$1 default=${2-} line
@@ -207,7 +208,9 @@ check_scanners() {
 		if ((epoch < $(date +%s) - 2 * 86400)); then
 			finding "The daily ${label} check has not run since ${when} (systemctl status ${unit}.timer)."
 		fi
-		[[ ${status} =~ ^[0-9]+$ ]] && ((status > 0)) || continue
+		if [[ ! ${status} =~ ^[0-9]+$ ]] || ((status == 0)); then
+			continue
+		fi
 		output=''
 		if [[ ${invocation} != - ]]; then
 			output=$(journalctl --no-pager -o cat "_SYSTEMD_INVOCATION_ID=${invocation}" 2>/dev/null || true)
