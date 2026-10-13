@@ -24,8 +24,10 @@ request that adds them to this file and to [CODEOWNERS](CODEOWNERS).
 
 ## Releases
 
-Releases are built and published only by the release workflow on `main`, with a signed build attestation. Nobody
-publishes from a laptop, and version tags can only be created by that workflow: a tag ruleset blocks everyone else.
+From 2.0.0 on, releases are built and published only by the release workflow on `main`, with a signed build
+attestation; nobody publishes from a laptop. A tag ruleset already blocks changing or deleting tags; with the release
+workflow it will also allow only that workflow to create version tags. The 1.x releases were published by hand and
+are not signed.
 
 ## Access to sensitive resources
 

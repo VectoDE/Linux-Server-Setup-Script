@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Secret scan of the whole history and ShellCheck findings in GitHub code scanning. There is no OSV-Scanner job:
+# Dependency review of pull requests, a secret scan of the whole history and ShellCheck findings in GitHub code
+# scanning. There is no OSV-Scanner job:
 # lss has no lock file, and the test images are pinned by digest and updated by Dependabot.
 name: Security scans
 
@@ -22,6 +23,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fails a pull request that adds an action or image with a known vulnerability of moderate or higher severity.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-24.04

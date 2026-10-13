@@ -3,6 +3,7 @@
 [![CI](https://github.com/VectoDE/Linux-Server-Setup-Script/actions/workflows/ci.yml/badge.svg)](https://github.com/VectoDE/Linux-Server-Setup-Script/actions/workflows/ci.yml)
 [![Integration](https://github.com/VectoDE/Linux-Server-Setup-Script/actions/workflows/integration.yml/badge.svg)](https://github.com/VectoDE/Linux-Server-Setup-Script/actions/workflows/integration.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/VectoDE/Linux-Server-Setup-Script/badge)](https://scorecard.dev/viewer/?uri=github.com/VectoDE/Linux-Server-Setup-Script)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15442/badge)](https://www.bestpractices.dev/projects/15442)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 `lss` sets up and hardens Linux servers from modules. Install everything a profile lists in one run, or only the
@@ -99,6 +100,7 @@ a falling Lynis index. Findings go to a webhook (Slack, Teams, Mattermost, Disco
 - [Architecture](docs/architecture.md): how a run works, where lss keeps its state
 - [Hardening](docs/hardening.md): what the security modules change, CIS mapping, deviations
 - [Troubleshooting](docs/troubleshooting.md): locked out, failed modules, common messages
+- [Assurance case](docs/assurance.md): threat model, trust boundaries and how lss counters common weaknesses
 - [Writing a module](docs/module-guide.md)
 - [Changelog](CHANGELOG.md)
 

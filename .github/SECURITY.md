@@ -42,6 +42,9 @@ lss runs as root and changes the security configuration of a server, so these co
   data from package metadata, guard input)
 - A lockout: a run that leaves SSH unreachable although the lockout checks passed
 
+A known vulnerability in a GitHub Action or container image used by this repository that does not affect lss is
+documented as an [OpenVEX](https://openvex.dev/) statement in `.vex/`, with the reason. There are none today.
+
 ## Not a vulnerability
 
 - Settings that root writes: whoever can edit `/etc/lss/lss.conf` or pass `--set` is root already.
