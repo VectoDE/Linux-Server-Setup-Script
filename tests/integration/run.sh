@@ -37,7 +37,8 @@ start_target() {
 			echo "Unknown system ${system}" >&2
 			exit 2
 		}
-		docker build -q -t "lss-test:${system}" "tests/integration/images/${system}" >/dev/null
+		docker build -q -f "tests/integration/images/${system}/Containerfile" -t "lss-test:${system}" \
+			"tests/integration/images/${system}" >/dev/null
 		docker rm -f "${container}" >/dev/null 2>&1 || true
 		docker run -d --name "${container}" --hostname lss-test --privileged --cgroupns=host \
 			-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec \

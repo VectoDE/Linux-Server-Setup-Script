@@ -150,3 +150,35 @@ setup() {
 		false
 	fi
 }
+
+@test "opt reads an option with the default from MOD_OPTIONS" {
+	LSS_MODULE=alpha
+	MOD_OPTIONS=$'value|hello|Content\nflag|true|A switch\ncount|3|A number'
+	run opt value
+	[ "${output}" = hello ]
+	config_set LSS_ALPHA_VALUE world
+	run opt value
+	[ "${output}" = world ]
+	opt_bool flag
+	config_set LSS_ALPHA_FLAG off
+	run opt_bool flag
+	[ "${status}" -eq 1 ]
+	[ "$(opt_int count)" = 3 ]
+}
+
+@test "opt refuses unknown options and malformed values" {
+	LSS_MODULE=alpha
+	MOD_OPTIONS=$'flag|maybe|A switch\ncount|x|A number'
+	run opt missing
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"unknown option 'missing'"* ]]
+	run opt_bool flag
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"LSS_ALPHA_FLAG must be true or false"* ]]
+	run opt_bool missing
+	[[ ${output} == *"unknown option"* ]]
+	run opt_int count
+	[[ ${output} == *"LSS_ALPHA_COUNT must be a number"* ]]
+	run opt_int missing
+	[[ ${output} == *"unknown option"* ]]
+}

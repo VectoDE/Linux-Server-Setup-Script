@@ -150,7 +150,9 @@ fw_remove_module() {
 # Port sshd listens on (first one), from the effective configuration.
 fw_ssh_port() {
 	local port
-	port=$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')
+	# Without sshd (or with an invalid configuration) the default port is assumed; awk reads all input, so no
+	# broken pipe reaches pipefail.
+	port=$({ sshd -T 2>/dev/null || true; } | awk '$1 == "port" && !found { print $2; found = 1 }')
 	printf '%s' "${port:-22}"
 }
 

@@ -310,3 +310,31 @@ write_release() {
 	state_forget demo
 	[ ! -e "${LSS_STATE_DIR}/modules/demo" ]
 }
+
+@test "file_ensure_lines appends only missing lines and keeps a backup" {
+	LSS_MODULE=alpha
+	local file=${BATS_TEST_TMPDIR}/keys
+	printf 'one\n' >"${file}"
+	file_ensure_lines 0600 "${OWNER}" "${file}" <<<$'one\ntwo\n\nthree'
+	[ "${LSS_FILE_CHANGED}" = 1 ]
+	[ "$(cat "${file}")" = $'one\ntwo\nthree' ]
+	[ "$(stat -c '%a' "${file}")" = 600 ]
+	file_ensure_lines 0600 "${OWNER}" "${file}" <<<$'two\none'
+	[ "${LSS_FILE_CHANGED}" = 0 ]
+	files_restore
+	[ "$(cat "${file}")" = one ]
+}
+
+@test "file_ensure_lines creates a missing file" {
+	local file=${BATS_TEST_TMPDIR}/new/keys
+	file_ensure_lines 0640 "${OWNER}" "${file}" <<<"key"
+	[ "$(cat "${file}")" = key ]
+	[ "$(stat -c '%a' "${file}")" = 640 ]
+}
+
+@test "containers are detected with systemd-detect-virt" {
+	os_in_container
+	STUB_EXIT_systemd_detect_virt=1 run os_in_container
+	[ "${status}" -eq 1 ]
+	grep -q 'systemd-detect-virt --container --quiet' "${STUB_LOG}"
+}

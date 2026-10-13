@@ -527,3 +527,22 @@ EOF
 	[[ ${output} == *"Download of tool failed: https://example.invalid/tool-amd64"* ]]
 	[ ! -e "${BATS_TEST_TMPDIR}/new/tool" ]
 }
+
+@test "svc_unit writes an own unit and reloads systemd only on change" {
+	local root=${BATS_TEST_TMPDIR}/root
+	file_write() { mkdir -p "${root}"; cat >"${root}/unit"; LSS_FILE_CHANGED=${WRITE_CHANGED}; }
+	WRITE_CHANGED=1 svc_unit test.swap <<<"[Swap]"
+	grep -q 'systemctl daemon-reload' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	WRITE_CHANGED=0 svc_unit test.swap <<<"[Swap]"
+	run ! grep -q 'daemon-reload' "${STUB_LOG}"
+	[ "$(cat "${root}/unit")" = "[Swap]" ]
+}
+
+@test "fw_ssh_port falls back to 22 when sshd fails" {
+	STUB_EXIT_sshd=255 run fw_ssh_port
+	[ "${status}" -eq 0 ]
+	[ "${output}" = 22 ]
+	STUB_OUT_sshd=$'port 2222\nport 2223' run fw_ssh_port
+	[ "${output}" = 2222 ]
+}
