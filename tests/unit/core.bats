@@ -43,6 +43,41 @@ setup() {
 	[[ $(os_unsupported_reason) == *"Architecture armv7l"* ]]
 }
 
+write_release() {
+	LSS_OS_RELEASE=${BATS_TEST_TMPDIR}/os-release
+	printf '%s\n' "$@" >"${LSS_OS_RELEASE}"
+	os_detect
+}
+
+@test "derivatives are mapped by ID_LIKE and quotes are stripped" {
+	write_release 'ID=linuxmint' 'ID_LIKE="ubuntu debian"' "VERSION_ID='22'" 'UBUNTU_CODENAME=jammy'
+	[ "${OS_FAMILY}" = debian ]
+	[ "${OS_CODENAME}" = jammy ]
+	[ "${OS_VERSION}" = 22 ]
+	os_is_debian
+	write_release 'ID=ol' 'ID_LIKE="fedora"' 'VERSION_ID="9.4"'
+	[ "${OS_FAMILY}" = rhel ]
+	[ "${OS_MAJOR}" = 9 ]
+	os_is_rhel
+	run ! os_is_debian
+	write_release 'ID=alpine'
+	[ "${OS_FAMILY}" = unknown ]
+}
+
+@test "a missing os-release stops lss" {
+	LSS_OS_RELEASE=${BATS_TEST_TMPDIR}/missing run os_detect
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Cannot read ${BATS_TEST_TMPDIR}/missing"* ]]
+}
+
+@test "Debian architecture names for every architecture" {
+	use_os debian-12
+	[ "$(os_deb_arch)" = amd64 ]
+	os_require_supported
+	use_os debian-12 riscv64
+	[ "$(os_deb_arch)" = riscv64 ]
+}
+
 # --- log --------------------------------------------------------------------------------------------------------
 
 @test "masked values never reach the log file or stderr" {
@@ -65,6 +100,32 @@ setup() {
 	[ -z "${output}" ]
 	LSS_VERBOSE=1 run log_debug "shown"
 	[[ ${output} == *"DEBUG shown"* ]]
+}
+
+@test "colour only when forced or on a terminal" {
+	LSS_COLOR=always run log_warn "careful"
+	[[ ${output} == *$'\033[33mWARN \033[0m careful'* ]]
+	LSS_COLOR=auto run log_ok "fine"
+	[[ ${output} != *$'\033['* ]]
+	[[ ${output} == *"OK    fine"* ]]
+}
+
+@test "messages reach the journal with a matching priority" {
+	export LSS_JOURNAL=1 LSS_VERBOSE=1
+	log_error "e1" 2>/dev/null
+	log_warn "w1" 2>/dev/null
+	log_debug "d1" 2>/dev/null
+	log_step "s1" 2>/dev/null
+	grep -qxF 'logger -t lss -p user.err -- ERROR e1' "${STUB_LOG}"
+	grep -qxF 'logger -t lss -p user.warning -- WARN w1' "${STUB_LOG}"
+	grep -qxF 'logger -t lss -p user.debug -- DEBUG d1' "${STUB_LOG}"
+	grep -qxF 'logger -t lss -p user.info -- ==> s1' "${STUB_LOG}"
+}
+
+@test "short values are not masked and no log file is needed" {
+	log_mask abc
+	LSS_LOG_FILE='' run log_info "abc stays"
+	[[ ${output} == *"INFO  abc stays"* ]]
 }
 
 # --- files ------------------------------------------------------------------------------------------------------
@@ -113,6 +174,28 @@ setup() {
 	[ "$(files_drifted demo)" = "${dest} (missing)" ]
 }
 
+@test "file_remove keeps a backup that files_restore brings back" {
+	local dest=${BATS_TEST_TMPDIR}/gone.conf
+	[ "$(files_changes_of demo)" = 0 ]
+	printf 'keep\n' >"${dest}"
+	LSS_MODULE=demo
+	file_remove "${BATS_TEST_TMPDIR}/never-existed"
+	file_remove "${dest}"
+	[ ! -e "${dest}" ]
+	[ "$(files_changes_of demo)" = 1 ]
+	files_restore
+	[ "$(cat "${dest}")" = keep ]
+}
+
+@test "files_forget drops the checksums of a module" {
+	LSS_MODULE=demo
+	file_write 0644 "${OWNER}" "${BATS_TEST_TMPDIR}/f.conf" <<<"x"
+	[ -f "${LSS_STATE_DIR}/managed/demo" ]
+	files_forget demo
+	[ ! -e "${LSS_STATE_DIR}/managed/demo" ]
+	[ -z "$(files_drifted demo)" ]
+}
+
 # --- template ---------------------------------------------------------------------------------------------------
 
 @test "templates insert values literally" {
@@ -131,6 +214,21 @@ setup() {
 	printf 'a {{V}}\n\n' >"${BATS_TEST_TMPDIR}/t"
 	local V=1
 	[ "$(template_render "${BATS_TEST_TMPDIR}/t" | od -c | tr -s ' ' | head -1)" = "$(printf 'a 1\n\n' | od -c | tr -s ' ' | head -1)" ]
+}
+
+@test "template_install renders a module template into a managed file" {
+	export LSS_ROOT=${BATS_TEST_TMPDIR}/root
+	mkdir -p "${LSS_ROOT}/templates/demo"
+	printf 'listen {{PORT}}\n' >"${LSS_ROOT}/templates/demo/app.conf"
+	local PORT=8080 dest=${BATS_TEST_TMPDIR}/app.conf
+	[ "$(template_path demo app.conf)" = "${LSS_ROOT}/templates/demo/app.conf" ]
+	template_install demo app.conf 0640 "${OWNER}" "${dest}"
+	[ "$(cat "${dest}")" = 'listen 8080' ]
+	[ "$(stat -c %a "${dest}")" = 640 ]
+	run template_install demo missing.conf 0640 "${OWNER}" "${dest}"
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Template ${LSS_ROOT}/templates/demo/missing.conf not found."* ]]
+	[[ ${output} == *"Rendering template demo/missing.conf failed."* ]]
 }
 
 # --- secrets ----------------------------------------------------------------------------------------------------
@@ -159,6 +257,33 @@ setup() {
 	[[ ${output} == *"Invalid secret name"* ]]
 }
 
+@test "given secrets are stored privately, masked and removable" {
+	local random
+	random=$(secret_random)
+	[ "${#random}" -eq 32 ]
+	secret_set api-token 'given-value'
+	[ "$(cat "${LSS_SECRETS_DIR}/api-token")" = given-value ]
+	[ "$(stat -c %a "${LSS_SECRETS_DIR}/api-token")" = 600 ]
+	secret_exists api-token
+	run log_info "token given-value"
+	[[ ${output} == *"token ***"* ]]
+	[ "$(secret_get api-token)" = given-value ]
+	secret_remove api-token
+	run ! secret_exists api-token
+}
+
+@test "invalid secret names are refused everywhere" {
+	run secret_set 'Bad Name' x
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Invalid secret name 'Bad Name'"* ]]
+	run secret_exists ../x
+	[ "${status}" -ne 0 ]
+	[[ ${output} == *"Invalid secret name '../x'"* ]]
+	run secret_load ../x value
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Could not read secret '../x'"* ]]
+}
+
 # --- state ------------------------------------------------------------------------------------------------------
 
 @test "state keeps one value per key" {
@@ -171,4 +296,17 @@ setup() {
 	[ "$(state_installed_modules)" = demo ]
 	run state_set demo status $'two\nlines'
 	[ "${status}" -eq 1 ]
+}
+
+@test "state rejects bad keys and forgets modules" {
+	[ -z "$(state_installed_modules)" ]
+	[ -z "$(state_get nothing status)" ]
+	run state_set demo 'Bad-Key' x
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Invalid state key 'Bad-Key'"* ]]
+	state_set demo status failed
+	run ! state_installed demo
+	[ -z "$(state_installed_modules)" ]
+	state_forget demo
+	[ ! -e "${LSS_STATE_DIR}/modules/demo" ]
 }
