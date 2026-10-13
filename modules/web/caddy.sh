@@ -136,6 +136,16 @@ mod_configure() {
 	local changed=0
 	web_prepare caddy
 	install -d -m 0750 -o caddy -g caddy /var/log/caddy
+	# caddy validate runs as root and opens the access log; a file it creates would be root's, and the service, which
+	# runs as caddy, could not write it.
+	[[ -e /var/log/caddy/access.log ]] || install -m 0640 -o caddy -g caddy /dev/null /var/log/caddy/access.log
+	chown caddy:caddy /var/log/caddy/access.log
+	# Empty imports keep Caddy from warning about import patterns that match nothing yet.
+	install -d -m 0755 "${CADDY_DIR}/sites" "${CADDY_DIR}/admin"
+	printf '# Managed by lss: keeps the import pattern from matching nothing.\n' |
+		file_write 0644 root:root "${CADDY_DIR}/sites/00-lss.caddy"
+	printf '# Managed by lss: keeps the import pattern from matching nothing.\n' |
+		file_write 0644 root:root "${CADDY_DIR}/admin/00-lss.caddy"
 	_caddy_file | file_write 0644 root:root "${CADDY_FILE}"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	file_write 0644 root:root "${WEB_ACME_ROOT}/.well-known/acme-challenge/lss-probe" <<<"lss"
