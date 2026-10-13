@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+shell=bash
+external-sources=true
+enable=all
+disable=SC2154
+disable=SC2250
+disable=SC2310,SC2311
+disable=SC2312
+# bats: [ ] is required (bats only reports failing [[ ]] reliably in newer versions); test data holds literal $(...)
+# strings on purpose; variables set for the code under test look unused to ShellCheck.
+disable=SC2292,SC2016,SC2034
+# Every bats test runs in its own subshell; changing variables there is intended.
+disable=SC2030,SC2031

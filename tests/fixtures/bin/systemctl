@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# systemctl stub: "is-active UNIT" and "is-enabled UNIT" succeed for units listed in $STUB_ACTIVE_UNITS; every other
+# command exits with $STUB_EXIT_systemctl (default 0).
+printf 'systemctl %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+case $1 in
+is-active | is-enabled)
+	unit=${*: -1}
+	[[ " ${STUB_ACTIVE_UNITS:-} " == *" ${unit} "* ]]
+	exit
+	;;
+list-unit-files)
+	[[ " ${STUB_ACTIVE_UNITS:-} " == *" $3 "* ]] && printf '%s enabled\n' "$3"
+	exit 0
+	;;
+*) exit "${STUB_EXIT_systemctl:-0}" ;;
+esac

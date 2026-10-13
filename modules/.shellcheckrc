@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+shell=bash
+external-sources=true
+enable=all
+# Library files are sourced by lss; their functions use globals defined there.
+disable=SC2154
+# Braces around every variable are the house style already; double brackets are used throughout.
+disable=SC2250
+# Functions are used in conditions on purpose (check helpers return a status); set -e is not relied on there.
+disable=SC2310,SC2311
+# Command substitutions inside arguments are checked by the functions they call (die on error).
+disable=SC2312
+
+# Module metadata (MOD_*) and variables for templates are read by lib/module.sh and lib/template.sh.
+disable=SC2034

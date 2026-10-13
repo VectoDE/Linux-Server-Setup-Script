@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# lss: modular, hardened Linux server setup. See README.md and docs/.
+
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+LSS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
+LSS_VERSION=$(<"${LSS_ROOT}/VERSION")
+export LSS_ROOT LSS_VERSION
+
+for library in log os config files template secrets state pkg repo fetch service firewall module ui; do
+	# shellcheck source=/dev/null
+	source "${LSS_ROOT}/lib/${library}.sh"
+done
+
+usage() {
+	cat <<EOF
+lss ${LSS_VERSION}: modular, hardened Linux server setup
+
+Usage: lss [options] <command> [arguments]
+
+Commands:
+  (none)                         interactive menu
+  list [--group GROUP]           list modules and their state
+  info MODULE                    description, options, ports and requirements of a module
+  install MODULE... | all        install modules and what they need
+  install --profile NAME         install a profile (see profiles/)
+  configure MODULE...            rewrite the configuration of installed modules
+  verify [MODULE...]             check installed modules and changed managed files
+  status                         installed modules and their services
+  remove MODULE... [--purge]     remove modules (--purge also deletes their data)
+  audit                          Lynis audit with hardening index
+  secrets show NAME              print a generated secret
+  profiles                       list profiles
+  version                        print the version
+
+Options:
+  -c, --config FILE              settings file (default /etc/lss/lss.conf)
+  -s, --set KEY=VALUE            one setting, for example --set LSS_SSH_HARDENING_PORT=2222
+  -m, --mode native|docker       how services that support both are installed
+  -n, --dry-run                  show what would happen, change nothing
+  -y, --yes                      do not ask; required without a terminal
+  -v, --verbose                  more output
+      --no-color                 no colours
+  -h, --help                     this help
+EOF
+	return
+}
+
+LSS_DRY_RUN=0
+LSS_YES=0
+LSS_PURGE=0
+LSS_PROFILE=''
+CONFIG_FILE=''
+COMMAND=''
+declare -a ARGS=()
+
+parse_args() {
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		-c | --config)
+			[[ $# -ge 2 ]] || die "$1 needs a file."
+			CONFIG_FILE=$2
+			shift 2
+			;;
+		-s | --set)
+			[[ $# -ge 2 ]] || die "$1 needs KEY=VALUE."
+			config_set_arg "$2"
+			shift 2
+			;;
+		-m | --mode)
+			[[ $# -ge 2 && $2 =~ ^(native|docker)$ ]] || die "--mode must be native or docker."
+			config_set LSS_MODE "$2"
+			shift 2
+			;;
+		-p | --profile)
+			[[ $# -ge 2 ]] || die "$1 needs a profile name."
+			LSS_PROFILE=$2
+			shift 2
+			;;
+		-n | --dry-run)
+			LSS_DRY_RUN=1
+			shift
+			;;
+		-y | --yes)
+			LSS_YES=1
+			shift
+			;;
+		--purge)
+			LSS_PURGE=1
+			shift
+			;;
+		-v | --verbose)
+			LSS_VERBOSE=1
+			shift
+			;;
+		--no-color)
+			LSS_COLOR=never
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		--)
+			shift
+			ARGS+=("$@")
+			break
+			;;
+		-*) die "Unknown option '$1'. See 'lss --help'." ;;
+		*)
+			if [[ -z ${COMMAND} ]]; then
+				COMMAND=$1
+			else
+				ARGS+=("$1")
+			fi
+			shift
+			;;
+		esac
+	done
+	export LSS_DRY_RUN LSS_YES LSS_PURGE LSS_VERBOSE LSS_COLOR
+}
+
+require_root() {
+	[[ ${EUID} -eq 0 ]] || die "lss changes the system and must run as root (sudo lss ...)."
+	return
+}
+
+start_run() {
+	require_root
+	os_detect
+	os_require_supported
+	LSS_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
+	export LSS_RUN_ID
+	umask 022
+	mkdir -p /var/log/lss "${LSS_STATE_DIR}"
+	chmod 700 /var/log/lss "${LSS_STATE_DIR}"
+	LSS_LOG_FILE="/var/log/lss/${LSS_RUN_ID}.log"
+	(
+		umask 077
+		: >"${LSS_LOG_FILE}"
+	)
+	export LSS_LOG_FILE
+	local lock=/run/lss.lock
+	exec 9>"${lock}"
+	flock -n 9 || die "Another lss run is in progress."
+	log_info "lss ${LSS_VERSION} on ${OS_NAME} (${OS_ARCH}), run ${LSS_RUN_ID}"
+	return
+}
+
+load_settings() {
+	if [[ -n ${CONFIG_FILE} ]]; then
+		config_load_file "${CONFIG_FILE}"
+	elif [[ -f /etc/lss/lss.conf ]]; then
+		config_load_file /etc/lss/lss.conf
+	fi
+	if [[ -n ${LSS_PROFILE} ]]; then
+		local file="${LSS_ROOT}/profiles/${LSS_PROFILE}.conf"
+		[[ ${LSS_PROFILE} =~ ^[a-z0-9-]+$ && -f ${file} ]] || die "Unknown profile '${LSS_PROFILE}'. See 'lss profiles'."
+		config_load_profile "${file}"
+	fi
+	local unknown
+	unknown=$(config_unknown_keys)
+	for unknown in ${unknown}; do
+		log_warn "${unknown} is not a setting of any module; check the spelling ('lss info MODULE' lists them)."
+	done
+	return
+}
+
+confirm() {
+	[[ ${LSS_YES} == 1 ]] && return 0
+	[[ -t 0 ]] || die "No terminal to confirm; run with --yes."
+	local answer
+	read -r -p "$1 [y/N] " answer
+	[[ ${answer,,} == y || ${answer,,} == yes ]]
+}
+
+cmd_list() {
+	local group_filter='' group name state description
+	if [[ ${ARGS[0]:-} == --group ]]; then group_filter=${ARGS[1]:-}; fi
+	printf '%-11s %-18s %-10s %s\n' GROUP MODULE STATE DESCRIPTION
+	while read -r group name; do
+		[[ -z ${group_filter} || ${group} == "${group_filter}" ]] || continue
+		state=$(state_get "${name}" status)
+		description=$(module_meta "${name}" MOD_DESCRIPTION)
+		printf '%-11s %-18s %-10s %s\n' "${group}" "${name}" "${state:--}" "${description}"
+	done < <(module_list --groups)
+	return
+}
+
+cmd_info() {
+	local name=${ARGS[0]:-} option key default description
+	[[ -n ${name} ]] || die "Usage: lss info MODULE"
+	module_exists "${name}" || die "Unknown module '${name}'."
+	printf '%s: %s\n\n' "${name}" "$(module_meta "${name}" MOD_DESCRIPTION)"
+	printf 'Group:      %s\n' "$(module_meta "${name}" MOD_GROUP)"
+	printf 'Requires:   %s\n' "$(module_meta "${name}" MOD_REQUIRES)"
+	printf 'Conflicts:  %s\n' "$(module_meta "${name}" MOD_CONFLICTS)"
+	printf 'Modes:      %s\n' "$(module_meta "${name}" MOD_MODES)"
+	printf 'Ports:      %s\n' "$(module_meta "${name}" MOD_PORTS)"
+	printf 'State:      %s\n\nOptions:\n' "$(state_get "${name}" status)"
+	while IFS= read -r option; do
+		[[ -n ${option} ]] || continue
+		IFS='|' read -r key default description <<<"${option}"
+		printf '  %-40s %s (default: %s)\n' "$(config_key "${name}" "${key}")" "${description}" "${default:-empty}"
+	done < <(module_meta "${name}" MOD_OPTIONS)
+	return
+}
+
+selected_modules() {
+	local -a modules=()
+	if [[ ${#ARGS[@]} -eq 1 && ${ARGS[0]} == all ]]; then
+		LSS_PROFILE=all
+		load_settings
+	fi
+	if [[ -n ${LSS_PROFILE} ]]; then
+		read -ra modules <<<"$(config_get LSS_MODULES)"
+		[[ ${#modules[@]} -gt 0 ]] || die "Profile '${LSS_PROFILE}' lists no modules (LSS_MODULES)."
+	fi
+	if [[ ${#ARGS[@]} -gt 0 && ${ARGS[0]} != all ]]; then
+		modules+=("${ARGS[@]}")
+	fi
+	[[ ${#modules[@]} -gt 0 ]] || die "Name modules, 'all' or --profile NAME. See 'lss list'."
+	printf '%s\n' "${modules[@]}"
+	return
+}
+
+cmd_install() {
+	local requested resolved name
+	requested=$(selected_modules) || exit 1
+	# shellcheck disable=SC2086 # one module name per word
+	resolved=$(module_resolve ${requested}) || exit 1
+	local -a order=()
+	mapfile -t order <<<"${resolved}"
+	log_info "Modules in order: ${order[*]}"
+	for name in "${order[@]}"; do
+		LSS_MODULE=${name} module_run "${name}" check || die "${name}: check failed; nothing was changed."
+	done
+	if [[ ${LSS_DRY_RUN} == 1 ]]; then
+		log_ok "Dry run: all checks passed. Nothing was changed."
+		return 0
+	fi
+	for name in "${order[@]}"; do
+		module_apply "${name}"
+	done
+	log_ok "Finished. Log: ${LSS_LOG_FILE}"
+}
+
+cmd_configure() {
+	local name
+	[[ ${#ARGS[@]} -gt 0 ]] || die "Usage: lss configure MODULE..."
+	for name in "${ARGS[@]}"; do
+		state_installed "${name}" || die "${name} is not installed."
+		LSS_MODULE=${name} module_run "${name}" check || die "${name}: check failed."
+		if ! module_run "${name}" configure || ! module_run "${name}" verify; then
+			LSS_MODULE=${name} files_restore
+			die "${name}: configuration failed; changed files were restored."
+		fi
+		log_ok "${name}: configured"
+	done
+	return
+}
+
+cmd_verify() {
+	local -a modules=("${ARGS[@]}")
+	local name drift failed=0
+	if [[ ${#modules[@]} -eq 0 ]]; then
+		mapfile -t modules < <(state_installed_modules)
+	fi
+	for name in "${modules[@]}"; do
+		[[ -n ${name} ]] || continue
+		if module_run "${name}" verify; then
+			log_ok "${name}: working"
+		else
+			log_error "${name}: not working"
+			failed=1
+		fi
+		drift=$(files_drifted "${name}")
+		if [[ -n ${drift} ]]; then
+			log_warn "${name}: changed outside lss: ${drift//$'\n'/, }"
+		fi
+	done
+	return "${failed}"
+}
+
+cmd_status() {
+	local name
+	printf '%-18s %-10s %-8s %s\n' MODULE STATE MODE UPDATED
+	while IFS= read -r name; do
+		[[ -n ${name} ]] || continue
+		printf '%-18s %-10s %-8s %s\n' "${name}" "$(state_get "${name}" status)" "$(state_get "${name}" mode)" \
+			"$(state_get "${name}" updated_at)"
+	done < <(state_installed_modules)
+	printf '\nFailed services:\n'
+	systemctl --failed --no-legend --plain | sed 's/^/  /' || true
+	return
+}
+
+cmd_remove() {
+	local name
+	[[ ${#ARGS[@]} -gt 0 ]] || die "Usage: lss remove MODULE..."
+	confirm "Remove ${ARGS[*]}?" || die "Cancelled."
+	for name in "${ARGS[@]}"; do
+		module_exists "${name}" || die "Unknown module '${name}'."
+		module_remove "${name}"
+	done
+	return
+}
+
+cmd_audit() {
+	if ! state_installed lynis; then
+		ARGS=(lynis)
+		cmd_install
+	fi
+	module_run lynis audit
+	return
+}
+
+cmd_secrets() {
+	[[ ${ARGS[0]:-} == show && -n ${ARGS[1]:-} ]] || die "Usage: lss secrets show NAME"
+	secret_exists "${ARGS[1]}" || die "No secret named '${ARGS[1]}'."
+	cat -- "$(secret_path "${ARGS[1]}")"
+	printf '\n'
+	return
+}
+
+cmd_profiles() {
+	local file
+	for file in "${LSS_ROOT}"/profiles/*.conf; do
+		printf '%-16s %s\n' "$(basename "${file}" .conf)" "$(sed -n 's/^# Profile: //p' "${file}")"
+	done
+	return
+}
+
+main() {
+	parse_args "$@"
+	case ${COMMAND} in
+	version)
+		printf 'lss %s\n' "${LSS_VERSION}"
+		return 0
+		;;
+	help)
+		usage
+		return 0
+		;;
+	profiles)
+		cmd_profiles
+		return 0
+		;;
+	list | info)
+		load_settings
+		"cmd_${COMMAND}"
+		return 0
+		;;
+	*) ;;
+	esac
+	start_run
+	load_settings
+	case ${COMMAND} in
+	'')
+		ui_menu
+		;;
+	install) cmd_install ;;
+	configure) cmd_configure ;;
+	verify) cmd_verify ;;
+	status) cmd_status ;;
+	remove) cmd_remove ;;
+	audit) cmd_audit ;;
+	secrets) cmd_secrets ;;
+	*) die "Unknown command '${COMMAND}'. See 'lss --help'." ;;
+	esac
+}
+
+main "$@"

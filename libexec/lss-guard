@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# lss guard: keeps a server at the state lss set up. Installed by the guard module as /usr/local/lib/lss/guard and
+# run daily by lss-guard.timer. Settings come from /etc/lss/guard.conf (KEY=value lines, parsed, never sourced).
+#
+# Checks: lss verify of every installed module (failed modules and files changed outside lss are configured again
+# when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, the Lynis hardening index.
+# Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+CONF=${LSS_GUARD_CONF:-/etc/lss/guard.conf}
+LSS=${LSS_GUARD_LSS:-/usr/local/sbin/lss}
+STATE_DIR=${LSS_STATE_DIR:-/var/lib/lss}
+declare -a FINDINGS=() FIXED=()
+
+setting() {
+	local key=$1 default=${2-} line
+	if [[ -r ${CONF} ]]; then
+		while IFS= read -r line || [[ -n ${line} ]]; do
+			if [[ ${line} == "${key}="* ]]; then
+				printf '%s' "${line#*=}"
+				return 0
+			fi
+		done <"${CONF}"
+	fi
+	printf '%s' "${default}"
+}
+
+finding() {
+	FINDINGS+=("$1")
+	logger -t lss-guard -p auth.warning -- "$1"
+	return
+}
+
+check_modules() {
+	local output name failed=() drifted=()
+	output=$("${LSS}" --no-color verify 2>&1) || true
+	while read -r name; do failed+=("${name}"); done < <(sed -nE 's/^ERROR +([a-z0-9-]+): not working$/\1/p' <<<"${output}")
+	while read -r name; do drifted+=("${name}"); done < <(sed -nE 's/^WARN +([a-z0-9-]+): changed outside lss.*/\1/p' <<<"${output}")
+	for name in "${failed[@]}" "${drifted[@]}"; do
+		[[ -n ${name} ]] || continue
+		if [[ $(setting GUARD_AUTOFIX true) == true ]] && "${LSS}" --yes --no-color configure "${name}" >/dev/null 2>&1; then
+			FIXED+=("${name}")
+			logger -t lss-guard -p auth.notice -- "Restored module ${name}"
+		else
+			finding "Module ${name} is not in the state lss set up (lss verify ${name})."
+		fi
+	done
+	return
+}
+
+check_units() {
+	local unit
+	while read -r unit; do
+		if [[ -n ${unit} ]]; then
+			finding "Service ${unit} has failed."
+		fi
+	done < <(systemctl --failed --no-legend --plain 2>/dev/null | awk '{ print $1 }')
+	return
+}
+
+check_disks() {
+	local limit use mount
+	limit=$(setting GUARD_DISK_THRESHOLD 90)
+	while read -r use mount; do
+		use=${use%\%}
+		[[ ${use} =~ ^[0-9]+$ ]] || continue
+		if ((use >= limit)); then
+			finding "File system ${mount} is ${use} % full."
+		fi
+	done < <(df --output=pcent,target -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | tail -n +2)
+	return
+}
+
+check_updates() {
+	local count=0
+	if command -v apt-get >/dev/null 2>&1; then
+		count=$(apt-get -s -o Debug::NoLocking=true dist-upgrade 2>/dev/null | grep -c '^Inst .*-security' || true)
+	elif command -v dnf >/dev/null 2>&1; then
+		count=$(dnf -q updateinfo list --security 2>/dev/null | grep -c . || true)
+	fi
+	if ((count > 0)); then
+		finding "${count} security update(s) are not installed yet."
+	fi
+	if [[ -f /run/reboot-required ]] || { command -v needs-restarting >/dev/null 2>&1 && ! needs-restarting --reboothint >/dev/null 2>&1; }; then
+		finding "A reboot is pending to activate installed updates."
+	fi
+	return
+}
+
+check_lynis() {
+	local minimum last
+	minimum=$(setting GUARD_LYNIS_MIN 0)
+	[[ -f ${STATE_DIR}/lynis-history ]] || return 0
+	last=$(tail -n 1 "${STATE_DIR}/lynis-history" | awk '{ print $2 }')
+	if [[ ${last} =~ ^[0-9]+$ ]] && ((last < minimum)); then
+		finding "Lynis hardening index ${last} is below ${minimum}."
+	fi
+}
+
+json_escape() {
+	local text=$1
+	text=${text//\\/\\\\}
+	text=${text//\"/\\\"}
+	text=${text//$'\n'/\\n}
+	text=${text//$'\t'/\\t}
+	text=${text//$'\r'/}
+	printf '%s' "${text}"
+	return
+}
+
+notify() {
+	local summary=$1 webhook email body
+	webhook=$(setting GUARD_WEBHOOK)
+	email=$(setting GUARD_EMAIL)
+	if [[ -n ${webhook} ]]; then
+		if [[ ${webhook} == *ntfy* ]]; then
+			body=${summary}
+		else
+			# "text" for Slack, Teams and Mattermost, "content" for Discord.
+			body="{\"text\":\"$(json_escape "${summary}")\",\"content\":\"$(json_escape "${summary:0:1900}")\"}"
+		fi
+		curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 20 \
+			-H 'Content-Type: application/json' --data-binary @- "${webhook}" <<<"${body}" >/dev/null ||
+			logger -t lss-guard -p auth.err -- "Webhook delivery failed"
+	fi
+	if [[ -n ${email} ]] && command -v sendmail >/dev/null 2>&1; then
+		printf 'To: %s\nSubject: [lss guard] %s\n\n%s\n' "${email}" "$(hostname -f 2>/dev/null || hostname)" "${summary}" |
+			sendmail -t || logger -t lss-guard -p auth.err -- "Mail delivery failed"
+	fi
+	return
+}
+
+main() {
+	[[ ${EUID} -eq 0 ]] || {
+		echo "lss guard must run as root." >&2
+		exit 1
+	}
+	check_modules
+	check_units
+	check_disks
+	check_updates
+	check_lynis
+	local summary host
+	host=$(hostname -f 2>/dev/null || hostname)
+	if [[ ${#FINDINGS[@]} -eq 0 && ${#FIXED[@]} -eq 0 ]]; then
+		logger -t lss-guard -p auth.info -- "All checks passed"
+		if [[ $(setting GUARD_DAILY_SUMMARY false) == true ]]; then
+			notify "lss guard on ${host}: all checks passed."
+		fi
+		return 0
+	fi
+	summary="lss guard on ${host}:"
+	local line
+	for line in "${FINDINGS[@]}"; do summary+=$'\n'"- ${line}"; done
+	for line in "${FIXED[@]}"; do summary+=$'\n'"- Restored module ${line} (it had been changed outside lss)."; done
+	notify "${summary}"
+	[[ ${#FINDINGS[@]} -eq 0 ]]
+}
+
+main "$@"

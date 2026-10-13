@@ -1,0 +1,5 @@
+PRETTY_NAME="Ubuntu 24.10"
+VERSION_ID="24.10"
+VERSION_CODENAME=oracular
+ID=ubuntu
+ID_LIKE=debian

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# ubuntu-24.04 with systemd as PID 1, the way a minimal cloud server boots (no policy-rc.d, which
+# stops services from starting in Docker images). Used by tests/integration/run.sh.
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+
+RUN apt-get update -q \
+	&& DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+		ca-certificates cron curl dbus gnupg iproute2 openssh-server procps rsyslog sudo systemd systemd-sysv \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& rm -f /usr/sbin/policy-rc.d /lib/systemd/system/multi-user.target.wants/getty* /etc/systemd/system/getty.target.wants/*
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

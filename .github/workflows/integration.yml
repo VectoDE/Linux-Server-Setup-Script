@@ -1,0 +1,85 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Installs every module on every supported distribution: install, verify, install again without a change, remove.
+# Containers run systemd as PID 1; modules that change the kernel (firewall, swap, sysctl, ...) run on the runner
+# virtual machine itself, which is thrown away afterwards.
+name: Integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container:
+    name: ${{ matrix.system }} / ${{ matrix.group }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
+        group: [base, security, scanners]
+        include:
+          - group: base
+            modules: system time admin-user tools logging
+          - group: security
+            modules: ssh-hardening ssh-2fa fail2ban crowdsec password-policy auto-updates guard
+          - group: scanners
+            modules: aide rkhunter clamav lynis
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install, verify, reinstall, remove
+        env:
+          SYSTEM: ${{ matrix.system }}
+          MODULES: ${{ matrix.modules }}
+        run: |
+          read -ra modules <<<"$MODULES"
+          tests/integration/run.sh "$SYSTEM" "${modules[@]}"
+
+  host:
+    name: ubuntu-24.04 VM / kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install, verify, reinstall, remove
+        run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard
+
+  profile:
+    name: ubuntu-24.04 VM / profile minimal-secure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The whole profile at once, as on a real server, then the Lynis audit. minimal-secure reached a hardening index
+      # of 75 here (October 2026); the minimum leaves room for small changes between Lynis versions.
+      - name: Install the profile, verify, reinstall, audit
+        run: tests/integration/run.sh host --profile minimal-secure 70

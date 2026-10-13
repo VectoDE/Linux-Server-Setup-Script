@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+name: Bug report
+description: A module fails or does not do what it documents.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems belong in a [private advisory](https://github.com/VectoDE/Linux-Server-Setup-Script/security/advisories/new), not here.
+        Remove passwords, keys, tokens and webhook URLs from everything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: The command you ran, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The output of the command with --verbose, and the log file it names under /var/log/lss/.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: The lines of /etc/lss/lss.conf for the modules involved, without secrets.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of lss version
+      placeholder: 2.0.0
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution and release, and whether it runs in a VM, a container or on hardware.
+      placeholder: Debian 13, KVM virtual machine
+    validations:
+      required: true

@@ -1,0 +1,5 @@
+Public key material
+
+The files under data/keys are OpenPGP public keys that software vendors publish so that anyone can verify the
+signatures on their packages. They are copied unchanged from the vendor and redistributed only for that purpose.
+This project claims no rights in them and does not license them; any rights stay with the vendor.

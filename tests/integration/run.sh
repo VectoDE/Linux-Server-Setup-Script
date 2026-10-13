@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Integration test: tests/integration/run.sh SYSTEM|host MODULE...
+#                   tests/integration/run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]
+#
+# For every module: install (with its requirements), verify, install again (every module in the run must report
+# "unchanged"), and remove. With --profile: install the whole profile, verify, install again, then run the Lynis
+# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container);
+# "host" runs on the machine itself (for modules that need a real kernel, used on throwaway CI virtual machines only).
+set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+
+system=${1:?usage: run.sh SYSTEM|host MODULE...}
+shift
+[[ $# -gt 0 ]] || {
+	echo "usage: run.sh SYSTEM|host MODULE... | --profile NAME [LYNIS_MIN_INDEX]" >&2
+	exit 2
+}
+settings=tests/integration/settings.conf
+container="lss-test-${system}"
+
+# Collapsible sections in the GitHub Actions log.
+group_start() {
+	echo "::group::$1"
+	return
+}
+
+group_end() {
+	echo "::endgroup::"
+	return
+}
+
+in_target() {
+	local script=$1
+	if [[ ${system} == host ]]; then
+		sudo --preserve-env=SSH_CONNECTION bash -c "${script}"
+	else
+		docker exec -i "${container}" bash -c "${script}"
+	fi
+	return
+}
+
+start_target() {
+	if [[ ${system} == host ]]; then
+		sudo rm -rf /opt/lss-src
+		sudo cp -a "${PWD}" /opt/lss-src
+	else
+		[[ -d tests/integration/images/${system} ]] || {
+			echo "Unknown system ${system}" >&2
+			exit 2
+		}
+		docker build -q -f "tests/integration/images/${system}/Containerfile" -t "lss-test:${system}" \
+			"tests/integration/images/${system}" >/dev/null
+		docker rm -f "${container}" >/dev/null 2>&1 || true
+		docker run -d --name "${container}" --hostname lss-test --privileged --cgroupns=host \
+			-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec \
+			-v "${PWD}:/src:ro" "lss-test:${system}" >/dev/null
+		in_target 'for i in $(seq 60); do s=$(systemctl is-system-running 2>/dev/null || true); [[ $s == running || $s == degraded ]] && exit 0; sleep 1; done; exit 1'
+		in_target 'cp -a /src /opt/lss-src'
+	fi
+	in_target 'ln -sf /opt/lss-src/lss /usr/local/sbin/lss && mkdir -p /etc/lss'
+	in_target "cat > /etc/lss/lss.conf" <"${settings}"
+	# A setting that no module reads is a typo in the test settings.
+	if in_target 'lss --no-color list 2>&1' | grep 'is not a setting'; then
+		exit 1
+	fi
+}
+
+# Fails when a second install changed anything: every step must be idempotent.
+install_again() {
+	local second
+	second=$(in_target "lss --yes --no-color install $* 2>&1") || {
+		printf '%s\n' "${second}"
+		exit 1
+	}
+	printf '%s\n' "${second}"
+	if grep -E 'OK +[a-z0-9-]+: done' <<<"${second}"; then
+		echo "Second install of $* changed something; modules must be idempotent." >&2
+		exit 1
+	fi
+}
+
+stop_target() {
+	local status=$?
+	if [[ ${status} -ne 0 ]]; then
+		group_start "Diagnostics"
+		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null; systemctl --failed --no-pager; journalctl -p warning -n 80 --no-pager' || true
+		group_end
+	fi
+	if [[ ${system} != host ]]; then
+		docker rm -f "${container}" >/dev/null 2>&1 || true
+	fi
+	exit "${status}"
+}
+
+# Available memory and used disk space in MiB, for the resource figures in the README.
+resources_snapshot() {
+	in_target 'echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
+	return
+}
+
+# Samples MemAvailable twice a second until resources_report stops it, for the peak memory of an install and verify.
+memory_watch_start() {
+	in_target 'rm -f /run/lss-memwatch /run/lss-memwatch.stop
+		setsid sh -c "until [ -e /run/lss-memwatch.stop ]; do grep MemAvailable /proc/meminfo; sleep 0.5; done" \
+			>/run/lss-memwatch 2>/dev/null </dev/null &'
+	return
+}
+
+# Prints what an install and verify cost: time, memory in use afterwards and at the peak (from MemAvailable), disk
+# space, and the largest processes.
+resources_report() {
+	local label=$1 before=$2 started=$3 mem_before disk_before mem_after disk_after mem_low
+	read -r mem_before disk_before <<<"${before}"
+	read -r mem_after disk_after <<<"$(resources_snapshot)"
+	in_target 'touch /run/lss-memwatch.stop; sleep 1'
+	mem_low=$(in_target "awk 'NR == 1 || \$2 < low { low = \$2 } END { print int(low / 1024) }' /run/lss-memwatch
+		rm -f /run/lss-memwatch /run/lss-memwatch.stop")
+	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB after, $((mem_before - mem_low)) MiB peak, disk $((disk_after - disk_before)) MiB"
+	in_target 'ps -eo rss=,comm= --sort=-rss | head -n 8' | awk '{ printf "  %5d MiB  %s\n", $1 / 1024, $2 }'
+	return
+}
+
+trap stop_target EXIT
+start_target
+
+if [[ $1 == --profile ]]; then
+	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
+	group_start "${system}: profile ${profile}"
+	before=$(resources_snapshot)
+	started=${SECONDS}
+	memory_watch_start
+	in_target "lss --yes --no-color install --profile ${profile}"
+	in_target "lss --yes --no-color verify"
+	resources_report "${system} profile ${profile}" "${before}" "${started}"
+	install_again --profile "${profile}"
+	group_end
+	group_start "${system}: Lynis audit"
+	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
+	group_end
+	echo "${system}: profile ${profile} passed"
+	exit 0
+fi
+
+for module in "$@"; do
+	group_start "${system}: ${module}"
+	before=$(resources_snapshot)
+	started=${SECONDS}
+	memory_watch_start
+	in_target "lss --yes --no-color install ${module}"
+	in_target "lss --yes --no-color verify"
+	resources_report "${system} ${module}" "${before}" "${started}"
+	install_again "${module}"
+	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
+		in_target "lss --yes --no-color remove ${module}"
+		in_target "! lss status | grep -q '^${module} '"
+	fi
+	group_end
+done
+echo "${system}: ${*} passed"

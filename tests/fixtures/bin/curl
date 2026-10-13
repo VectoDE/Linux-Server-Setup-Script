@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# curl stub: writes the content of $STUB_CURL_BODY to the file given with -o.
+printf 'curl %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+out=''
+while [[ $# -gt 0 ]]; do
+	if [[ $1 == -o ]]; then
+		out=$2
+		shift
+	fi
+	shift
+done
+[[ -n ${out} ]] && printf '%s' "${STUB_CURL_BODY:-}" >"${out}"
+exit "${STUB_EXIT_curl:-0}"

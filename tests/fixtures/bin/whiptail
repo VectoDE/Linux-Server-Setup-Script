@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# whiptail stub: prints $STUB_OUT_whiptail on stderr (where whiptail writes the choice) and exits with
+# $STUB_EXIT_whiptail; a --yesno dialog exits with $STUB_EXIT_whiptail_yesno instead.
+printf 'whiptail %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+if [[ " $* " == *" --yesno "* ]]; then
+	exit "${STUB_EXIT_whiptail_yesno:-0}"
+fi
+[[ -z ${STUB_OUT_whiptail:-} ]] || printf '%s\n' "${STUB_OUT_whiptail}" >&2
+exit "${STUB_EXIT_whiptail:-0}"
