@@ -4,7 +4,7 @@
 
 # Installs every module on every supported distribution: install, verify, install again without a change, remove.
 # Containers run systemd as PID 1; modules that change the kernel (firewall, swap, sysctl, ...) run on the runner
-# virtual machine itself, which is thrown away afterwards.
+# virtual machine itself, which is thrown away afterwards. Everything runs on x86_64 and on arm64 (aarch64).
 name: Integration
 
 on:
@@ -24,14 +24,15 @@ concurrency:
 
 jobs:
   container:
-    name: ${{ matrix.system }} / ${{ matrix.group }}
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / ${{ matrix.group }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
         group: [base, security, scanners]
+        arch: [x64, arm64]
         include:
           - group: base
             modules: system time admin-user tools logging
@@ -55,9 +56,13 @@ jobs:
           tests/integration/run.sh "$SYSTEM" "${modules[@]}"
 
   host:
-    name: ubuntu-24.04 VM / kernel
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.runner == 'ubuntu-24.04' && 'ubuntu-24.04 VM' || 'ubuntu-24.04 arm64 VM' }} / kernel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -69,9 +74,14 @@ jobs:
         run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard
 
   profile:
-    name: ubuntu-24.04 VM / profile minimal-secure
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.runner }} VM / profile minimal-secure
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-26.04 runners are in public preview (October 2026).
+        runner: [ubuntu-24.04, ubuntu-26.04]
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
