@@ -49,9 +49,9 @@ mod_install() {
 	fi
 	if ! _java_available "${package}"; then
 		# Debian 12 ships OpenJDK 17 only; Adoptium builds every version for every supported system.
-		log_info "java: ${OS_NAME} has no OpenJDK ${version}; using Eclipse Temurin from Adoptium."
+		log_info "java: ${OS_ID} ${OS_VERSION} has no OpenJDK ${version}; using Eclipse Temurin from Adoptium."
 		repo_add adoptium
-		_java_available "${temurin}" || die "java: Java ${version} is available neither from ${OS_NAME} nor from Adoptium."
+		_java_available "${temurin}" || die "java: Java ${version} is available neither from ${OS_ID} ${OS_VERSION} nor from Adoptium."
 		package=${temurin}
 	fi
 	pkg_install "${package}"

@@ -47,7 +47,7 @@ mod_install() {
 			fi
 		fi
 	fi
-	_dotnet_available "${package}" || die "dotnet: .NET ${version} is not available for ${OS_NAME} on $(os_deb_arch)."
+	_dotnet_available "${package}" || die "dotnet: .NET ${version} is not available for ${OS_ID} ${OS_VERSION} on $(os_deb_arch)."
 	pkg_install "${package}"
 	# Remembered, so remove takes away only what lss installed.
 	state_set "${LSS_MODULE}" packages "$(state_get "${LSS_MODULE}" packages) ${package}"
@@ -75,6 +75,7 @@ mod_verify() {
 	version=$(opt version)
 	sdks=$(DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 dotnet --list-sdks 2>/dev/null) || die "dotnet: dotnet does not run."
 	grep -q "^${version//./\\.}\." <<<"${sdks}" || die "dotnet: dotnet --list-sdks shows no .NET ${version} SDK."
+	# shellcheck disable=SC2016 # expanded by the login shell
 	output=$(env -i HOME=/root PATH=/usr/bin:/bin bash -lc 'printf "%s" "${DOTNET_CLI_TELEMETRY_OPTOUT:-}"' 2>/dev/null) || true
 	[[ ${output##*$'\n'} == 1 ]] || die "dotnet: DOTNET_CLI_TELEMETRY_OPTOUT is not set for login shells."
 	grep -qxF "${DOTNET_ENV_LINE}" /etc/environment || die "dotnet: /etc/environment does not switch telemetry off."

@@ -91,10 +91,10 @@ _php_resolve_debian() {
 	fi
 	if ! _php_apt_has "php${wanted}-fpm"; then
 		if [[ ${OS_ID} == ubuntu && " ${PHP_PPA_SUITES} " != *" ${OS_CODENAME} "* ]]; then
-			die "php: PHP ${wanted} is not available for ${OS_NAME}; leave LSS_PHP_VERSION empty for the distribution's PHP."
+			die "php: PHP ${wanted} is not available for ${OS_ID} ${OS_VERSION}; leave LSS_PHP_VERSION empty for the distribution's PHP."
 		fi
 		repo_add "${repo}"
-		_php_apt_has "php${wanted}-fpm" || die "php: PHP ${wanted} is not available for ${OS_NAME}."
+		_php_apt_has "php${wanted}-fpm" || die "php: PHP ${wanted} is not available for ${OS_ID} ${OS_VERSION}."
 	fi
 	PHP_VERSION=${wanted}
 	return
@@ -142,7 +142,7 @@ _php_resolve_rhel() {
 	available=${available%.*}
 	[[ -n ${available} ]] || die "php: the package sources offer no php-fpm."
 	if [[ -n ${wanted} && ${wanted} != "${available}" ]]; then
-		die "php: PHP ${wanted} is not available for ${OS_NAME} (it offers ${available}${streams:+ and the streams $(tr '\n' ' ' <<<"${streams}")})."
+		die "php: PHP ${wanted} is not available for ${OS_ID} ${OS_VERSION} (it offers ${available}${streams:+ and the streams $(tr '\n' ' ' <<<"${streams}")})."
 	fi
 	PHP_VERSION=${available}
 	return
