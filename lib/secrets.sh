@@ -56,10 +56,11 @@ secret_get() {
 # secret_load NAME VARIABLE [LENGTH]: like secret_get, but assigns the value in the calling shell, so the masking
 # registration survives (a command substitution would lose it).
 secret_load() {
-	local value
-	value=$(secret_get "$1" "${3:-32}") || die "Could not read secret '$1'."
-	log_mask "${value}"
-	printf -v "$2" '%s' "${value}"
+	# The local name must not collide with the caller's variable name, or printf -v would assign the local.
+	local _lss_secret_value
+	_lss_secret_value=$(secret_get "$1" "${3:-32}") || die "Could not read secret '$1'."
+	log_mask "${_lss_secret_value}"
+	printf -v "$2" '%s' "${_lss_secret_value}"
 }
 
 # secret_set NAME VALUE: stores a given secret (from configuration), for example an API token.

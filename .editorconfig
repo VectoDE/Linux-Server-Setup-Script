@@ -10,9 +10,14 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-[*.{sh,bash,bats}]
+[*.{sh,bash}]
 indent_style = tab
 shell_variant = bash
+switch_case_indent = false
+
+[*.bats]
+indent_style = tab
+shell_variant = bats
 switch_case_indent = false
 
 [lss]
