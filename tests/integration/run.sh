@@ -25,18 +25,22 @@ container="lss-test-${system}"
 # Collapsible sections in the GitHub Actions log.
 group_start() {
 	echo "::group::$1"
+	return
 }
 
 group_end() {
 	echo "::endgroup::"
+	return
 }
 
 in_target() {
+	local script=$1
 	if [[ ${system} == host ]]; then
-		sudo --preserve-env=SSH_CONNECTION bash -c "$1"
+		sudo --preserve-env=SSH_CONNECTION bash -c "${script}"
 	else
-		docker exec -i "${container}" bash -c "$1"
+		docker exec -i "${container}" bash -c "${script}"
 	fi
+	return
 }
 
 start_target() {
@@ -95,6 +99,7 @@ stop_target() {
 # Available memory and used disk space in MiB, for the resource figures in the README.
 resources_snapshot() {
 	in_target 'echo $(($(grep MemAvailable /proc/meminfo | tr -s " " | cut -d " " -f 2) / 1024)) $(df -m --output=used / | tail -n 1)'
+	return
 }
 
 # Samples MemAvailable twice a second until resources_report stops it, for the peak memory of an install and verify.
@@ -102,6 +107,7 @@ memory_watch_start() {
 	in_target 'rm -f /run/lss-memwatch /run/lss-memwatch.stop
 		setsid sh -c "until [ -e /run/lss-memwatch.stop ]; do grep MemAvailable /proc/meminfo; sleep 0.5; done" \
 			>/run/lss-memwatch 2>/dev/null </dev/null &'
+	return
 }
 
 # Prints what an install and verify cost: time, memory in use afterwards and at the peak (from MemAvailable), disk
@@ -115,6 +121,7 @@ resources_report() {
 		rm -f /run/lss-memwatch /run/lss-memwatch.stop")
 	echo "RESOURCES ${label}: $((SECONDS - started)) s, RAM $((mem_before - mem_after)) MiB after, $((mem_before - mem_low)) MiB peak, disk $((disk_after - disk_before)) MiB"
 	in_target 'ps -eo rss=,comm= --sort=-rss | head -n 8' | awk '{ printf "  %5d MiB  %s\n", $1 / 1024, $2 }'
+	return
 }
 
 trap stop_target EXIT

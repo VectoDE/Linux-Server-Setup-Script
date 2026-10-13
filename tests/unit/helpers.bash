@@ -26,10 +26,12 @@ lss_test_setup() {
 		# shellcheck source=/dev/null
 		source "${REPO_ROOT}/lib/${library}.sh"
 	done
+	return
 }
 
 use_os() {
 	export LSS_OS_RELEASE=${REPO_ROOT}/tests/fixtures/os-release/$1
 	export LSS_ARCH=${2:-x86_64}
 	os_detect
+	return
 }

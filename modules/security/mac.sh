@@ -15,6 +15,7 @@ mod_check() {
 	if os_in_container; then
 		die "mac needs the kernel's security module; run it on a virtual machine or bare metal, not in a container."
 	fi
+	return
 }
 
 mod_install() {
@@ -26,6 +27,7 @@ mod_install() {
 	else
 		pkg_install selinux-policy-targeted policycoreutils policycoreutils-python-utils
 	fi
+	return
 }
 
 _mac_selinux() {
@@ -49,12 +51,14 @@ _mac_selinux() {
 		log_warn "SELinux was disabled; it becomes enforcing after the next reboot (the first boot relabels all files)."
 		;;
 	esac
+	return
 }
 
 _mac_apparmor() {
 	svc_enable apparmor
 	[[ $(cat /sys/module/apparmor/parameters/enabled 2>/dev/null) == Y ]] ||
 		die "mac: the kernel runs without AppArmor (add apparmor=1 security=apparmor to the kernel command line)."
+	return
 }
 
 mod_configure() {
@@ -63,6 +67,7 @@ mod_configure() {
 	else
 		_mac_selinux
 	fi
+	return
 }
 
 mod_verify() {
@@ -75,10 +80,12 @@ mod_verify() {
 			die "mac: SELinux is $(getenforce), not enforcing."
 		fi
 	fi
+	return
 }
 
 # MAC stays on: AppArmor is the Debian/Ubuntu default and SELinux enforcing the RHEL default, so lowering it on
 # removal would leave the server weaker than its distribution ships it.
 mod_remove() {
 	log_info "mac: AppArmor/SELinux stay enabled (distribution default)."
+	return
 }

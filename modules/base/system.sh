@@ -23,6 +23,7 @@ mod_check() {
 	[[ ${locale} =~ ^(C|[a-z]{2,3}_[A-Z]{2})\.UTF-8$ ]] ||
 		die "LSS_SYSTEM_LOCALE '${locale}' must look like C.UTF-8 or de_DE.UTF-8."
 	opt_bool upgrade || true
+	return
 }
 
 mod_install() {
@@ -32,6 +33,7 @@ mod_install() {
 		log_info "Installing available updates"
 		pkg_upgrade
 	fi
+	return
 }
 
 _system_hostname() {
@@ -75,16 +77,19 @@ _system_locale() {
 	else
 		file_write 0644 root:root /etc/locale.conf <<<"LANG=${locale}"
 	fi
+	return
 }
 
 _system_cron() {
 	if os_is_debian; then printf 'cron'; else printf 'crond'; fi
+	return
 }
 
 mod_configure() {
 	_system_hostname
 	_system_locale
 	svc_enable "$(_system_cron)"
+	return
 }
 
 mod_verify() {
@@ -99,9 +104,11 @@ mod_verify() {
 	fi
 	getent hosts "$(hostname)" >/dev/null || die "system: the host name $(hostname) does not resolve."
 	svc_is_active "$(_system_cron)" || die "system: cron is not running."
+	return
 }
 
 # Base packages, host name and locale stay: other software depends on them, and they were set on purpose.
 mod_remove() {
 	log_info "system: base packages, host name and locale stay as they are."
+	return
 }

@@ -12,10 +12,12 @@
 
 fw_backend() {
 	if os_is_debian; then printf 'ufw'; else printf 'firewalld'; fi
+	return
 }
 
 fw_vpn_network() {
 	config_get LSS_WIREGUARD_NETWORK 10.66.0.0/24
+	return
 }
 
 fw_is_enabled() {
@@ -24,27 +26,31 @@ fw_is_enabled() {
 	else
 		svc_is_active firewalld
 	fi
+	return
 }
 
 _fw_registry() {
 	printf '%s/firewall/%s' "${LSS_STATE_DIR:-/var/lib/lss}" "${LSS_MODULE:-core}"
+	return
 }
 
 _fw_registered() {
-	local registry
+	local rule=$1 registry
 	registry=$(_fw_registry)
-	[[ -f ${registry} ]] && grep -qxF -- "$1" "${registry}"
+	[[ -f ${registry} ]] && grep -qxF -- "${rule}" "${registry}"
+	return
 }
 
 _fw_parse() {
-	local spec=$1
+	local rule=$1 spec=$1
 	FW_SCOPE=${spec#*:}
 	[[ ${spec} == *:* ]] || FW_SCOPE=public
 	spec=${spec%%:*}
 	FW_PORT=${spec%/*}
 	FW_PROTO=${spec#*/}
 	[[ ${FW_PORT} =~ ^[0-9]+(-[0-9]+)?$ && ${FW_PROTO} =~ ^(tcp|udp)$ && ${FW_SCOPE} =~ ^(public|vpn|local)$ ]] ||
-		die "Invalid firewall rule '$1' (expected PORT/tcp|udp[:public|vpn|local])."
+		die "Invalid firewall rule '${rule}' (expected PORT/tcp|udp[:public|vpn|local])."
+	return
 }
 
 # firewalld command: the live one while the service runs, the offline one otherwise. Both change the permanent
@@ -55,6 +61,7 @@ _fw_firewalld() {
 	else
 		firewall-offline-cmd "$@"
 	fi
+	return
 }
 
 # _fw_apply add|remove: changes the rule parsed by _fw_parse. Fails loudly; a rule that could not be removed stays
@@ -87,6 +94,7 @@ _fw_apply() {
 			firewall-cmd --reload >/dev/null
 		fi
 	fi
+	return
 }
 
 # The backend tool is installed (the firewall module installs it).
@@ -96,6 +104,7 @@ fw_available() {
 	else
 		command -v firewall-offline-cmd >/dev/null 2>&1
 	fi
+	return
 }
 
 # Applies the rules every module recorded (used by the firewall module after installing the backend).
@@ -110,6 +119,7 @@ fw_apply_all() {
 			LSS_MODULE=${module} _fw_apply add
 		done <"${registry}"
 	done
+	return
 }
 
 # fw_allow SPEC...: opens ports for the current module (no-op for scope local).
@@ -128,6 +138,7 @@ fw_allow() {
 		printf '%s\n' "${spec}" >>"${registry}"
 		files_note_change "firewall allow ${spec}"
 	done
+	return
 }
 
 # fw_remove_module: closes every port the current module opened.
@@ -154,6 +165,7 @@ fw_ssh_port() {
 	# broken pipe reaches pipefail.
 	port=$({ sshd -T 2>/dev/null || true; } | awk '$1 == "port" && !found { print $2; found = 1 }')
 	printf '%s' "${port:-22}"
+	return
 }
 
 # fw_rollback_arm SECONDS: if lss runs over SSH, schedules a firewall shutdown in case this session dies. The
@@ -170,4 +182,5 @@ fw_rollback_arm() {
 fw_rollback_cancel() {
 	systemctl stop lss-firewall-rollback.timer >/dev/null 2>&1 || true
 	systemctl reset-failed lss-firewall-rollback.service >/dev/null 2>&1 || true
+	return
 }

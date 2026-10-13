@@ -13,10 +13,12 @@ AIDE_UNIT=lss-aide-check
 
 _aide_conf() {
 	if os_is_debian; then printf '/etc/aide/aide.conf'; else printf '/etc/aide.conf'; fi
+	return
 }
 
 _aide_db() {
 	if os_is_debian; then printf '/var/lib/aide/aide.db'; else printf '/var/lib/aide/aide.db.gz'; fi
+	return
 }
 
 mod_check() {
@@ -26,10 +28,12 @@ mod_check() {
 		[[ ${path} =~ ^/[A-Za-z0-9._+/-]+$ && ${path} != */../* && ${path} != */.. ]] ||
 			die "LSS_AIDE_EXCLUDE: '${path}' is not an absolute directory path."
 	done
+	return
 }
 
 mod_install() {
 	pkg_install_family "aide aide-common" "aide"
+	return
 }
 
 # Paths that change all the time and would drown real findings.
@@ -54,6 +58,7 @@ EOF
 		# AIDE reads the path as a regular expression; a literal dot must not match any character.
 		printf '!%s\n' "${path//./[.]}"
 	done
+	return
 }
 
 mod_configure() {
@@ -111,12 +116,14 @@ EOF
 	svc_enable "${AIDE_UNIT}.timer"
 	# Debian's own daily check would run a second time.
 	svc_disable dailyaidecheck.timer
+	return
 }
 
 mod_verify() {
 	[[ -s $(_aide_db) ]] || die "aide: no database at $(_aide_db)."
 	aide --config "$(_aide_conf)" --config-check >/dev/null || die "aide: the configuration is invalid."
 	svc_is_enabled "${AIDE_UNIT}.timer" || die "aide: the daily check is not scheduled."
+	return
 }
 
 mod_remove() {
@@ -128,4 +135,5 @@ mod_remove() {
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove_family "aide aide-common" "aide"
 	fi
+	return
 }

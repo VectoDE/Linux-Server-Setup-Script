@@ -12,10 +12,12 @@ nts|true|Authenticate the time servers with NTS (they must support it)"
 
 _time_unit() {
 	if os_is_debian; then printf 'chrony'; else printf 'chronyd'; fi
+	return
 }
 
 _time_config() {
 	if os_is_debian; then printf '/etc/chrony/chrony.conf'; else printf '/etc/chrony.conf'; fi
+	return
 }
 
 mod_check() {
@@ -27,6 +29,7 @@ mod_check() {
 	done
 	[[ -n $(opt servers) ]] || die "LSS_TIME_SERVERS must name at least one server."
 	opt_bool nts || true
+	return
 }
 
 # A container shares the clock of its host, which keeps it in sync; there the module sets only the time zone.
@@ -35,6 +38,7 @@ mod_install() {
 	if ! os_in_container; then
 		pkg_install chrony
 	fi
+	return
 }
 
 mod_configure() {
@@ -100,4 +104,5 @@ mod_remove() {
 	if svc_exists systemd-timesyncd; then
 		svc_enable systemd-timesyncd
 	fi
+	return
 }

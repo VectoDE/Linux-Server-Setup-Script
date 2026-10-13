@@ -16,6 +16,7 @@ _module_dirs() {
 	else
 		printf '%s/modules\n' "${LSS_ROOT}"
 	fi
+	return
 }
 
 module_file() {
@@ -33,7 +34,9 @@ module_file() {
 }
 
 module_exists() {
-	module_file "$1" >/dev/null
+	local name=$1
+	module_file "${name}" >/dev/null
+	return
 }
 
 # module_list: all module names, sorted by group then name ("group name" per line with --groups).
@@ -50,18 +53,20 @@ module_list() {
 			fi
 		done
 	done < <(_module_dirs) | sort -u
+	return
 }
 
 # module_meta NAME VAR: prints a metadata variable of a module. The final newline lets `while read` loops see the
 # last line; command substitutions drop it.
 module_meta() {
-	local file
-	file=$(module_file "$1") || die "Unknown module '$1'. See 'lss list'."
+	local name=$1 file
+	file=$(module_file "${name}") || die "Unknown module '${name}'. See 'lss list'."
 	(
 		# shellcheck source=/dev/null
 		source "${file}"
 		printf '%s\n' "${!2-}"
 	)
+	return
 }
 
 # Resolves an alternative "a|b|c" against the requested set and installed modules.
@@ -130,6 +135,7 @@ module_mode() {
 	else
 		printf '%s' "${modes%% *}"
 	fi
+	return
 }
 
 # Variables handed to every module step (module_run). Settings, masks and paths; nothing else of the caller leaks.
@@ -156,6 +162,7 @@ _module_context() {
 		done >"${file}"
 	)
 	printf '%s' "${file}"
+	return
 }
 
 # module_run NAME STEP: runs mod_STEP of the module in a fresh bash process (lib/step.sh) and returns its status.
@@ -166,6 +173,7 @@ module_run() {
 	context=$(_module_context)
 	LSS_STEP_MODULE=${name} LSS_STEP_NAME=${step} LSS_STEP_FILE=${file} LSS_STEP_CONTEXT=${context} \
 		bash "${LSS_ROOT}/lib/step.sh"
+	return
 }
 
 # module_apply NAME: install, configure and verify one module; restores its files on failure.
@@ -195,6 +203,7 @@ module_apply() {
 	else
 		log_ok "${name}: done (${changes} changes)"
 	fi
+	return
 }
 
 module_remove() {
@@ -212,6 +221,7 @@ module_remove() {
 	files_forget "${name}"
 	state_forget "${name}"
 	log_ok "${name}: removed"
+	return
 }
 
 # config_unknown_keys: prints the given settings that no module reads, usually typos, one per line.
@@ -228,6 +238,7 @@ config_unknown_keys() {
 	for key in "${!LSS_CFG_SET[@]}" "${!LSS_CFG_FILE[@]}" "${!LSS_CFG_PROFILE[@]}"; do
 		[[ -n ${known[${key}]+x} ]] || printf '%s\n' "${key}"
 	done | sort -u
+	return
 }
 
 # opt OPTION: value of an option of the module running this step (LSS_<MODULE>_<OPTION>), with the default from the
@@ -245,19 +256,20 @@ opt() {
 
 # opt_bool OPTION: true for 1/true/yes/on, false for 0/false/no/off/empty; anything else stops the step.
 opt_bool() {
-	local value
-	value=$(opt "$1") || die "${LSS_MODULE}: unknown option '$1'."
+	local option=$1 value
+	value=$(opt "${option}") || die "${LSS_MODULE}: unknown option '${option}'."
 	case ${value,,} in
 	1 | true | yes | on) return 0 ;;
 	0 | false | no | off | '') return 1 ;;
-	*) die "$(config_key "${LSS_MODULE}" "$1") must be true or false, got '${value}'." ;;
+	*) die "$(config_key "${LSS_MODULE}" "${option}") must be true or false, got '${value}'." ;;
 	esac
 }
 
 # opt_int OPTION: prints the option after checking it is a non-negative integer.
 opt_int() {
-	local value
-	value=$(opt "$1") || die "${LSS_MODULE}: unknown option '$1'."
-	[[ ${value} =~ ^[0-9]+$ ]] || die "$(config_key "${LSS_MODULE}" "$1") must be a number, got '${value}'."
+	local option=$1 value
+	value=$(opt "${option}") || die "${LSS_MODULE}: unknown option '${option}'."
+	[[ ${value} =~ ^[0-9]+$ ]] || die "$(config_key "${LSS_MODULE}" "${option}") must be a number, got '${value}'."
 	printf '%s' "${value}"
+	return
 }

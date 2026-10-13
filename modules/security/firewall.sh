@@ -11,6 +11,7 @@ rollback|120|Seconds after which the firewall switches itself off again if lss c
 
 _fw_unit() {
 	if [[ $(fw_backend) == ufw ]]; then printf 'ufw'; else printf 'firewalld'; fi
+	return
 }
 
 mod_check() {
@@ -19,6 +20,7 @@ mod_check() {
 		_fw_parse "${spec}"
 	done
 	opt_int rollback >/dev/null
+	return
 }
 
 mod_install() {
@@ -27,6 +29,7 @@ mod_install() {
 	else
 		pkg_install firewalld
 	fi
+	return
 }
 
 _fw_defaults_ufw() {
@@ -45,6 +48,7 @@ _fw_defaults_ufw() {
 		changed=1
 	fi
 	[[ ${changed} == 0 ]] || files_note_change "ufw defaults"
+	return
 }
 
 # firewalld: public zone with nothing open but what lss records (no cockpit, no dhcpv6-client by default).
@@ -61,6 +65,7 @@ _fw_defaults_firewalld() {
 			files_note_change "firewalld: closed service ${service}"
 		fi
 	done
+	return
 }
 
 mod_configure() {
@@ -93,6 +98,7 @@ mod_configure() {
 	elif [[ $(fw_backend) == firewalld ]]; then
 		firewall-cmd --reload >/dev/null
 	fi
+	return
 }
 
 # _fw_is_open PORT [PROTO]: the port is open to everyone.
@@ -103,6 +109,7 @@ _fw_is_open() {
 	else
 		firewall-cmd --zone=public --query-port="${port}/${proto}" >/dev/null
 	fi
+	return
 }
 
 mod_verify() {
@@ -123,6 +130,7 @@ mod_verify() {
 			_fw_is_open "${FW_PORT}" "${FW_PROTO}" || die "firewall: ${spec} is not open."
 		fi
 	done
+	return
 }
 
 # Switches the firewall off. The rules of other modules stay recorded, so installing the module again restores them.
@@ -136,4 +144,5 @@ mod_remove() {
 	else
 		svc_disable firewalld
 	fi
+	return
 }

@@ -9,18 +9,20 @@
 
 # _kv FILE KEY: value of KEY in a KEY=value file (parsed, not sourced).
 _kv() {
-	local line
+	local file=$1 key=$2 line
 	while IFS= read -r line || [[ -n ${line} ]]; do
-		[[ ${line} == "$2="* ]] || continue
+		[[ ${line} == "${key}="* ]] || continue
 		printf '%s' "${line#*=}"
 		return 0
-	done <"$1"
+	done <"${file}"
 }
 
 # repo_key_fingerprints KEYFILE: prints the primary key fingerprints in the file.
 repo_key_fingerprints() {
-	gpg --batch --quiet --show-keys --with-colons "$1" 2>/dev/null |
+	local keyfile=$1
+	gpg --batch --quiet --show-keys --with-colons "${keyfile}" 2>/dev/null |
 		awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }'
+	return
 }
 
 # repo_key_verify KEYFILE "FPR1 FPR2 ...": every key in the file must be one of the expected fingerprints.
@@ -48,6 +50,7 @@ _repo_value() {
 	value=${value//\{\{arch\}\}/$(os_deb_arch)}
 	value=${value//\{\{id\}\}/${OS_ID}}
 	printf '%s' "${value}"
+	return
 }
 
 # repo_add NAME: installs the key and the source of data/repos/NAME.conf for the current distribution.
@@ -107,6 +110,7 @@ repo_gpgcheck=${repo_gpgcheck:-0}
 gpgkey=file://${keyring}
 EOF
 	fi
+	return
 }
 
 repo_remove() {
@@ -115,4 +119,5 @@ repo_remove() {
 	file_remove "/etc/apt/keyrings/lss-${name}.gpg"
 	file_remove "/etc/yum.repos.d/lss-${name}.repo"
 	file_remove "/etc/pki/rpm-gpg/lss-${name}.asc"
+	return
 }

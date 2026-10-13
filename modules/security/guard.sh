@@ -31,6 +31,7 @@ mod_check() {
 	[[ -z ${email} || ${email} =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "LSS_GUARD_EMAIL '${email}' is not an e-mail address."
 	[[ -z ${webhook} || ${webhook} =~ ^https://[^[:space:]]+$ ]] || die "LSS_GUARD_WEBHOOK must be an https:// URL."
 	[[ -x ${GUARD_LSS} ]] || die "guard needs lss installed as ${GUARD_LSS} (bootstrap.sh does that)."
+	return
 }
 
 mod_configure() {
@@ -74,6 +75,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
 	svc_enable "${GUARD_UNIT}.timer"
+	return
 }
 
 mod_verify() {
@@ -83,6 +85,7 @@ mod_verify() {
 	svc_is_enabled "${GUARD_UNIT}.timer" || die "guard: the daily run is not scheduled."
 	systemctl list-timers --all --no-legend "${GUARD_UNIT}.timer" | grep -q "${GUARD_UNIT}" ||
 		die "guard: systemd does not know the timer."
+	return
 }
 
 mod_remove() {
@@ -92,4 +95,5 @@ mod_remove() {
 	file_remove "${GUARD_SCRIPT}"
 	file_remove "${GUARD_CONF}"
 	svc_daemon_reload
+	return
 }

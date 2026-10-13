@@ -12,6 +12,7 @@ LSS_PKG_UPDATED=${LSS_PKG_UPDATED:-0}
 _pkg_apt() {
 	DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q -o DPkg::Lock::Timeout=600 \
 		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
+	return
 }
 
 pkg_update() {
@@ -25,6 +26,7 @@ pkg_update() {
 		mkdir -p "${LSS_STATE_DIR:-/var/lib/lss}/runs/${LSS_RUN_ID}"
 		: >"${LSS_STATE_DIR:-/var/lib/lss}/runs/${LSS_RUN_ID}/pkg-updated"
 	fi
+	return
 }
 
 # Refreshes the package index once per run (after a repository was added, call pkg_update directly).
@@ -35,11 +37,13 @@ pkg_update_once() {
 }
 
 pkg_is_installed() {
+	local package=$1
 	if os_is_debian; then
-		[[ $(dpkg-query -W -f='${Status}' "$1" 2>/dev/null) == 'install ok installed' ]]
+		[[ $(dpkg-query -W -f='${Status}' "${package}" 2>/dev/null) == 'install ok installed' ]]
 	else
-		rpm -q --whatprovides "$1" >/dev/null 2>&1
+		rpm -q --whatprovides "${package}" >/dev/null 2>&1
 	fi
+	return
 }
 
 pkg_missing() {
@@ -47,6 +51,7 @@ pkg_missing() {
 	for package in "$@"; do
 		pkg_is_installed "${package}" || printf '%s\n' "${package}"
 	done
+	return
 }
 
 pkg_install() {
@@ -65,13 +70,15 @@ pkg_install() {
 
 # pkg_install_family DEBIAN_PACKAGES RHEL_PACKAGES (space-separated lists).
 pkg_install_family() {
+	local debian=$1 rhel=$2
 	local -a list=()
 	if os_is_debian; then
-		read -ra list <<<"$1"
+		read -ra list <<<"${debian}"
 	else
-		read -ra list <<<"$2"
+		read -ra list <<<"${rhel}"
 	fi
 	[[ ${#list[@]} -eq 0 ]] || pkg_install "${list[@]}"
+	return
 }
 
 pkg_remove() {
@@ -91,13 +98,15 @@ pkg_remove() {
 }
 
 pkg_remove_family() {
+	local debian=$1 rhel=$2
 	local -a list=()
 	if os_is_debian; then
-		read -ra list <<<"$1"
+		read -ra list <<<"${debian}"
 	else
-		read -ra list <<<"$2"
+		read -ra list <<<"${rhel}"
 	fi
 	[[ ${#list[@]} -eq 0 ]] || pkg_remove "${list[@]}"
+	return
 }
 
 # Installs all available updates (used by the system module).
@@ -108,6 +117,7 @@ pkg_upgrade() {
 	else
 		log_command dnf -y -q upgrade --refresh
 	fi
+	return
 }
 
 # EPEL on the RHEL family (needed by fail2ban, aide extras, rkhunter, clamav, ...).

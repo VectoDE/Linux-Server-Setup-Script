@@ -56,6 +56,7 @@ os_detect() {
 	if [[ -z ${OS_CODENAME} && ${OS_FAMILY} == debian ]]; then
 		OS_CODENAME=$(_os_value UBUNTU_CODENAME)
 	fi
+	return
 }
 
 # Prints why the detected system is not supported, or nothing.
@@ -83,10 +84,11 @@ os_require_supported() {
 	local reason
 	reason=$(os_unsupported_reason)
 	[[ -z ${reason} ]] || die "${reason}"
+	return
 }
 
-os_is_debian() { [[ ${OS_FAMILY} == debian ]]; }
-os_is_rhel() { [[ ${OS_FAMILY} == rhel ]]; }
+os_is_debian() { [[ ${OS_FAMILY} == debian ]]; return; }
+os_is_rhel() { [[ ${OS_FAMILY} == rhel ]]; return; }
 
 # Debian architecture name (amd64/arm64) for repository lines and downloads.
 os_deb_arch() {
@@ -95,10 +97,12 @@ os_deb_arch() {
 	aarch64) printf 'arm64' ;;
 	*) printf '%s' "${OS_ARCH}" ;;
 	esac
+	return
 }
 
 # True inside a container (Docker, Podman, LXC, systemd-nspawn). Modules that change the kernel or block devices
 # refuse to run there, because the change would hit the host or fail.
 os_in_container() {
 	systemd-detect-virt --container --quiet 2>/dev/null
+	return
 }

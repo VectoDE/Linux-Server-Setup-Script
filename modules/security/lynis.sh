@@ -19,11 +19,13 @@ mod_check() {
 	index=$(opt_int min_index)
 	((index <= 100)) || die "LSS_LYNIS_MIN_INDEX must be between 0 and 100."
 	[[ $(opt audit_day) =~ ^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$ ]] || die "LSS_LYNIS_AUDIT_DAY must be Mon..Sun."
+	return
 }
 
 mod_install() {
 	pkg_enable_epel
 	pkg_install lynis
+	return
 }
 
 mod_configure() {
@@ -62,12 +64,14 @@ Persistent=true
 WantedBy=timers.target
 EOF
 	svc_enable "${LYNIS_UNIT}.timer"
+	return
 }
 
 mod_verify() {
 	lynis show version >/dev/null || die "lynis: lynis does not run."
 	[[ -x ${LYNIS_RUNNER} ]] || die "lynis: ${LYNIS_RUNNER} is missing."
 	svc_is_enabled "${LYNIS_UNIT}.timer" || die "lynis: the weekly audit is not scheduled."
+	return
 }
 
 # lss audit: full audit now, prints findings and the hardening index, fails below LSS_LYNIS_MIN_INDEX.
@@ -85,6 +89,7 @@ mod_audit() {
 		die "Hardening index ${index} is below the required ${minimum}."
 	fi
 	log_ok "Hardening index ${index}"
+	return
 }
 
 mod_remove() {
@@ -96,4 +101,5 @@ mod_remove() {
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove lynis
 	fi
+	return
 }

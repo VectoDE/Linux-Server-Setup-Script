@@ -33,6 +33,7 @@ setting() {
 finding() {
 	FINDINGS+=("$1")
 	logger -t lss-guard -p auth.warning -- "$1"
+	return
 }
 
 check_modules() {
@@ -49,6 +50,7 @@ check_modules() {
 			finding "Module ${name} is not in the state lss set up (lss verify ${name})."
 		fi
 	done
+	return
 }
 
 check_units() {
@@ -58,6 +60,7 @@ check_units() {
 			finding "Service ${unit} has failed."
 		fi
 	done < <(systemctl --failed --no-legend --plain 2>/dev/null | awk '{ print $1 }')
+	return
 }
 
 check_disks() {
@@ -70,6 +73,7 @@ check_disks() {
 			finding "File system ${mount} is ${use} % full."
 		fi
 	done < <(df --output=pcent,target -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | tail -n +2)
+	return
 }
 
 check_updates() {
@@ -85,6 +89,7 @@ check_updates() {
 	if [[ -f /run/reboot-required ]] || { command -v needs-restarting >/dev/null 2>&1 && ! needs-restarting --reboothint >/dev/null 2>&1; }; then
 		finding "A reboot is pending to activate installed updates."
 	fi
+	return
 }
 
 check_lynis() {
@@ -105,6 +110,7 @@ json_escape() {
 	text=${text//$'\t'/\\t}
 	text=${text//$'\r'/}
 	printf '%s' "${text}"
+	return
 }
 
 notify() {
@@ -126,6 +132,7 @@ notify() {
 		printf 'To: %s\nSubject: [lss guard] %s\n\n%s\n' "${email}" "$(hostname -f 2>/dev/null || hostname)" "${summary}" |
 			sendmail -t || logger -t lss-guard -p auth.err -- "Mail delivery failed"
 	fi
+	return
 }
 
 main() {

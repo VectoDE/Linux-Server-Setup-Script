@@ -25,10 +25,12 @@ SSH_PUBKEYS="ssh-ed25519 sk-ssh-ed25519@openssh.com ecdsa-sha2-nistp521 ecdsa-sh
 
 _ssh_unit() {
 	if os_is_debian; then printf 'ssh'; else printf 'sshd'; fi
+	return
 }
 
 _ssh_admin_group() {
 	if os_is_debian; then printf 'sudo'; else printf 'wheel'; fi
+	return
 }
 
 # _ssh_supported QUERY WANTED: comma-separated list of the WANTED algorithms that "ssh -Q QUERY" knows.
@@ -42,6 +44,7 @@ _ssh_supported() {
 	done
 	[[ -n ${result} ]] || die "ssh-hardening: OpenSSH supports none of: ${wanted}"
 	printf '%s' "${result%,}"
+	return
 }
 
 # Lockout protection: at least one administrator must be able to log in with a key once passwords are off.
@@ -54,6 +57,7 @@ _ssh_key_admins() {
 			printf '%s\n' "${member}"
 		fi
 	done
+	return
 }
 
 mod_check() {
@@ -70,6 +74,7 @@ mod_check() {
 		[[ ${group} =~ ^[a-z_][a-z0-9_-]*$ ]] || die "LSS_SSH_HARDENING_ALLOW_GROUPS: '${group}' is not a group name."
 	done
 	[[ $(opt banner) != *$'\n'* ]] || die "LSS_SSH_HARDENING_BANNER must be one line."
+	return
 }
 
 mod_install() {
@@ -77,6 +82,7 @@ mod_install() {
 	if os_is_rhel && [[ $(opt port) != 22 ]]; then
 		pkg_install policycoreutils-python-utils
 	fi
+	return
 }
 
 _ssh_render() {
@@ -122,6 +128,7 @@ MACs ${SSH_MAC_LIST}
 HostKeyAlgorithms ${SSH_HOSTKEY_LIST}
 PubkeyAcceptedAlgorithms ${SSH_PUBKEY_LIST}
 EOF
+	return
 }
 
 # Diffie-Hellman group exchange only with moduli of 3072 bits or more.
@@ -188,6 +195,7 @@ mod_configure() {
 	if [[ ${changed} == 1 ]]; then
 		svc_reload "$(_ssh_unit)"
 	fi
+	return
 }
 
 mod_verify() {
@@ -201,6 +209,7 @@ mod_verify() {
 	grep -qx "port ${port}" <<<"${effective}" || die "ssh-hardening: sshd does not use port ${port}."
 	svc_wait_port 127.0.0.1 "${port}" 10 || die "ssh-hardening: nothing listens on port ${port}."
 	[[ -n $(_ssh_key_admins) ]] || die "ssh-hardening: no administrator with an SSH key (lockout risk)."
+	return
 }
 
 # Back to the distribution's defaults: the lss settings go, sshd keeps running.
@@ -209,4 +218,5 @@ mod_remove() {
 	file_remove "${SSH_BANNER}"
 	sshd -t || die "ssh-hardening: sshd configuration is invalid without the lss settings."
 	svc_reload "$(_ssh_unit)"
+	return
 }

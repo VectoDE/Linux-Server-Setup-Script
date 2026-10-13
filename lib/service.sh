@@ -6,14 +6,17 @@
 
 svc_exists() {
 	systemctl list-unit-files --no-legend "$1" "$1.service" 2>/dev/null | grep -q .
+	return
 }
 
 svc_is_active() {
 	systemctl is-active --quiet "$1"
+	return
 }
 
 svc_is_enabled() {
 	systemctl is-enabled --quiet "$1" 2>/dev/null
+	return
 }
 
 # Enables and starts a unit; records a change only if it was not enabled or not running.
@@ -68,6 +71,7 @@ svc_reload() {
 
 svc_daemon_reload() {
 	systemctl daemon-reload
+	return
 }
 
 # svc_dropin UNIT NAME: writes /etc/systemd/system/UNIT.d/NAME.conf from stdin and reloads systemd when it changed.
@@ -78,6 +82,7 @@ svc_dropin() {
 	if [[ ${LSS_FILE_CHANGED} == 1 ]]; then
 		svc_daemon_reload
 	fi
+	return
 }
 
 svc_dropin_remove() {
@@ -107,4 +112,5 @@ svc_unit() {
 	if [[ ${LSS_FILE_CHANGED} == 1 ]]; then
 		svc_daemon_reload
 	fi
+	return
 }

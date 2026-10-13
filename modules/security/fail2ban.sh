@@ -26,17 +26,20 @@ mod_check() {
 	for address in $(opt ignoreip); do
 		[[ ${address} =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]] || die "LSS_FAIL2BAN_IGNOREIP: '${address}' is not an address."
 	done
+	return
 }
 
 mod_install() {
 	pkg_enable_epel
 	pkg_install_family "fail2ban python3-systemd nftables" "fail2ban-server python3-systemd nftables"
+	return
 }
 
 _fail2ban_ssh_port() {
 	local port
 	port=$({ sshd -T 2>/dev/null || true; } | awk '$1 == "port" { print $2 }' | paste -sd ',' -)
 	printf '%s' "${port:-ssh}"
+	return
 }
 
 mod_configure() {
@@ -87,6 +90,7 @@ EOF
 	if [[ ${changed} == 1 ]]; then
 		svc_restart fail2ban
 	fi
+	return
 }
 
 mod_verify() {
@@ -98,6 +102,7 @@ mod_verify() {
 	done
 	fail2ban-client ping >/dev/null 2>&1 || die "fail2ban: the server does not answer."
 	fail2ban-client status sshd >/dev/null 2>&1 || die "fail2ban: the sshd jail is not running."
+	return
 }
 
 mod_remove() {
@@ -105,4 +110,5 @@ mod_remove() {
 	file_remove "${FAIL2BAN_JAIL}"
 	file_remove "${FAIL2BAN_SERVER}"
 	pkg_remove_family "fail2ban" "fail2ban-server"
+	return
 }

@@ -48,6 +48,7 @@ Options:
       --no-color                 no colours
   -h, --help                     this help
 EOF
+	return
 }
 
 LSS_DRY_RUN=0
@@ -126,6 +127,7 @@ parse_args() {
 
 require_root() {
 	[[ ${EUID} -eq 0 ]] || die "lss changes the system and must run as root (sudo lss ...)."
+	return
 }
 
 start_run() {
@@ -147,6 +149,7 @@ start_run() {
 	exec 9>"${lock}"
 	flock -n 9 || die "Another lss run is in progress."
 	log_info "lss ${LSS_VERSION} on ${OS_NAME} (${OS_ARCH}), run ${LSS_RUN_ID}"
+	return
 }
 
 load_settings() {
@@ -165,6 +168,7 @@ load_settings() {
 	for unknown in ${unknown}; do
 		log_warn "${unknown} is not a setting of any module; check the spelling ('lss info MODULE' lists them)."
 	done
+	return
 }
 
 confirm() {
@@ -185,6 +189,7 @@ cmd_list() {
 		description=$(module_meta "${name}" MOD_DESCRIPTION)
 		printf '%-11s %-18s %-10s %s\n' "${group}" "${name}" "${state:--}" "${description}"
 	done < <(module_list --groups)
+	return
 }
 
 cmd_info() {
@@ -203,6 +208,7 @@ cmd_info() {
 		IFS='|' read -r key default description <<<"${option}"
 		printf '  %-40s %s (default: %s)\n' "$(config_key "${name}" "${key}")" "${description}" "${default:-empty}"
 	done < <(module_meta "${name}" MOD_OPTIONS)
+	return
 }
 
 selected_modules() {
@@ -220,6 +226,7 @@ selected_modules() {
 	fi
 	[[ ${#modules[@]} -gt 0 ]] || die "Name modules, 'all' or --profile NAME. See 'lss list'."
 	printf '%s\n' "${modules[@]}"
+	return
 }
 
 cmd_install() {
@@ -255,6 +262,7 @@ cmd_configure() {
 		fi
 		log_ok "${name}: configured"
 	done
+	return
 }
 
 cmd_verify() {
@@ -289,6 +297,7 @@ cmd_status() {
 	done < <(state_installed_modules)
 	printf '\nFailed services:\n'
 	systemctl --failed --no-legend --plain | sed 's/^/  /' || true
+	return
 }
 
 cmd_remove() {
@@ -299,6 +308,7 @@ cmd_remove() {
 		module_exists "${name}" || die "Unknown module '${name}'."
 		module_remove "${name}"
 	done
+	return
 }
 
 cmd_audit() {
@@ -307,6 +317,7 @@ cmd_audit() {
 		cmd_install
 	fi
 	module_run lynis audit
+	return
 }
 
 cmd_secrets() {
@@ -314,6 +325,7 @@ cmd_secrets() {
 	secret_exists "${ARGS[1]}" || die "No secret named '${ARGS[1]}'."
 	cat -- "$(secret_path "${ARGS[1]}")"
 	printf '\n'
+	return
 }
 
 cmd_profiles() {
@@ -321,6 +333,7 @@ cmd_profiles() {
 	for file in "${LSS_ROOT}"/profiles/*.conf; do
 		printf '%-16s %s\n' "$(basename "${file}" .conf)" "$(sed -n 's/^# Profile: //p' "${file}")"
 	done
+	return
 }
 
 main() {

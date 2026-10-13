@@ -16,6 +16,7 @@ _tools_wanted() {
 	if os_is_debian; then list=${TOOLS_DEB}; else list=${TOOLS_RPM}; fi
 	extra=$(opt extra)
 	printf '%s %s' "${list}" "${extra}"
+	return
 }
 
 mod_check() {
@@ -23,6 +24,7 @@ mod_check() {
 	for package in $(opt extra); do
 		[[ ${package} =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]] || die "LSS_TOOLS_EXTRA: '${package}' is not a package name."
 	done
+	return
 }
 
 mod_install() {
@@ -39,6 +41,7 @@ mod_install() {
 			printf ' %s' "${missing[@]}"
 		)"
 	fi
+	return
 }
 
 mod_verify() {
@@ -48,6 +51,7 @@ mod_verify() {
 	[[ ${#missing[@]} -eq 0 ]] || die "tools: not installed: ${missing[*]}"
 	tmux -V >/dev/null || die "tools: tmux does not run."
 	jq --version >/dev/null || die "tools: jq does not run."
+	return
 }
 
 mod_remove() {
@@ -56,4 +60,5 @@ mod_remove() {
 	if [[ ${#installed[@]} -gt 0 ]]; then
 		pkg_remove "${installed[@]}"
 	fi
+	return
 }

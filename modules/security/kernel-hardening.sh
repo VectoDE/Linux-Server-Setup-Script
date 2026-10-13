@@ -61,6 +61,7 @@ net.ipv6.conf.default.accept_source_route = 0
 net.ipv6.conf.all.accept_ra = ${accept_ra}
 net.ipv6.conf.default.accept_ra = ${accept_ra}
 EOF
+	return
 }
 
 mod_check() {
@@ -73,6 +74,7 @@ mod_check() {
 	if os_in_container; then
 		die "kernel-hardening changes the kernel; run it on a virtual machine or bare metal, not in a container."
 	fi
+	return
 }
 
 mod_configure() {
@@ -104,6 +106,7 @@ EOF
 # Managed by lss (module kernel-hardening).
 *    hard    core    0
 EOF
+	return
 }
 
 mod_verify() {
@@ -118,6 +121,7 @@ mod_verify() {
 		[[ ${actual% } == "${value}" ]] || die "kernel-hardening: ${key} is ${actual% }, expected ${value}."
 	done < <(_kh_settings)
 	modprobe -n -v cramfs 2>/dev/null | grep -q '/bin/false' || die "kernel-hardening: blocked modules can still be loaded."
+	return
 }
 
 mod_remove() {
@@ -127,4 +131,5 @@ mod_remove() {
 	file_remove "${KH_LIMITS}"
 	# The distribution defaults come back with "sysctl --system"; values without a default stay until reboot.
 	sysctl -q --system >/dev/null 2>&1 || true
+	return
 }

@@ -15,10 +15,11 @@ sudo_nopasswd|false|sudo without password (the generated password is then only n
 
 ADMIN_KEY_PATTERN='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}( [^[:cntrl:]]*)?$'
 
-_admin_name() { opt name; }
+_admin_name() { opt name; return; }
 
 _admin_group() {
 	if os_is_debian; then printf 'sudo'; else printf 'wheel'; fi
+	return
 }
 
 # Home directory of the administrator; empty if the account does not exist yet.
@@ -52,6 +53,7 @@ _admin_keys() {
 		fi
 		printf '%s\n' "${line}"
 	done
+	return
 }
 
 mod_check() {
@@ -69,10 +71,12 @@ mod_check() {
 			die "admin-user needs a public key: set LSS_ADMIN_USER_SSH_KEY or LSS_ADMIN_USER_GITHUB_USER."
 		fi
 	fi
+	return
 }
 
 mod_install() {
 	pkg_install sudo
+	return
 }
 
 # Writes a sudoers file only after visudo accepted it; a broken sudoers file would lock every administrator out.
@@ -86,6 +90,7 @@ _admin_sudoers() {
 	fi
 	rm -f -- "${tmp}"
 	file_write 0440 root:root "${dest}" <<<"${content}"
+	return
 }
 
 mod_configure() {
@@ -134,6 +139,7 @@ Defaults env_reset"
 		sudoers+=$'\n'"${name} ALL=(ALL:ALL) NOPASSWD: ALL"
 	fi
 	_admin_sudoers /etc/sudoers.d/00-lss "${sudoers}"
+	return
 }
 
 mod_verify() {
@@ -154,6 +160,7 @@ mod_verify() {
 	# The group rule is read directly: "sudo -l" runs PAM account checks that fail in minimal containers.
 	grep -rqsE "^%$(_admin_group)[[:space:]]+ALL[[:space:]]*=[[:space:]]*\(ALL(:ALL)?\)[[:space:]]+ALL" \
 		/etc/sudoers /etc/sudoers.d || die "admin-user: no sudoers rule grants %$(_admin_group) full sudo rights."
+	return
 }
 
 # The account stays (removing it could lock the administrator out); --purge deletes it unless it is in use.
@@ -169,4 +176,5 @@ mod_remove() {
 		secret_remove admin-user-password
 		log_info "Deleted user ${name}"
 	fi
+	return
 }

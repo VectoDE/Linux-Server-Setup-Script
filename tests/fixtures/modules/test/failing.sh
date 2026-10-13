@@ -10,4 +10,5 @@ mod_configure() {
 	file_write 0644 "${OWNER}" "${TEST_TARGET}/alpha.conf" <<<"overwritten by failing"
 	file_write 0644 "${OWNER}" "${TEST_TARGET}/failing.conf" <<<"new"
 	false
+	return
 }

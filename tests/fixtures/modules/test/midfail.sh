@@ -9,4 +9,5 @@ mod_configure() {
 	false
 	file_write 0644 "${OWNER}" "${TEST_TARGET}/midfail.conf" <<<"should not exist"
 	true
+	return
 }

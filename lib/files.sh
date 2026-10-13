@@ -12,10 +12,12 @@ LSS_MODULE=${LSS_MODULE:-}
 
 _files_run_dir() {
 	printf '%s/runs/%s' "${LSS_STATE_DIR}" "${LSS_RUN_ID:?LSS_RUN_ID is not set}"
+	return
 }
 
 _files_backup_dir() {
 	printf '%s/backup/%s/%s' "${LSS_STATE_DIR}" "${LSS_RUN_ID:?LSS_RUN_ID is not set}" "${LSS_MODULE:-core}"
+	return
 }
 
 # Records that the current module changed something (counted by the runner for the "unchanged" report).
@@ -24,16 +26,17 @@ files_note_change() {
 	dir=$(_files_run_dir)
 	mkdir -p "${dir}"
 	printf '%s\t%s\n' "${LSS_MODULE:-core}" "$*" >>"${dir}/changes"
+	return
 }
 
 files_changes_of() {
-	local file
+	local module=$1 file
 	file="$(_files_run_dir)/changes"
 	[[ -f ${file} ]] || {
 		printf '0'
 		return 0
 	}
-	awk -F '\t' -v module="$1" '$1 == module { count++ } END { print count + 0 }' "${file}"
+	awk -F '\t' -v module="${module}" '$1 == module { count++ } END { print count + 0 }' "${file}"
 }
 
 # Saves the current state of PATH (or that it did not exist) once per run and module.
@@ -88,6 +91,7 @@ _files_record_checksum() {
 		mv "${list}.tmp" "${list}"
 	fi
 	printf '%s\t%s\n' "${sum}" "${path}" >>"${list}"
+	return
 }
 
 # file_write MODE OWNER:GROUP DEST, content on stdin. Sets LSS_FILE_CHANGED to 1 or 0.
@@ -143,7 +147,9 @@ files_drifted() {
 }
 
 files_forget() {
-	rm -f -- "${LSS_STATE_DIR}/managed/$1"
+	local name=$1
+	rm -f -- "${LSS_STATE_DIR}/managed/${name}"
+	return
 }
 
 # file_ensure_lines MODE OWNER:GROUP DEST, lines on stdin: appends the lines DEST is missing, for files lss shares
@@ -178,4 +184,5 @@ file_ensure_lines() {
 	if command -v restorecon >/dev/null 2>&1; then
 		restorecon -F "${dest}" 2>/dev/null || true
 	fi
+	return
 }

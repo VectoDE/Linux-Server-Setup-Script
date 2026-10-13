@@ -13,10 +13,12 @@ mod_check() {
 	if os_in_container; then
 		die "usbguard needs the kernel's USB authorisation; run it on a virtual machine or bare metal."
 	fi
+	return
 }
 
 mod_install() {
 	pkg_install usbguard
+	return
 }
 
 mod_configure() {
@@ -33,11 +35,13 @@ mod_configure() {
 	if [[ ${changed} == 1 ]]; then
 		svc_restart usbguard
 	fi
+	return
 }
 
 mod_verify() {
 	svc_is_active usbguard || die "usbguard: the service is not running."
 	usbguard list-rules >/dev/null || die "usbguard: the daemon does not answer."
+	return
 }
 
 mod_remove() {
@@ -46,4 +50,5 @@ mod_remove() {
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove usbguard
 	fi
+	return
 }

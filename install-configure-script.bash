@@ -20,6 +20,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 log(){
   local level=$1; shift
   printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*"
+  return
 }
 
 die(){
@@ -37,6 +38,7 @@ handle_error(){
 
 cleanup(){
   log "INFO" "${SCRIPT_NAME} finished. Review ${LOG_FILE} for a persistent record."
+  return
 }
 trap cleanup EXIT
 
@@ -73,6 +75,7 @@ Environment variables mirror the CLI arguments. Additional toggles:
   ENABLE_SSH_HARDENING=true   Apply conservative SSH configuration.
   ENABLE_AUTO_UPDATES=false   Skip unattended upgrades setup.
 EOF
+  return
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -88,17 +91,17 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-if [ -n "${DOMAIN-}" ] && [ -z "$DOMAINS_RAW" ]; then
+if [[ -n "${DOMAIN-}" ]] && [[ -z "$DOMAINS_RAW" ]]; then
   DOMAINS_RAW="$DOMAIN"
 fi
-if [ -n "${DOMAINS-}" ] && [ -z "$DOMAINS_RAW" ]; then
+if [[ -n "${DOMAINS-}" ]] && [[ -z "$DOMAINS_RAW" ]]; then
   DOMAINS_RAW="$DOMAINS"
 fi
-if [ -z "$DOMAINS_RAW" ]; then
+if [[ -z "$DOMAINS_RAW" ]]; then
   die "No domains provided. Supply via --domains or DOMAINS environment variable."
 fi
 
-if [ -z "$DB_ROOT_PASS" ]; then
+if [[ -z "$DB_ROOT_PASS" ]]; then
   command -v openssl >/dev/null 2>&1 || die "openssl is required to generate a database password. Install it first."
   DB_ROOT_PASS=$(openssl rand -base64 24)
   log "WARN" "No DB root password provided; generated a secure password automatically."
@@ -111,12 +114,14 @@ detect_os(){
   OS_LIKE=${ID_LIKE,,}
   OS_VERSION=${VERSION_ID,,}
   log "INFO" "Detected OS: $OS_ID (like: $OS_LIKE) version: $OS_VERSION"
+  return
 }
 
 require_root(){
-  if [ "$EUID" -ne 0 ]; then
+  if [[ "$EUID" -ne 0 ]]; then
     die "This script must be run as root. Retry with sudo."
   fi
+  return
 }
 
 verify_prerequisites(){
@@ -124,6 +129,7 @@ verify_prerequisites(){
   for bin in "${required_cmds[@]}"; do
     command -v "$bin" >/dev/null 2>&1 || die "Required command '$bin' not found. Install it and retry."
   done
+  return
 }
 
 parse_domain_groups(){
@@ -133,14 +139,15 @@ parse_domain_groups(){
   DOMAIN_GROUPS=()
   for entry in "${sanitized[@]}"; do
     local trimmed=${entry//[[:space:]]/}
-    [ -n "$trimmed" ] || continue
+    [[ -n "$trimmed" ]] || continue
     DOMAIN_GROUPS+=("$trimmed")
   done
-  if [ "${#DOMAIN_GROUPS[@]}" -eq 0 ]; then
+  if [[ "${#DOMAIN_GROUPS[@]}" -eq 0 ]]; then
     die "Unable to parse provided domains."
   fi
   PRIMARY_DOMAIN=$(printf '%s' "${DOMAIN_GROUPS[0]}" | awk -F',' '{print $1}')
   log "INFO" "Primary domain resolved as: ${PRIMARY_DOMAIN}"
+  return
 }
 
 determine_web_user(){
@@ -157,6 +164,7 @@ determine_web_user(){
       die "Unsupported OS: $OS_ID"
       ;;
   esac
+  return
 }
 
 check_system_resources(){
@@ -169,6 +177,7 @@ check_system_resources(){
       die "Insufficient memory. Rerun with --force if you want to continue regardless."
     fi
   fi
+  return
 }
 
 update_system_packages(){
@@ -183,11 +192,16 @@ update_system_packages(){
     centos|rhel)
       yum -y update
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
+  return
 }
 
 ensure_state_marker(){
   echo "mode=${MODE}" > "${STATE_DIR}/last-run"
+  return
 }
 
 # --------------------------- INSTALL COMMON TOOLS ---------------------------
@@ -207,22 +221,27 @@ install_common(){
       die "Unsupported OS: $OS_ID"
       ;;
   esac
+  return
 }
 
 # --------------------------- PACKAGE INSTALLERS ---------------------------
 install_node(){
-  local NODE_VERSION=20
-  log "INFO" "Installing Node.js ${NODE_VERSION}.x"
+  local node_version=20
+  log "INFO" "Installing Node.js ${node_version}.x"
   case "$OS_ID" in
     ubuntu|debian)
-      curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+      curl -fsSL https://deb.nodesource.com/setup_${node_version}.x | bash -
       apt-get install -y nodejs build-essential
       ;;
     centos|rhel)
-      curl -fsSL https://rpm.nodesource.com/setup_${NODE_VERSION}.x | bash -
+      curl -fsSL https://rpm.nodesource.com/setup_${node_version}.x | bash -
       yum install -y nodejs gcc-c++ make
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
+  return
 }
 
 install_php(){
@@ -231,7 +250,7 @@ install_php(){
     ubuntu|debian)
       export DEBIAN_FRONTEND=noninteractive
       apt-get install -y lsb-release ca-certificates apt-transport-https gnupg
-      if [ ! -f /etc/apt/sources.list.d/php.list ]; then
+      if [[ ! -f /etc/apt/sources.list.d/php.list ]]; then
         curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury-php.gpg
         echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
       fi
@@ -246,7 +265,11 @@ install_php(){
       yum-config-manager --enable remi-php${remi_stream} || true
       yum install -y php php-fpm php-mysqlnd php-cli php-curl php-gd php-mbstring php-xml php-zip php-bcmath
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
+  return
 }
 
 install_database(){
@@ -261,6 +284,9 @@ install_database(){
       yum install -y mariadb-server mariadb
       systemctl enable --now mariadb
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
   mysql --user=root <<MYSQL_SECURE
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASS}';
@@ -270,6 +296,7 @@ DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
 FLUSH PRIVILEGES;
 MYSQL_SECURE
   log "INFO" "MariaDB configured with provided root password"
+  return
 }
 
 install_nginx(){
@@ -281,8 +308,12 @@ install_nginx(){
     centos|rhel)
       yum install -y nginx
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
   systemctl enable --now nginx
+  return
 }
 
 install_phpmyadmin_native(){
@@ -295,14 +326,18 @@ install_phpmyadmin_native(){
       apt-get install -y phpmyadmin
       ;;
     centos|rhel)
-      local PHP_MYADMIN_DIR=/usr/share/phpmyadmin
-      mkdir -p "$PHP_MYADMIN_DIR"
+      local php_myadmin_dir=/usr/share/phpmyadmin
+      mkdir -p "$php_myadmin_dir"
       wget -qO- https://files.phpmyadmin.net/phpMyAdmin/latest/phpMyAdmin-latest-all-languages.tar.gz | \
-        tar xz --strip-components=1 -C "$PHP_MYADMIN_DIR"
+        tar xz --strip-components=1 -C "$php_myadmin_dir"
       mkdir -p /var/lib/phpmyadmin/tmp
-      chown -R root:root "$PHP_MYADMIN_DIR"
+      chown -R root:root "$php_myadmin_dir"
+      ;;
+    *)
+      die "Unsupported OS: $OS_ID"
       ;;
   esac
+  return
 }
 
 install_fail2ban(){
@@ -313,6 +348,9 @@ install_fail2ban(){
       ;;
     centos|rhel)
       yum install -y fail2ban
+      ;;
+    *)
+      die "Unsupported OS: $OS_ID"
       ;;
   esac
   mkdir -p /etc/fail2ban/jail.d
@@ -328,6 +366,7 @@ bantime = 3600
 enabled = true
 JAIL
   systemctl enable --now fail2ban
+  return
 }
 
 install_certbot(){
@@ -339,7 +378,11 @@ install_certbot(){
     centos|rhel)
       yum install -y certbot python3-certbot-nginx
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
+  return
 }
 
 configure_firewall(){
@@ -363,7 +406,11 @@ configure_firewall(){
       firewall-cmd --permanent --add-port=8080/tcp
       firewall-cmd --reload
       ;;
+    *)
+      die "Unsupported OS: $OS_ID"
+      ;;
   esac
+  return
 }
 
 
@@ -375,6 +422,7 @@ user=root
 password=${DB_ROOT_PASS}
 MYSQLCNF
   chmod 600 /root/.my.cnf
+  return
 }
 
 enable_automatic_updates(){
@@ -395,6 +443,9 @@ enable_automatic_updates(){
         yum install -y yum-cron || true
         systemctl enable --now yum-cron || true
       fi
+      ;;
+    *)
+      die "Unsupported OS: $OS_ID"
       ;;
   esac
   log "INFO" "Automatic security updates configured"
@@ -435,6 +486,7 @@ BACKUP
 0 2 * * * root $backup_script
 CRON
   log "INFO" "Automated MariaDB backup job installed (daily 02:00)"
+  return
 }
 
 configure_php(){
@@ -444,7 +496,7 @@ configure_php(){
   else
     php_ini=/etc/php.ini
   fi
-  if [ -f "$php_ini" ]; then
+  if [[ -f "$php_ini" ]]; then
     sed -i "s/^;*cgi.fix_pathinfo=.*/cgi.fix_pathinfo=0/" "$php_ini"
     sed -i "s/^;*date.timezone.*/date.timezone = UTC/" "$php_ini"
   fi
@@ -457,6 +509,7 @@ configure_php(){
   systemctl enable --now "$php_service"
   systemctl restart "$php_service"
   log "INFO" "PHP-FPM configured and restarted ($php_service)"
+  return
 }
 
 verify_services(){
@@ -475,6 +528,7 @@ verify_services(){
       log "WARN" "Service '$svc' is not running. Check logs."
     fi
   done
+  return
 }
 
 summary(){
@@ -482,7 +536,7 @@ summary(){
   local stack_id=$(echo "${PRIMARY_DOMAIN}" | tr '.' '_')
   log "INFO" "Setup complete (mode: ${mode}). MariaDB root password stored securely in /root/.my.cnf"
   log "INFO" "Primary domain: ${PRIMARY_DOMAIN}"
-  if [ "$mode" = "docker" ]; then
+  if [[ "$mode" = "docker" ]]; then
     cat <<EOF
 NEXT STEPS:
  - Change directory to /opt/${stack_id}
@@ -499,6 +553,7 @@ NEXT STEPS:
  - Access phpMyAdmin at https://<your-domain>/phpmyadmin
 EOF
   fi
+  return
 }
 # --------------------------- NGINX VHOST GENERATOR ---------------------------
 generate_nginx_vhost(){
@@ -519,7 +574,7 @@ generate_nginx_vhost(){
     fastcgi_block=$'        include fastcgi_params;\n        fastcgi_pass unix:/run/php-fpm/www.sock;\n        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;'
   fi
 
-  if [ -d /etc/nginx/sites-enabled ]; then
+  if [[ -d /etc/nginx/sites-enabled ]]; then
     has_sites_enabled=1
   fi
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
@@ -549,7 +604,7 @@ ${fastcgi_block}
 }
 NGINXCONF
 
-  if [ "$has_sites_enabled" -eq 1 ]; then
+  if [[ "$has_sites_enabled" -eq 1 ]]; then
     ln -sf /etc/nginx/sites-available/${site_name}.conf /etc/nginx/sites-enabled/${site_name}.conf
   else
     mkdir -p /etc/nginx/conf.d
@@ -562,6 +617,7 @@ NGINXCONF
   else
     log "WARN" "nginx -t failed; review configuration for ${server_names}"
   fi
+  return
 }
 
 # --------------------------- SSL (Let’s Encrypt) ---------------------------
@@ -569,7 +625,7 @@ obtain_ssl(){
   local domains_str="$1"
   local primary
   primary=$(echo "$domains_str" | awk -F',' '{print $1}')
-  if [ -z "${EMAIL}" ]; then
+  if [[ -z "${EMAIL}" ]]; then
     EMAIL="admin@${primary}"
     log "WARN" "No email provided for Let's Encrypt; defaulting to ${EMAIL}"
   fi
@@ -659,6 +715,7 @@ PHP
   chown -R "$owner":"$owner" "${stack_dir}"
   log "INFO" "Docker compose stack written to ${stack_dir}"
   log "INFO" "Run: cd ${stack_dir} && docker compose up -d"
+  return
 }
 # --------------------------- MAIN FLOW ---------------------------
 require_root
@@ -679,7 +736,7 @@ case "$MODE" in
     ;;
 esac
 
-if [ "$MODE" = "docker" ]; then
+if [[ "$MODE" = "docker" ]]; then
   log "INFO" "Setting up Docker mode"
   case "$OS_ID" in
     ubuntu|debian)
@@ -692,6 +749,9 @@ if [ "$MODE" = "docker" ]; then
       curl -fsSL https://get.docker.com | sh
       yum install -y docker-compose-plugin || true
       systemctl enable --now docker
+      ;;
+    *)
+      die "Unsupported OS: $OS_ID"
       ;;
   esac
   install_node

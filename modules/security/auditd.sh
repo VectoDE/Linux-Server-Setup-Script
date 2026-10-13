@@ -21,10 +21,12 @@ mod_check() {
 	if os_in_container; then
 		die "auditd needs the kernel audit system; run it on a virtual machine or bare metal, not in a container."
 	fi
+	return
 }
 
 mod_install() {
 	pkg_install_family "auditd audispd-plugins" "audit audit-libs"
+	return
 }
 
 # ausyscall name of the 64- or 32-bit ABI of this machine; fails if there is no 32-bit ABI.
@@ -56,6 +58,7 @@ _auditd_filter() {
 		fi
 		printf '%s\n' "${line}"
 	done
+	return
 }
 
 # Sets KEY = VALUE pairs in auditd.conf, keeping everything else of the distribution's file.
@@ -72,10 +75,12 @@ _auditd_conf() {
 		fi
 	done
 	file_write 0640 root:root "${AUDIT_CONF}" <<<"${content}"
+	return
 }
 
 _auditd_immutable_now() {
 	auditctl -s 2>/dev/null | grep -q '^enabled 2'
+	return
 }
 
 # Audit from the first process on, not only after auditd starts (takes effect at the next boot).
@@ -92,6 +97,7 @@ _auditd_boot_args() {
 			files_note_change "kernel arguments ${args}"
 		fi
 	fi
+	return
 }
 
 mod_configure() {
@@ -123,12 +129,14 @@ mod_configure() {
 			augenrules --load >/dev/null || die "auditd: the kernel rejected the audit rules."
 		fi
 	fi
+	return
 }
 
 mod_verify() {
 	svc_is_active auditd || die "auditd: the service is not running."
 	auditctl -s | grep -qE '^enabled [12]' || die "auditd: kernel auditing is off."
 	auditctl -l | grep -qE -- '(-k |key=)identity' || die "auditd: the lss rules are not loaded."
+	return
 }
 
 mod_remove() {
@@ -143,4 +151,5 @@ mod_remove() {
 	else
 		augenrules --load >/dev/null 2>&1 || true
 	fi
+	return
 }

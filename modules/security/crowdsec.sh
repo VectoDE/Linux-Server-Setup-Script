@@ -20,11 +20,13 @@ mod_check() {
 		[[ ${collection} =~ ^[a-z0-9_-]+/[a-z0-9_.-]+$ ]] || die "LSS_CROWDSEC_COLLECTIONS: '${collection}' is not a collection name."
 	done
 	[[ -z $(opt enroll_key) || $(opt enroll_key) =~ ^[A-Za-z0-9]+$ ]] || die "LSS_CROWDSEC_ENROLL_KEY is not a CrowdSec key."
+	return
 }
 
 mod_install() {
 	repo_add crowdsec
 	pkg_install_family "crowdsec crowdsec-firewall-bouncer-nftables" "crowdsec crowdsec-firewall-bouncer-nftables"
+	return
 }
 
 mod_configure() {
@@ -64,6 +66,7 @@ EOF
 	svc_wait_port 127.0.0.1 8080 60 || die "crowdsec: the local API does not listen on 127.0.0.1:8080."
 	_cs_bouncer_key
 	svc_enable "${CS_BOUNCER}"
+	return
 }
 
 # The bouncer package registers itself only when cscli is already installed; dnf installs both packages in one
@@ -110,6 +113,7 @@ mod_verify() {
 	fi
 	cscli bouncers list -o raw 2>/dev/null | grep -q 'firewall' || die "crowdsec: the firewall bouncer is not registered."
 	cscli collections list -o raw 2>/dev/null | grep -q '^crowdsecurity/sshd,' || die "crowdsec: the sshd collection is missing."
+	return
 }
 
 mod_remove() {
@@ -121,4 +125,5 @@ mod_remove() {
 		repo_remove crowdsec
 		secret_remove crowdsec-enroll-key
 	fi
+	return
 }

@@ -24,11 +24,13 @@ _swap_size() {
 		fi
 	fi
 	printf '%s' "${size}"
+	return
 }
 
 # systemd names a swap unit after its path: /swapfile -> swapfile.swap, /var/swap/file -> var-swap-file.swap.
 _swap_unit() {
 	systemd-escape --path --suffix=swap "$(opt path)"
+	return
 }
 
 mod_check() {
@@ -42,6 +44,7 @@ mod_check() {
 	if os_in_container; then
 		die "swap needs a virtual machine or bare metal; containers use the swap of their host."
 	fi
+	return
 }
 
 mod_configure() {
@@ -85,11 +88,13 @@ UNIT
 	if [[ ${LSS_FILE_CHANGED} == 1 ]]; then
 		sysctl -q -p /etc/sysctl.d/60-lss-swap.conf
 	fi
+	return
 }
 
 mod_verify() {
 	swapon --show=NAME --noheadings | grep -qxF "$(opt path)" || die "swap: $(opt path) is not active."
 	[[ $(sysctl -n vm.swappiness) == "$(opt_int swappiness)" ]] || die "swap: vm.swappiness is not $(opt_int swappiness)."
+	return
 }
 
 mod_remove() {
@@ -105,4 +110,5 @@ mod_remove() {
 	rm -f -- "${path}"
 	file_remove /etc/sysctl.d/60-lss-swap.conf
 	sysctl -q --system >/dev/null 2>&1 || true
+	return
 }

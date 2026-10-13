@@ -6,4 +6,4 @@ MOD_NAME=web-a
 MOD_GROUP="test"
 MOD_DESCRIPTION="Web server A"
 MOD_CONFLICTS="web-b"
-mod_verify() { :; }
+mod_verify() { :; return; }

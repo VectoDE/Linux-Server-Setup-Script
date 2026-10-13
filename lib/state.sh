@@ -7,6 +7,7 @@
 
 state_dir() {
 	printf '%s/modules' "${LSS_STATE_DIR:-/var/lib/lss}"
+	return
 }
 
 state_get() {
@@ -33,10 +34,13 @@ state_set() {
 	printf '%s=%s\n' "${key}" "${value}" >>"${file}.tmp"
 	mv -f -- "${file}.tmp" "${file}"
 	chmod 600 "${file}"
+	return
 }
 
 state_installed() {
-	[[ $(state_get "$1" status) == installed ]]
+	local name=$1
+	[[ $(state_get "${name}" status) == installed ]]
+	return
 }
 
 state_installed_modules() {
@@ -52,5 +56,7 @@ state_installed_modules() {
 }
 
 state_forget() {
-	rm -f -- "$(state_dir)/$1"
+	local name=$1
+	rm -f -- "$(state_dir)/${name}"
+	return
 }

@@ -16,6 +16,7 @@ mod_check() {
 	[[ $(opt scope) =~ ^(security|all)$ ]] || die "LSS_AUTO_UPDATES_SCOPE must be security or all."
 	opt_bool reboot || true
 	[[ $(opt reboot_time) =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "LSS_AUTO_UPDATES_REBOOT_TIME must look like 04:00."
+	return
 }
 
 mod_install() {
@@ -24,6 +25,7 @@ mod_install() {
 	else
 		pkg_install dnf-automatic dnf-utils
 	fi
+	return
 }
 
 _au_debian() {
@@ -71,6 +73,7 @@ EOF
 	svc_timer_skip_missed apt-daily-upgrade.timer
 	svc_enable apt-daily.timer
 	svc_enable apt-daily-upgrade.timer
+	return
 }
 
 _au_rhel() {
@@ -93,6 +96,7 @@ debuglevel = 1
 EOF
 	svc_timer_skip_missed dnf-automatic.timer
 	svc_enable dnf-automatic.timer
+	return
 }
 
 # Reboots in the configured window if an update needs it; logs the reason to the journal.
@@ -127,6 +131,7 @@ Persistent=false
 WantedBy=timers.target
 EOF
 	svc_enable "${AU_REBOOT_UNIT}.timer"
+	return
 }
 
 mod_configure() {
@@ -140,6 +145,7 @@ mod_configure() {
 	else
 		_au_remove_reboot_timer
 	fi
+	return
 }
 
 _au_remove_reboot_timer() {
@@ -169,6 +175,7 @@ mod_verify() {
 	if opt_bool reboot; then
 		svc_is_enabled "${AU_REBOOT_UNIT}.timer" || die "auto-updates: the reboot timer is not enabled."
 	fi
+	return
 }
 
 mod_remove() {
@@ -181,4 +188,5 @@ mod_remove() {
 		svc_disable dnf-automatic.timer
 		file_remove /etc/dnf/automatic.conf
 	fi
+	return
 }

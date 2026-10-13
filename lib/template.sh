@@ -10,6 +10,7 @@ LSS_ROOT=${LSS_ROOT:-}
 # template_path MODULE FILE -> templates/MODULE/FILE
 template_path() {
 	printf '%s/templates/%s/%s' "${LSS_ROOT:?LSS_ROOT is not set}" "$1" "$2"
+	return
 }
 
 # template_render_string TEXT: prints TEXT with placeholders replaced.
@@ -23,6 +24,7 @@ template_render_string() {
 		rest=${rest#*"{{${name}}}"}
 	done
 	printf '%s' "${output}${rest}"
+	return
 }
 
 # template_render FILE: prints the rendered file (keeps a trailing newline).
@@ -35,14 +37,16 @@ template_render() {
 	)
 	text=${text%x}
 	template_render_string "${text}"
+	return
 }
 
 # template_install MODULE FILE MODE OWNER DEST: renders templates/MODULE/FILE into DEST as a managed file.
 template_install() {
-	local rendered
+	local module=$1 file=$2 mode=$3 owner=$4 dest=$5 rendered
 	rendered=$(
-		template_render "$(template_path "$1" "$2")"
+		template_render "$(template_path "${module}" "${file}")"
 		printf x
-	) || die "Rendering template $1/$2 failed."
-	file_write "$3" "$4" "$5" < <(printf '%s' "${rendered%x}")
+	) || die "Rendering template ${module}/${file} failed."
+	file_write "${mode}" "${owner}" "${dest}" < <(printf '%s' "${rendered%x}")
+	return
 }

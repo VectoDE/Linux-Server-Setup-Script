@@ -21,10 +21,12 @@ _tfa_users() {
 		users=$(config_get LSS_ADMIN_USER_NAME admin)
 	fi
 	printf '%s' "${users}"
+	return
 }
 
 _tfa_unit() {
 	if os_is_debian; then printf 'ssh'; else printf 'sshd'; fi
+	return
 }
 
 mod_check() {
@@ -33,11 +35,13 @@ mod_check() {
 	for user in $(_tfa_users); do
 		[[ ${user} =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "LSS_SSH_2FA_USERS: '${user}' is not a user name."
 	done
+	return
 }
 
 mod_install() {
 	pkg_enable_epel
 	pkg_install_family "libpam-google-authenticator qrencode" "google-authenticator qrencode"
+	return
 }
 
 # The PAM stack for sshd: the one-time code replaces the password (keys are checked by sshd before PAM runs).
@@ -61,6 +65,7 @@ _tfa_pam() {
 		{ print }
 		END { if (!done) { print line; print "auth required pam_permit.so" } }
 	' "${TFA_ORIGINAL}"
+	return
 }
 
 # Creates a TOTP secret for USER once and keeps the otpauth URI as lss secret ssh-2fa-USER.
@@ -104,6 +109,7 @@ EOF
 	if [[ ${changed} == 1 ]]; then
 		svc_reload "$(_tfa_unit)"
 	fi
+	return
 }
 
 mod_verify() {
@@ -117,6 +123,7 @@ mod_verify() {
 			die "ssh-2fa: ${user} has no TOTP secret."
 	done
 	svc_is_active "$(_tfa_unit)" || die "ssh-2fa: sshd is not running."
+	return
 }
 
 # Back to key-only logins; the users' TOTP files stay (they are harmless without the PAM line).
@@ -128,4 +135,5 @@ mod_remove() {
 	fi
 	sshd -t || die "ssh-2fa: sshd configuration is invalid without the 2FA settings."
 	svc_reload "$(_tfa_unit)"
+	return
 }

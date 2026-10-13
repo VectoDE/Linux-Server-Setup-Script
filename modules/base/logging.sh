@@ -18,12 +18,14 @@ _logging_remote_host() {
 	local remote
 	remote=$(opt remote)
 	printf '%s' "${remote%%:*}"
+	return
 }
 
 _logging_remote_port() {
 	local remote
 	remote=$(opt remote)
 	if [[ ${remote} == *:* ]]; then printf '%s' "${remote##*:}"; else printf '6514'; fi
+	return
 }
 
 mod_check() {
@@ -38,12 +40,14 @@ mod_check() {
 		[[ ${remote} =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || die "LSS_LOGGING_REMOTE '${remote}' must be HOST or HOST:PORT."
 		[[ -r $(opt remote_ca) ]] || die "LSS_LOGGING_REMOTE_CA $(opt remote_ca) does not exist."
 	fi
+	return
 }
 
 mod_install() {
 	if [[ -n $(opt remote) ]]; then
 		pkg_install_family "rsyslog rsyslog-gnutls" "rsyslog rsyslog-gnutls"
 	fi
+	return
 }
 
 mod_configure() {
@@ -84,6 +88,7 @@ EOF
 	else
 		_logging_remove_remote
 	fi
+	return
 }
 
 _logging_remove_remote() {
@@ -109,10 +114,12 @@ mod_verify() {
 	if [[ -n $(opt remote) ]]; then
 		svc_is_active rsyslog || die "logging: rsyslog is not running."
 	fi
+	return
 }
 
 mod_remove() {
 	_logging_remove_remote
 	file_remove "${LOGGING_JOURNALD}"
 	svc_restart systemd-journald
+	return
 }

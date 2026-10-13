@@ -18,15 +18,18 @@ mod_check() {
 	for path in $(opt scan_paths); do
 		[[ ${path} =~ ^/[A-Za-z0-9._/-]*$ ]] || die "LSS_CLAMAV_SCAN_PATHS: '${path}' is not an absolute path."
 	done
+	return
 }
 
 mod_install() {
 	pkg_enable_epel
 	pkg_install_family "clamav clamav-freshclam" "clamav clamav-update"
+	return
 }
 
 _clam_db_ready() {
 	compgen -G '/var/lib/clamav/main.c[vl]d' >/dev/null && compgen -G '/var/lib/clamav/daily.c[vl]d' >/dev/null
+	return
 }
 
 mod_configure() {
@@ -80,6 +83,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
 	svc_enable "${CLAM_UNIT}.timer"
+	return
 }
 
 mod_verify() {
@@ -96,6 +100,7 @@ mod_verify() {
 	# 1 = virus found (expected), 0 = missed, 2 = scanner error.
 	[[ ${status} == 1 ]] || die "clamav: the EICAR test file was not detected (clamscan exit ${status})."
 	svc_is_enabled "${CLAM_UNIT}.timer" || die "clamav: the daily scan is not scheduled."
+	return
 }
 
 mod_remove() {
@@ -107,4 +112,5 @@ mod_remove() {
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove_family "clamav clamav-freshclam" "clamav clamav-update"
 	fi
+	return
 }

@@ -18,6 +18,7 @@ mapfile -t files < <(
 
 run_shellcheck() {
 	shellcheck -x "${files[@]}"
+	return
 }
 
 # ShellCheck findings as SARIF 2.1.0 for GitHub code scanning (ShellCheck itself has no SARIF output).
@@ -44,11 +45,13 @@ run_shellcheck_sarif() {
 				}]
 			}]
 		}'
+	return
 }
 
 run_shfmt() {
 	# Formatting follows .editorconfig (tabs, bash dialect, indented case items).
 	shfmt -d "${files[@]}"
+	return
 }
 
 case ${1:-all} in

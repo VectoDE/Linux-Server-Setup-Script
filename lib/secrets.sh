@@ -8,12 +8,16 @@
 LSS_SECRETS_DIR=${LSS_SECRETS_DIR:-/etc/lss/secrets}
 
 secret_valid_name() {
-	[[ $1 =~ ^[a-z0-9][a-z0-9._-]*$ ]]
+	local name=$1
+	[[ ${name} =~ ^[a-z0-9][a-z0-9._-]*$ ]]
+	return
 }
 
 secret_path() {
-	secret_valid_name "$1" || die "Invalid secret name '$1'."
-	printf '%s/%s' "${LSS_SECRETS_DIR}" "$1"
+	local name=$1
+	secret_valid_name "${name}" || die "Invalid secret name '${name}'."
+	printf '%s/%s' "${LSS_SECRETS_DIR}" "${name}"
+	return
 }
 
 # Prints LENGTH random characters from A-Z a-z 0-9 (no characters that need quoting anywhere).
@@ -24,6 +28,7 @@ secret_random() {
 		value+=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c "$((length - ${#value}))" || true)
 	done
 	printf '%s' "${value}"
+	return
 }
 
 _secrets_prepare_dir() {
@@ -31,6 +36,7 @@ _secrets_prepare_dir() {
 		mkdir -p "${LSS_SECRETS_DIR}"
 	fi
 	chmod 700 "${LSS_SECRETS_DIR}"
+	return
 }
 
 # secret_get NAME [LENGTH]: prints the secret, creating it if needed.
@@ -51,37 +57,45 @@ secret_get() {
 	value=$(<"${path}")
 	log_mask "${value}"
 	printf '%s' "${value}"
+	return
 }
 
 # secret_load NAME VARIABLE [LENGTH]: like secret_get, but assigns the value in the calling shell, so the masking
 # registration survives (a command substitution would lose it).
 secret_load() {
 	# The local name must not collide with the caller's variable name, or printf -v would assign the local.
-	local _lss_secret_value
-	_lss_secret_value=$(secret_get "$1" "${3:-32}") || die "Could not read secret '$1'."
+	local _lss_secret_name=$1 _lss_secret_variable=$2 _lss_secret_value
+	_lss_secret_value=$(secret_get "${_lss_secret_name}" "${3:-32}") ||
+		die "Could not read secret '${_lss_secret_name}'."
 	log_mask "${_lss_secret_value}"
-	printf -v "$2" '%s' "${_lss_secret_value}"
+	printf -v "${_lss_secret_variable}" '%s' "${_lss_secret_value}"
+	return
 }
 
 # secret_set NAME VALUE: stores a given secret (from configuration), for example an API token.
 secret_set() {
-	local path
-	secret_valid_name "$1" || die "Invalid secret name '$1'."
-	path=$(secret_path "$1")
+	local name=$1 value=$2 path
+	secret_valid_name "${name}" || die "Invalid secret name '${name}'."
+	path=$(secret_path "${name}")
 	_secrets_prepare_dir
 	(
 		umask 077
-		printf '%s' "$2" >"${path}.tmp"
+		printf '%s' "${value}" >"${path}.tmp"
 	)
 	mv -f -- "${path}.tmp" "${path}"
 	chmod 600 "${path}"
-	log_mask "$2"
+	log_mask "${value}"
+	return
 }
 
 secret_exists() {
-	[[ -s $(secret_path "$1") ]]
+	local name=$1
+	[[ -s $(secret_path "${name}") ]]
+	return
 }
 
 secret_remove() {
-	rm -f -- "$(secret_path "$1")"
+	local name=$1
+	rm -f -- "$(secret_path "${name}")"
+	return
 }

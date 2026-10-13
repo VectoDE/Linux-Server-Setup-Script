@@ -23,10 +23,12 @@ mod_check() {
 		opt_int "${option}" >/dev/null
 	done
 	(($(opt_int min_length) >= 8)) || die "LSS_PASSWORD_POLICY_MIN_LENGTH must be at least 8."
+	return
 }
 
 mod_install() {
 	pkg_install_family "libpam-pwquality libpam-modules" "libpwquality authselect"
+	return
 }
 
 # Sets KEY VALUE pairs in /etc/login.defs and keeps everything else.
@@ -43,6 +45,7 @@ _pp_login_defs() {
 		fi
 	done
 	file_write 0644 root:root /etc/login.defs <<<"${content}"
+	return
 }
 
 _pp_faillock_debian() {
@@ -70,6 +73,7 @@ EOF
 		DEBIAN_FRONTEND=noninteractive pam-auth-update --enable ${PP_PAM_CONFIGS}
 		files_note_change "PAM faillock enabled"
 	fi
+	return
 }
 
 # Every authselect profile has pam_pwquality built in; faillock is a feature. The profile for local accounts is
@@ -84,6 +88,7 @@ _pp_faillock_rhel() {
 		authselect enable-feature with-faillock >/dev/null
 		files_note_change "authselect with-faillock"
 	fi
+	return
 }
 
 mod_configure() {
@@ -126,6 +131,7 @@ EOF
 			printf '\treadonly TMOUT=%s\n\texport TMOUT\nfi\n' "${timeout}"
 		fi
 	)
+	return
 }
 
 # yescrypt where the system supports it (Debian 11+, Ubuntu 22.04+, RHEL 9 does too), else SHA512.
@@ -135,6 +141,7 @@ _pp_hash() {
 	else
 		printf 'SHA512'
 	fi
+	return
 }
 
 mod_verify() {
@@ -150,6 +157,7 @@ mod_verify() {
 	if command -v pwscore >/dev/null 2>&1 && pwscore <<<"password1" >/dev/null 2>&1; then
 		die "password-policy: a weak password is accepted."
 	fi
+	return
 }
 
 mod_remove() {
@@ -163,4 +171,5 @@ mod_remove() {
 	elif authselect current 2>/dev/null | grep -q with-faillock; then
 		authselect disable-feature with-faillock >/dev/null
 	fi
+	return
 }

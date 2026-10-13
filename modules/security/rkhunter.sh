@@ -15,11 +15,13 @@ RKH_SCRIPTS="/usr/bin/egrep /usr/bin/fgrep /usr/bin/which /usr/bin/ldd /usr/sbin
 
 mod_check() {
 	[[ $(opt check_time) =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "LSS_RKHUNTER_CHECK_TIME must look like 05:45."
+	return
 }
 
 mod_install() {
 	pkg_enable_epel
 	pkg_install_family "rkhunter unhide" "rkhunter"
+	return
 }
 
 _rkh_config() {
@@ -44,6 +46,7 @@ EOF
 			printf 'SCRIPTWHITELIST=%s\n' "${script}"
 		fi
 	done
+	return
 }
 
 mod_configure() {
@@ -87,12 +90,14 @@ Persistent=true
 WantedBy=timers.target
 EOF
 	svc_enable "${RKH_UNIT}.timer"
+	return
 }
 
 mod_verify() {
 	rkhunter --config-check --nocolors >/dev/null || die "rkhunter: the configuration is invalid."
 	[[ -s /var/lib/rkhunter/db/rkhunter.dat ]] || die "rkhunter: the file properties database is missing."
 	svc_is_enabled "${RKH_UNIT}.timer" || die "rkhunter: the daily scan is not scheduled."
+	return
 }
 
 mod_remove() {
@@ -104,4 +109,5 @@ mod_remove() {
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove rkhunter
 	fi
+	return
 }
