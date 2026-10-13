@@ -45,6 +45,18 @@ EOF
 	[[ ${output} == *"invalid key 'PATH'"* ]]
 }
 
+@test "unreadable files and invalid keys from --set or code are refused" {
+	run config_load_file "${BATS_TEST_TMPDIR}/missing.conf"
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Cannot read configuration file ${BATS_TEST_TMPDIR}/missing.conf"* ]]
+	run config_set_arg 'PATH=/tmp'
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"--set: invalid key 'PATH'"* ]]
+	run config_set lss_lower x
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Invalid setting key 'lss_lower'"* ]]
+}
+
 @test "precedence: --set over environment over file over profile over default" {
 	printf 'LSS_X=file\nLSS_Y=file\nLSS_Z=file\n' >"${CONF}"
 	printf 'LSS_X=profile\nLSS_Y=profile\nLSS_Z=profile\nLSS_P=profile\n' >"${BATS_TEST_TMPDIR}/profile.conf"
@@ -88,6 +100,8 @@ EOF
 	run config_bool LSS_BAD
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"must be true or false"* ]]
+	run ! config_bool LSS_UNSET
+	config_bool LSS_UNSET true
 }
 
 @test "Windows line endings are accepted" {

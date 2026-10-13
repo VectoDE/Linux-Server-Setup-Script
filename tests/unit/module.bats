@@ -101,9 +101,45 @@ setup() {
 	[ -z "$(state_get alpha status)" ]
 }
 
+@test "a failing verify restores the module's files and marks it failed" {
+	run module_apply unverified
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"unverified: verification failed; changed files were restored"* ]]
+	[ ! -e "${TEST_TARGET}/unverified.conf" ]
+	[ "$(state_get unverified status)" = failed ]
+}
+
+@test "a failing remove step stops the removal and keeps the state" {
+	state_set unverified status installed
+	state_set retired status installed
+	run module_remove unverified
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"unverified: removal failed"* ]]
+	[ "$(state_get unverified status)" = installed ]
+}
+
 @test "mode falls back to what the module supports" {
 	config_set LSS_MODE docker
 	[ "$(module_mode alpha)" = native ]
+	[ "$(module_mode unverified)" = docker ]
+	config_set LSS_UNVERIFIED_MODE native
+	[ "$(module_mode unverified)" = native ]
+}
+
+@test "metadata, the plain list and the default module directory" {
+	[ "$(module_meta alpha MOD_DESCRIPTION)" = 'Writes one file' ]
+	run module_meta nope MOD_DESCRIPTION
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Unknown module 'nope'"* ]]
+	[ "$(module_list | head -1)" = alpha ]
+	LSS_MODULE_DIRS=''
+	export LSS_ROOT=${BATS_TEST_TMPDIR}/root
+	mkdir -p "${LSS_ROOT}/modules"
+	[ -z "$(module_list)" ]
+	mkdir -p "${LSS_ROOT}/modules/base"
+	printf 'MOD_DESCRIPTION=solo\n' >"${LSS_ROOT}/modules/base/solo.sh"
+	[ "$(module_list)" = solo ]
+	[ "$(module_file solo)" = "${LSS_ROOT}/modules/base/solo.sh" ]
 }
 
 @test "a failing command in the middle of a step stops it, also inside a condition" {
