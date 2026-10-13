@@ -31,6 +31,8 @@ now or later.
   (NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK, Temurin where missing), `go` (official
   archive) and `dotnet` (.NET SDK, telemetry off), all from repositories with pinned keys or checksum-verified
   downloads.
+- Database tools: `phpmyadmin`, `adminer` and `pgadmin` on the admin port of the web server, from checksum-verified
+  downloads, limited to the local database servers; pgAdmin runs as its own sandboxed service.
 - A warning for every setting that no module reads, so a misspelt key does not silently fall back to the default.
 - Quiet output: the output of apt, dnf and long-running tools such as the AIDE database build goes to the run log,
   and appears on the terminal only with `--verbose` or, with its last 40 lines, when the command fails.

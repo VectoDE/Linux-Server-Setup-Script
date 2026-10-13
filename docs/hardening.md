@@ -36,6 +36,9 @@ Docker, databases and its own sudo rules) 78. CI checks that it stays at 82 on D
 | `tls`              | Certificates from Let's Encrypt (or any ACME server) with ECDSA keys, renewed by a timer; private keys readable by root and the web server group only; OCSP stapling where the certificate names a responder; guard warns 14 days before a certificate expires | Mozilla TLS guidelines |
 | `php`              | Own pool user `lss-php`, socket `0660 root:lss-web` only, the distribution's `www` pool off, `expose_php` and `display_errors` off, `allow_url_include` off, `cgi.fix_pathinfo=0`, secure, HTTP-only and SameSite session cookies with strict mode, a private session directory, `exec`, `system`, `proc_open` and similar functions disabled for the web pool, only `.php` executed, systemd sandbox (read-only system except `/var/lib/php` and `LSS_PHP_WRITABLE_PATHS`) | OWASP PHP Configuration Cheat Sheet |
 | `dotnet`           | `DOTNET_CLI_TELEMETRY_OPTOUT=1` for every login | (privacy) |
+| `phpmyadmin`       | Checksum-verified release without the setup wizard; configuration readable by root and PHP-FPM only, with a generated cookie secret; only the local database server, no root and no empty-password logins; no version check and no error reports; only on the admin port | (operations) |
+| `adminer`          | Checksum-verified release; a login plugin allows only the configured local servers and drivers; only on the admin port | (operations) |
+| `pgadmin`          | Pinned, checksum-verified wheels in an isolated environment; own system user; systemd sandbox without capabilities; bound to 127.0.0.1; no upgrade check, no psql tool, no browsing of binary paths; secure cookies when the admin port is public | (operations) |
 | `haproxy`          | Statistics only on 127.0.0.1, admin socket readable by root only, chroot, systemd sandbox, ports in the firewall only for services that are not `local` | (operations) |
 
 ## Deliberate deviations

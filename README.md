@@ -142,6 +142,9 @@ NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK 21, T
 none), `go` (official archive), `dotnet` (.NET SDK 10, telemetry off). `LSS_PHP_VERSION`, `LSS_NODE_VERSION`,
 `LSS_JAVA_VERSION` and `LSS_DOTNET_VERSION` pick another version.
 
+**Database tools:** `phpmyadmin`, `adminer` (only the local database servers) and `pgadmin` (its own service; the
+first password with `lss secrets show pgadmin-admin-password`), all on the admin port.
+
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
 and where lss deliberately deviates. Containers, backup, monitoring and mail follow as further module groups.
 

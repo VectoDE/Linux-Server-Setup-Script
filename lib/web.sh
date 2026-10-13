@@ -488,7 +488,7 @@ _web_admin_apache() {
 	if [[ ${kind} == proxy ]]; then
 		cat <<EOF
 <Location /${path}/>
-	ProxyPass ${target%/}/${path}/
+	ProxyPass ${target%/}/${path}/ upgrade=websocket
 	ProxyPassReverse ${target%/}/${path}/
 	RequestHeader set X-Script-Name /${path}
 </Location>
