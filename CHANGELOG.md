@@ -27,6 +27,9 @@ now or later.
 - A warning for every setting that no module reads, so a misspelt key does not silently fall back to the default.
 - Quiet output: the output of apt, dnf and long-running tools such as the AIDE database build goes to the run log,
   and appears on the terminal only with `--verbose` or, with its last 40 lines, when the command fails.
+- guard reports vulnerable packages (debsecan, `dnf updateinfo`), failed SSH logins above a threshold and what the
+  daily AIDE, rkhunter and ClamAV runs found, which their units had only written to the journal; successful logins
+  and active bans appear as notes.
 - System requirements in the README: RAM, disk and install time for the profile and every module, measured by the
   integration tests on every supported system.
 - Package repositories of vendors are added only with a pinned key fingerprint.

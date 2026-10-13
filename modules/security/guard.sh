@@ -4,7 +4,7 @@
 
 MOD_NAME="guard"
 MOD_GROUP="security"
-MOD_DESCRIPTION="Keeps the server at the level lss set up: daily verify and repair, failed services, disk, updates, alerts"
+MOD_DESCRIPTION="Keeps the server at the level lss set up: daily verify and repair, failed services, disk, updates, vulnerable packages, logins, scanner findings, alerts"
 MOD_REQUIRES="system"
 MOD_OPTIONS="autofix|true|Configure modules again that fail verify or were changed outside lss
 time|07:00|Time of the daily check (HH:MM)
@@ -12,6 +12,7 @@ email||Send findings to this address (needs the mail-relay module or another sen
 webhook||Send findings to this HTTPS webhook (Slack, Teams, Mattermost, Discord or ntfy)
 disk_threshold|90|Report file systems that are fuller than this (percent)
 lynis_min|0|Report a Lynis hardening index below this (needs the lynis module)
+login_threshold|50|Report more failed SSH logins than this within 24 hours
 daily_summary|false|Also send a message when everything is fine"
 
 GUARD_SCRIPT=/usr/local/lib/lss/guard
@@ -26,11 +27,21 @@ mod_check() {
 	[[ $(opt time) =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "LSS_GUARD_TIME must look like 07:00."
 	(($(opt_int disk_threshold) <= 100)) || die "LSS_GUARD_DISK_THRESHOLD must be at most 100."
 	opt_int lynis_min >/dev/null
+	opt_int login_threshold >/dev/null
 	email=$(opt email)
 	webhook=$(opt webhook)
 	[[ -z ${email} || ${email} =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "LSS_GUARD_EMAIL '${email}' is not an e-mail address."
 	[[ -z ${webhook} || ${webhook} =~ ^https://[^[:space:]]+$ ]] || die "LSS_GUARD_WEBHOOK must be an https:// URL."
 	[[ -x ${GUARD_LSS} ]] || die "guard needs lss installed as ${GUARD_LSS} (bootstrap.sh does that)."
+	return
+}
+
+# debsecan matches the installed packages with the Debian security tracker; Ubuntu and the RHEL family have no use for
+# it (the security updates check and dnf updateinfo cover them).
+mod_install() {
+	if [[ ${OS_ID} == debian ]]; then
+		pkg_install debsecan
+	fi
 	return
 }
 
@@ -48,6 +59,7 @@ mod_configure() {
 		printf 'GUARD_DAILY_SUMMARY=%s\n' "${bool}"
 		printf 'GUARD_EMAIL=%s\nGUARD_WEBHOOK=%s\n' "$(opt email)" "$(opt webhook)"
 		printf 'GUARD_DISK_THRESHOLD=%s\nGUARD_LYNIS_MIN=%s\n' "$(opt_int disk_threshold)" "$(opt_int lynis_min)"
+		printf 'GUARD_LOGIN_THRESHOLD=%s\n' "$(opt_int login_threshold)"
 	)
 	svc_unit "${GUARD_UNIT}.service" <<EOF
 # Managed by lss (module guard).
@@ -94,6 +106,7 @@ mod_remove() {
 	file_remove "/etc/systemd/system/${GUARD_UNIT}.service"
 	file_remove "${GUARD_SCRIPT}"
 	file_remove "${GUARD_CONF}"
+	pkg_remove debsecan
 	svc_daemon_reload
 	return
 }

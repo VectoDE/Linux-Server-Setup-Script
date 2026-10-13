@@ -29,7 +29,7 @@ virtual machine it reaches a Lynis hardening index of 75; CI checks that it stay
 | `usbguard` (opt-in)| Only the USB devices present at installation are allowed                                                                                         | Removable media                       |
 | `logging`          | Persistent journal with size and age limits, optional forwarding to a syslog server over TLS                                                     | Logging                               |
 | `time`             | chrony with NTS-authenticated servers, no NTP port open                                                                                          | Time synchronisation                  |
-| `guard`            | Runs `lss verify` every day, repairs modules that failed or were changed outside lss, reports failed units, full disks, pending security updates, a needed reboot and a low Lynis index | (operations)                          |
+| `guard`            | Runs `lss verify` every day, repairs modules that failed or were changed outside lss, reports failed units, full disks, pending security updates, vulnerable packages, a needed reboot, a low Lynis index, AIDE/rkhunter/ClamAV findings and failed SSH logins; notes logins and bans | (operations)                          |
 
 ## Deliberate deviations
 
