@@ -20,7 +20,7 @@ calls() {
 	use_os debian-12
 	export STUB_EXIT_dpkg_query=1
 	pkg_install nginx curl
-	grep -q 'apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold update' "${STUB_LOG}"
+	grep -q 'apt-get -y -q -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold update' "${STUB_LOG}"
 	grep -q 'install --no-install-recommends nginx curl' "${STUB_LOG}"
 	[ "$(files_changes_of core)" = 1 ]
 }

@@ -7,8 +7,10 @@
 
 LSS_PKG_UPDATED=${LSS_PKG_UPDATED:-0}
 
+# DPkg::Lock::Timeout waits for unattended-upgrades or apt-daily instead of failing on their lock; they start on
+# their own on a fresh server and as soon as the auto-updates module enables them.
 _pkg_apt() {
-	DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q \
+	DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q -o DPkg::Lock::Timeout=600 \
 		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
 }
 
