@@ -22,6 +22,8 @@ nginx() {
 
 new_cert() {
 	local dir=$1 days=$2
+	# The kcov image of the coverage run has no openssl.
+	command -v openssl >/dev/null || skip 'openssl is not installed'
 	shift 2
 	local san
 	san=$(printf 'DNS:%s,' "$@")

@@ -16,7 +16,11 @@ rm -rf -- "${out}"
 mkdir -p "${out}"
 docker run --rm --security-opt seccomp=unconfined \
 	-v "${PWD}:/src" -v "${bats_dir}:/bats:ro" -v "$(cd "${out}" && pwd):/out" -w /src \
-	"${image}" kcov --include-path=/src/lib --bash-dont-parse-binary-dir /out /bats/bin/bats tests/unit >/dev/null
+	"${image}" kcov --include-path=/src/lib --bash-dont-parse-binary-dir /out /bats/bin/bats tests/unit >"${out}/bats.tap" || {
+	# The failing tests with their output; the rest of the TAP stream is in OUT_DIR/bats.tap.
+	grep -A 20 '^not ok' "${out}/bats.tap" >&2 || true
+	exit 1
+}
 report=$(find "${out}" -name coverage.json -path '*bats*' | head -1)
 python3 - "${report}" <<'PY'
 import json, sys

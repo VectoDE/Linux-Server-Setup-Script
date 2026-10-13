@@ -124,6 +124,7 @@ journalctl() {
 }
 
 @test "a certificate close to its end is a finding, a fresh one is not" {
+	command -v openssl >/dev/null || skip 'openssl is not installed'
 	export LSS_TLS_DIR=${BATS_TEST_TMPDIR}/tls
 	TLS_DIR=${LSS_TLS_DIR}
 	mkdir -p "${TLS_DIR}/old" "${TLS_DIR}/fresh"

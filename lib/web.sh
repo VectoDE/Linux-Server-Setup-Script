@@ -25,6 +25,7 @@ WEB_PHP_SOCKET=/run/php-fpm/lss.sock
 WEB_TLS_DIR=/etc/lss/tls
 WEB_ACME_ROOT=/var/www/lss-acme
 WEB_DEFAULT_ROOT=/var/www/lss-default
+# shellcheck disable=SC2034 # read by the web server and admin interface modules
 WEB_ADMIN_PORT=8090
 WEB_ADMIN_HTPASSWD=/etc/lss/web/admin.htpasswd
 WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
@@ -32,6 +33,7 @@ WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
 WEB_CERT_HOOK=/etc/letsencrypt/renewal-hooks/deploy/lss-deploy
 # CA certificate of a private ACME server (LSS_TLS_CA_BUNDLE, for example Pebble or step-ca); certbot trusts it.
 WEB_ACME_CA=/etc/letsencrypt/lss-acme-ca.pem
+# shellcheck disable=SC2034 # read by the web server and haproxy modules
 WEB_TLS_CIPHERS=ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
 
 # The installed web server (nginx, apache or caddy), or nothing.
@@ -158,8 +160,12 @@ web_default_cert() {
 		-addext "subjectAltName=DNS:${name}" -keyout "${tmp}/privkey.pem" -out "${tmp}/fullchain.pem" >/dev/null 2>&1 ||
 		die "web: could not create the self-signed default certificate."
 	install -d -m 0755 "${WEB_TLS_DIR}"
-	file_write 0640 "root:${WEB_GROUP}" "${dir}/privkey.pem" <"${tmp}/privkey.pem"
-	file_write 0644 root:root "${dir}/fullchain.pem" <"${tmp}/fullchain.pem"
+	# Certificates are state, not configuration: the tls module's deploy hook replaces them, so they are not
+	# recorded as managed files (lss verify would report every renewal as a change made outside lss).
+	install -d -m 0755 "${dir}"
+	install -m 0640 -o root -g "${WEB_GROUP}" "${tmp}/privkey.pem" "${dir}/privkey.pem"
+	install -m 0644 -o root -g root "${tmp}/fullchain.pem" "${dir}/fullchain.pem"
+	files_note_change "self-signed default certificate"
 	rm -rf -- "${tmp}"
 	return
 }
@@ -365,6 +371,7 @@ _web_site_nginx() {
 	_web_listen_nginx 80
 	printf '\tserver_name %s;\n' "${domains}"
 	printf '\tlocation /.well-known/acme-challenge/ {\n\t\troot %s;\n\t}\n' "${WEB_ACME_ROOT}"
+	# shellcheck disable=SC2016 # $host and $request_uri are nginx variables
 	printf '\tlocation / {\n\t\treturn 301 https://$host$request_uri;\n\t}\n}\n\nserver {\n'
 	_web_listen_nginx 443 "$(web_nginx_ssl_flags)"
 	if web_nginx_http2_directive; then

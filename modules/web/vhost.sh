@@ -99,7 +99,7 @@ mod_configure() {
 }
 
 mod_verify() {
-	local spec status served
+	local spec status expected served i
 	for spec in $(opt sites); do
 		_vhost_parse "${spec}"
 		[[ ${VHOST_KIND} == proxy || -d ${VHOST_TARGET} ]] || die "vhost: the document root ${VHOST_TARGET} is missing."
@@ -107,9 +107,15 @@ mod_verify() {
 		status=$(curl -ks --max-time 10 -o /dev/null -w '%{http_code}' \
 			--resolve "${VHOST_DOMAINS[0]}:443:127.0.0.1" "https://${VHOST_DOMAINS[0]}/" || true)
 		[[ ${status} =~ ^[1-5][0-9][0-9]$ ]] || die "vhost: https://${VHOST_DOMAINS[0]}/ does not answer on this server."
-		served=$(openssl s_client -connect 127.0.0.1:443 -servername "${VHOST_DOMAINS[0]}" </dev/null 2>/dev/null |
-			openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)
-		[[ ${served} == "$(openssl x509 -noout -fingerprint -sha256 -in "${WEB_TLS_DIR}/${VHOST_NAME}/fullchain.pem")" ]] ||
+		expected=$(openssl x509 -noout -fingerprint -sha256 -in "${WEB_TLS_DIR}/${VHOST_NAME}/fullchain.pem")
+		# A reload after a new certificate finishes in the background; old workers serve the old one for a moment.
+		for ((i = 0; i < 15; i++)); do
+			served=$(openssl s_client -connect 127.0.0.1:443 -servername "${VHOST_DOMAINS[0]}" </dev/null 2>/dev/null |
+				openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)
+			[[ ${served} != "${expected}" ]] || break
+			sleep 1
+		done
+		[[ ${served} == "${expected}" ]] ||
 			die "vhost: ${VHOST_DOMAINS[0]} is not served with the certificate in ${WEB_TLS_DIR}/${VHOST_NAME}."
 	done
 	return
