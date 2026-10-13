@@ -49,6 +49,7 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 ExecStart=${LYNIS_RUNNER}
+$(svc_scanner_sandbox full)
 EOF
 	svc_unit "${LYNIS_UNIT}.timer" <<EOF
 # Managed by lss (module lynis).

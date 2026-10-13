@@ -551,6 +551,20 @@ EOF
 	run ! grep -q 'daemon-reload' "${STUB_LOG}"
 }
 
+@test "svc_scanner_sandbox confines writes but keeps /tmp and the kernel views of the scanners" {
+	run svc_scanner_sandbox strict /var/lib/aide /var/log
+	[ "${status}" -eq 0 ]
+	[ "${lines[0]}" = ProtectSystem=strict ]
+	grep -qxF 'ProtectHome=read-only' <<<"${output}"
+	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	grep -qxF 'ReadWritePaths=-/var/lib/aide' <<<"${output}"
+	grep -qxF 'ReadWritePaths=-/var/log' <<<"${output}"
+	run ! grep -qE '^(PrivateTmp|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs)=' <<<"${output}"
+	run svc_scanner_sandbox full
+	[ "${lines[0]}" = ProtectSystem=full ]
+	run ! grep -q ReadWritePaths <<<"${output}"
+}
+
 @test "fw_ssh_port falls back to 22 when sshd fails" {
 	STUB_EXIT_sshd=255 run fw_ssh_port
 	[ "${status}" -eq 0 ]

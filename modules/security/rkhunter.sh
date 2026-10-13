@@ -74,6 +74,7 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 ExecStart=$(command -v rkhunter) --check --skip-keypress --report-warnings-only --nocolors
+$(svc_scanner_sandbox strict /var/lib/rkhunter /var/log /tmp /var/tmp)
 SuccessExitStatus=1
 EOF
 	svc_unit "${RKH_UNIT}.timer" <<EOF

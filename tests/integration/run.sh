@@ -150,6 +150,18 @@ if [[ $1 == --profile ]]; then
 	group_start "${system}: Lynis audit"
 	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
 	group_end
+	# The daily and weekly scans run once inside their systemd sandbox; a path the sandbox blocks fails the unit.
+	group_start "${system}: scheduled scans"
+	in_target 'for unit in lss-aide-check lss-rkhunter lss-clamscan lss-lynis; do
+		systemctl cat "${unit}.service" >/dev/null 2>&1 || continue
+		started=${SECONDS}
+		if ! systemctl start --wait "${unit}.service"; then
+			journalctl -u "${unit}.service" -n 60 --no-pager
+			exit 1
+		fi
+		echo "${unit}: $(systemctl show -p ExecMainStatus --value "${unit}.service") after $((SECONDS - started)) s, $(systemd-analyze security "${unit}.service" 2>/dev/null | tail -n 1)"
+	done'
+	group_end
 	# What Lynis would still change, as the starting point for raising the hardening index.
 	group_start "${system}: Lynis details"
 	in_target "grep -iE 'different value than expected|weak configuration state|incorrect file permissions|permissions .* (not|too)|Result: .*(unsafe|not hardened|exposed)' /var/log/lynis.log | sed -E 's/^[0-9: -]+//' | sort -u | head -n 150" || true

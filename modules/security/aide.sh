@@ -98,6 +98,8 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 ExecStart=$(command -v aide) --check --config $(_aide_conf)
+PrivateNetwork=yes
+$(svc_scanner_sandbox strict /var/log /var/lib/aide)
 SuccessExitStatus=1 2 3 4 5 6 7
 EOF
 	svc_unit "${AIDE_UNIT}.timer" <<EOF

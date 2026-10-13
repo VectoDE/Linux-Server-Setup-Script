@@ -33,6 +33,8 @@ now or later.
 - More hardening towards a Lynis index of 85: the login banner also in `/etc/issue` and `/etc/issue.net`, costlier
   password hashes, libpam-tmpdir, process accounting, debsums, apt-show-versions, cron files and `sshd_config`
   readable by root only. minimal-secure reaches 85 to 87 on Debian.
+- The AIDE, rkhunter, ClamAV and Lynis runs are confined by systemd: read-only system and home directories, no new
+  privileges, writes only to their own state and logs; AIDE and ClamAV have no network.
 - System requirements in the README: RAM, disk and install time for the profile and every module, measured by the
   integration tests on every supported system.
 - Package repositories of vendors are added only with a pinned key fingerprint.

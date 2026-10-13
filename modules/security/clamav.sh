@@ -68,6 +68,8 @@ Nice=19
 IOSchedulingClass=idle
 ExecStart=/bin/sh -c 'for d in $(opt scan_paths); do [ -d "\$\$d" ] && set -- "\$\$@" "\$\$d"; done; [ \$\$# -eq 0 ] || exec $(command -v clamscan) --recursive --infected --cross-fs=no --max-filesize=100M --max-scansize=400M "\$\$@"'
 SuccessExitStatus=1
+PrivateNetwork=yes
+$(svc_scanner_sandbox strict /tmp /var/tmp)
 EOF
 	svc_unit "${CLAM_UNIT}.timer" <<EOF
 # Managed by lss (module clamav).
