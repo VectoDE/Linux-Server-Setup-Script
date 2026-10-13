@@ -137,6 +137,11 @@ change, run `lss configure MODULE`.
 
 **Web:** `nginx`, `apache` or `caddy`, `tls` (certificates from Let's Encrypt), `vhost` (sites), `haproxy`.
 
+**Runtimes:** `php` (PHP-FPM with a hardened pool for the web server), `composer`, `node` (Node.js 22, 24 or 26 from
+NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK 21, Temurin where the distribution has
+none), `go` (official archive), `dotnet` (.NET SDK 10, telemetry off). `LSS_PHP_VERSION`, `LSS_NODE_VERSION`,
+`LSS_JAVA_VERSION` and `LSS_DOTNET_VERSION` pick another version.
+
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
 and where lss deliberately deviates. Containers, backup, monitoring and mail follow as further module groups.
 

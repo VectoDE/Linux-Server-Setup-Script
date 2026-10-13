@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web]
+        group: [base, security, scanners, web, runtime]
         arch: [x64, arm64]
         include:
           - group: base
@@ -43,6 +43,8 @@ jobs:
           # Each web server alone, then with certificates (Pebble) and sites; then HAProxy.
           - group: web
             modules: nginx,tls,vhost apache,tls,vhost caddy,tls,vhost haproxy
+          - group: runtime
+            modules: php,composer nginx,php node python ruby java go dotnet
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
