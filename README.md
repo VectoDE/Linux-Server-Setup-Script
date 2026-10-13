@@ -68,6 +68,10 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `lynis`            | 25 s               | 80 MiB                    | 5 MiB   | weekly audit                                        |
 | `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
 | `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
+| `docker`           | not measured yet   | not measured yet          | not measured yet | dockerd and containerd                     |
+| `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
+| `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |
+| `k3s`              | not measured yet   | not measured yet          | not measured yet | k3s server, about 1 GiB with Traefik       |
 
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
 
@@ -120,6 +124,10 @@ LSS_FIREWALL_ALLOW=8443/tcp 51820/udp
 LSS_GUARD_WEBHOOK=https://ntfy.sh/your-topic
 LSS_TLS_DOMAINS=server.example.com
 LSS_VHOST_SITES=shop:php:shop.example.com,www.shop.example.com api:proxy:api.example.com:http://127.0.0.1:3000
+LSS_DOCKER_USERNS_REMAP=true
+LSS_PORTAINER_ACCESS=vpn
+LSS_K3S_API_ACCESS=vpn
+LSS_K3S_TRAEFIK=false
 ```
 
 `--set` wins over the environment, which wins over the file, which wins over the profile, which wins over the
@@ -150,8 +158,11 @@ with hardened authentication and optional databases and users (`LSS_<ENGINE>_USE
 **Database tools:** `phpmyadmin`, `adminer` (only the local database servers) and `pgadmin` (its own service; the
 first password with `lss secrets show pgadmin-admin-password`), all on the admin port.
 
+**Containers:** `docker` or `podman`, `portainer` (needs one of them) and `k3s` (single-server Kubernetes; not
+together with `docker`). See [Containers](#containers).
+
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
-and where lss deliberately deviates. Containers, backup, monitoring and mail follow as further module groups.
+and where lss deliberately deviates. Backup, monitoring and mail follow as further module groups.
 
 ### Web sites
 
@@ -167,11 +178,48 @@ Admin interfaces such as phpMyAdmin listen on `127.0.0.1:8090`. Reach them throu
 `LSS_<SERVER>_ADMIN_PUBLIC=true` to publish port 8090 with TLS and the password from
 `lss secrets show web-admin-password`.
 
+### Containers
+
+`docker` installs Docker CE from Docker's repository (Debian 12 and 13, Ubuntu 22.04, 24.04 and 26.04, the RHEL 9 and
+10 family; `docker.io` from the distribution where Docker has no packages), `podman` the distribution's Podman. Both
+run with limits for processes, logs and open files and the default seccomp profile; Docker also with `icc` off,
+`live-restore`, `no-new-privileges` and a user namespace for containers (`LSS_DOCKER_USERNS_REMAP`).
+
+A published port (`docker run -p 8080:80`) bypasses ufw and firewalld: the kernel redirects it to the container before
+their rules apply. lss therefore adds a container firewall (`lss-container-firewall.service`, an nftables table of its
+own) that lets a published port through only when a module opened it in the lss firewall, with the same scope. To
+publish a port of your own container, bind it to 127.0.0.1 and put a site of the web server in front of it, or open
+it with `LSS_FIREWALL_ALLOW=8080/tcp`. Without a host address Docker binds published ports to `LSS_DOCKER_BIND`
+(127.0.0.1).
+
+Containers that lss starts itself follow fixed rules: the image pinned by digest, no new privileges, no capabilities,
+a read-only root file system, memory and process limits, never the engine's socket. Modules use `ctr_run` and
+`ctr_compose_up` from `lib/container.sh` for that; `ctr_compose_check` checks a Compose file of your own against the
+same rules.
+
+`portainer` is the one container with the engine's socket, so it is as powerful as root and listens only on
+`127.0.0.1:9443` (`LSS_PORTAINER_ACCESS=local`, through an SSH tunnel) or on the WireGuard network (`vpn`). The admin
+password is `lss secrets show portainer-admin-password`. `LSS_PORTAINER_WEB_ADMIN=true` also publishes it below
+`/portainer/` on the admin port of the web server.
+
+`k3s` runs a single-server Kubernetes from a pinned, checksum-verified binary, hardened along the k3s CIS guide:
+encrypted secrets, Pod Security `restricted` by default, an audit log, protected kernel defaults and SELinux on the
+RHEL family. The API stays on 127.0.0.1 until `LSS_K3S_API_ACCESS` opens it; `kubectl` is installed next to it. The
+profile `k8s-node` installs `minimal-secure` plus `k3s`:
+
+```bash
+sudo lss install --profile k8s-node --set LSS_ADMIN_USER_NAME=alice --set LSS_ADMIN_USER_GITHUB_USER=alice-on-github
+```
+
+With `docker` or `podman` installed, the guard scans every image daily with Trivy and reports HIGH and CRITICAL
+vulnerabilities per image.
+
 ## Guard
 
 The `guard` module checks the server every day: it runs `lss verify`, repairs modules that fail or whose files were
 changed (`LSS_GUARD_AUTOFIX`), and reports failed services, full disks, pending security updates, a needed reboot, a
-falling Lynis index and vulnerable packages (debsecan on Debian, `dnf updateinfo` on the RHEL family). It passes on
+falling Lynis index, vulnerable packages (debsecan on Debian, `dnf updateinfo` on the RHEL family) and container
+images with HIGH or CRITICAL vulnerabilities (Trivy, with `docker` or `podman`). It passes on
 what the daily AIDE, rkhunter and ClamAV runs found, and reports more failed SSH logins than
 `LSS_GUARD_LOGIN_THRESHOLD` with their main sources. Successful SSH logins and active fail2ban or CrowdSec bans are
 listed as notes. Findings go to a webhook (Slack, Teams, Mattermost, Discord, ntfy) or by e-mail.

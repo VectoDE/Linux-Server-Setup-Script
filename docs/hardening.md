@@ -45,6 +45,13 @@ Docker, databases and its own sudo rules) 78. CI checks that it stays at 82 on D
 | `postgresql`       | localhost, `scram-sha-256`, TLS 1.2 or later, peer login only for `postgres`, each role reaches only its own database, PUBLIC loses CONNECT and CREATE, systemd sandbox | CIS PostgreSQL |
 | `redis`, `valkey`  | localhost, ACL password stored as SHA-256, `FLUSHALL`, `CONFIG`, `DEBUG`, `MODULE` and similar commands blocked, systemd sandbox | (vendor guide) |
 | `mongodb`          | Authorization from the first start, bound to 127.0.0.1, no Unix socket, server-side JavaScript off, mongosh telemetry off, least-privilege application users, systemd sandbox | CIS MongoDB |
+| `docker`           | Docker CE from Docker's repository with pinned keys (`docker.io` where Docker builds nothing); `daemon.json`: no traffic between containers on the default bridge (`icc` off), published ports on 127.0.0.1 unless a container names an address, `live-restore`, `userland-proxy` off, `no-new-privileges`, the local log driver with size limits, `nofile` limits, user namespace remapping, SELinux labels on the RHEL family, the default seccomp profile; the API only on its Unix socket (mode 660, root); published ports behind the container firewall | CIS Docker, sections 2 (daemon) and 3 (socket) |
+| `podman`           | Podman from the distribution, no daemon; process limit, log size limit and `nofile` limits for every container; seccomp checked, SELinux labels checked when SELinux enforces; published ports behind the container firewall | CIS Docker, sections 2 and 5, applied to Podman |
+| Containers of lss (`lib/container.sh`) | Image pinned by digest, `no-new-privileges`, all capabilities dropped (the dangerous ones never added), read-only root with a small `/tmp`, memory and process limits, never the host's network, PID or IPC namespace, published ports with an address, never the engine socket (Portainer is the one exception) or system paths, also through symbolic links; Compose files are checked against the same rules | CIS Docker, section 5 (container runtime) |
+| Container firewall | Published container ports (Docker, Podman, Kubernetes NodePorts and hostPorts) are forwarded past the INPUT rules of ufw and firewalld; an own nftables chain lets a redirected connection through only when a module opened that port with the same scope, and drops new connections straight to container addresses | CIS Docker, section 5 (published ports); host firewall |
+| `portainer`        | Pinned image digest, on 127.0.0.1:9443 or the WireGuard network only, the admin password from the lss secrets (a container sees only its own directory below `/etc/lss/containers`), data on a named volume, read-only root, no capabilities; optionally below `/portainer/` on the admin port | (operations; deliberate socket exception, see below) |
+| `k3s`              | Pinned, checksum-verified binary; secrets encrypted at rest, kubeconfig 0600, `protect-kernel-defaults` with the kernel values the kubelet expects, Pod Security admission (`restricted` everywhere except `kube-system`), an audit log (metadata, 30 days), idle streaming connections closed after 5 minutes, finished pods collected; k3s-selinux on the RHEL family; the API on 127.0.0.1 unless opened; pod traffic to the host only from the pod network on its bridge | CIS Kubernetes Benchmark as applied by the k3s CIS Hardening Guide (control plane, kubelet, Pod Security) |
+| `guard` with a container engine | Trivy scans every image daily and reports HIGH and CRITICAL vulnerabilities per image | CIS Docker, section 4 (images) |
 | `haproxy`          | Statistics only on 127.0.0.1, admin socket readable by root only, chroot, systemd sandbox, ports in the firewall only for services that are not `local` | (operations) |
 
 ## Deliberate deviations
@@ -61,6 +68,12 @@ These settings differ from a strict reading of the benchmarks. Each one has a se
 | USB device allow-list                               | opt-in                              | Virtual servers have no USB ports; on hardware it blocks keyboards plugged in later.                                                         | install `usbguard`                                |
 | Password expiry                                     | 365 days                            | NIST SP 800-63B advises against forced rotation; logins use SSH keys, so the password is only for the console and sudo.                      | `LSS_PASSWORD_POLICY_MAX_DAYS`                    |
 | Automatic reboot                                    | on, 04:00                           | Kernel and libc fixes only take effect after a reboot; a server that never reboots stays vulnerable.                                         | `LSS_AUTO_UPDATES_REBOOT=false`                   |
+| Docker restart policy                               | `unless-stopped` for containers of lss | CIS Docker suggests `on-failure` with at most 5 restarts; a management container that stops after five crashes leaves the server unmanaged.               | –            |
+| Engine socket in Portainer                          | mounted                             | CIS Docker forbids mounting it into containers; Portainer cannot manage the engine without it. It is the only container that gets it, it runs on 127.0.0.1 or the WireGuard network only, and it runs in the host's user namespace and, on the RHEL family, without SELinux separation to reach the socket. | do not install `portainer` |
+| Docker user namespace remapping                     | on                                  | Images that expect to own host paths as root need it off.                                                                                     | `LSS_DOCKER_USERNS_REMAP=false` |
+| Docker and k3s together                             | not possible                        | Each brings its own containerd and claims the forwarding rules; `profiles/all.conf` has Docker, `profiles/k8s-node.conf` has k3s.            | –            |
+| Kubernetes API                                      | 127.0.0.1                           | kubectl through an SSH tunnel; a cluster with more nodes or remote tooling needs `vpn` or `public`.                                           | `LSS_K3S_API_ACCESS` |
+| Traefik in k3s                                      | on                                  | The bundled ingress controller serves ports 80 and 443 for the cluster; without it you bring your own.                                        | `LSS_K3S_TRAEFIK=false` |
 
 ## What lss does not do
 
@@ -71,5 +84,11 @@ Some benchmark items cannot be applied safely to a running server, so lss report
   hoster; Lynis lists the missing ones.
 - **A boot loader password.** It stops an unattended reboot of a remote server at the boot menu.
 - **Disk encryption.** Like partitions, it is set up when the system is installed.
+- **Docker's auditd rules** (CIS Docker, section 1). The `auditd` module watches identity files, sudo and the
+  kernel; rules for every Docker file are not part of it yet.
+- **Docker content trust and image signatures** (CIS Docker, section 4). lss pins its own images by digest; images you run
+  yourself are your choice. The daily Trivy scan reports their known vulnerabilities.
+- **Kubernetes workloads.** k3s gets a hardened control plane and Pod Security admission; network policies, RBAC for
+  your users and the images of your pods are part of what you deploy.
 - **Removing packages of the distribution** that a benchmark calls unnecessary. lss installs only what its modules
   need and leaves the rest to the image you started from.

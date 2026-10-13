@@ -38,6 +38,17 @@ now or later.
 - Profiles `webhosting` and `all`.
 - Database tools: `phpmyadmin`, `adminer` and `pgadmin` on the admin port of the web server, from checksum-verified
   downloads, limited to the local database servers; pgAdmin runs as its own sandboxed service.
+- Container modules: `docker` (Docker CE from Docker's repository with a hardened daemon after CIS Docker), `podman`
+  (from the distribution), `portainer` (pinned image, on 127.0.0.1 or the WireGuard network, the only container with
+  the engine socket) and `k3s` (pinned, checksum-verified single-server Kubernetes after the k3s CIS hardening guide,
+  with k3s-selinux on the RHEL family).
+- Container firewall: published container ports pass only where a module opened the port in the lss firewall, on ufw
+  and firewalld alike; `fw_trust` binds trusted networks to their interface.
+- `lib/container.sh`: containers of lss run with a digest-pinned image, no new privileges, no capabilities, a
+  read-only root, memory and process limits and never the engine socket; host paths are checked after following
+  symbolic links. Compose files are checked against the same rules.
+- guard scans the images of Docker and Podman daily with Trivy and reports HIGH and CRITICAL vulnerabilities.
+- Profile `k8s-node` (minimal-secure plus k3s); `all` includes docker and portainer.
 - A warning for every setting that no module reads, so a misspelt key does not silently fall back to the default.
 - Quiet output: the output of apt, dnf and long-running tools such as the AIDE database build goes to the run log,
   and appears on the terminal only with `--verbose` or, with its last 40 lines, when the command fails.
