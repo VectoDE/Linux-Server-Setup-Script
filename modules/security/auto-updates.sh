@@ -150,7 +150,11 @@ _au_remove_reboot_timer() {
 mod_verify() {
 	if os_is_debian; then
 		svc_is_enabled apt-daily-upgrade.timer || die "auto-updates: apt-daily-upgrade.timer is not enabled."
-		unattended-upgrade --dry-run >/dev/null 2>&1 || die "auto-updates: unattended-upgrade --dry-run fails."
+		local output
+		if ! output=$(unattended-upgrade --dry-run --debug 2>&1); then
+			printf '%s\n' "${output}" | tail -n 40 >&2
+			die "auto-updates: unattended-upgrade --dry-run fails (output above)."
+		fi
 	else
 		svc_is_enabled dnf-automatic.timer || die "auto-updates: dnf-automatic.timer is not enabled."
 	fi
