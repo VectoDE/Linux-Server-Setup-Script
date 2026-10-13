@@ -72,17 +72,17 @@ EOF
 	fi
 }
 
+# Every authselect profile has pam_pwquality built in; faillock is a feature. The profile for local accounts is
+# called "minimal" up to authselect 1.4 (EL9) and "local" from 1.5 (EL10).
 _pp_faillock_rhel() {
+	local profile=local
 	if ! authselect current >/dev/null 2>&1; then
-		authselect select minimal with-faillock with-pwquality --force >/dev/null
-		files_note_change "authselect profile minimal"
+		authselect show local >/dev/null 2>&1 || profile=minimal
+		authselect select "${profile}" with-faillock --force >/dev/null
+		files_note_change "authselect profile ${profile}"
 	elif ! authselect current | grep -q with-faillock; then
 		authselect enable-feature with-faillock >/dev/null
 		files_note_change "authselect with-faillock"
-	fi
-	if authselect current | grep -q '^Profile ID: minimal' && ! authselect current | grep -q with-pwquality; then
-		authselect enable-feature with-pwquality >/dev/null
-		files_note_change "authselect with-pwquality"
 	fi
 }
 

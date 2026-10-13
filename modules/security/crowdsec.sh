@@ -90,8 +90,14 @@ _cs_bouncer_key() {
 }
 
 mod_verify() {
+	local i
 	svc_is_active crowdsec || die "crowdsec: the engine is not running."
 	svc_is_active "${CS_BOUNCER}" || die "crowdsec: the firewall bouncer is not running."
+	# A reload restarts the local API for a few seconds.
+	for ((i = 0; i < 30; i++)); do
+		cscli lapi status >/dev/null 2>&1 && break
+		sleep 1
+	done
 	cscli lapi status >/dev/null 2>&1 || die "crowdsec: the local API does not answer."
 	cscli bouncers list -o raw 2>/dev/null | grep -q 'firewall' || die "crowdsec: the firewall bouncer is not registered."
 	cscli collections list -o raw 2>/dev/null | grep -q '^crowdsecurity/sshd,' || die "crowdsec: the sshd collection is missing."
