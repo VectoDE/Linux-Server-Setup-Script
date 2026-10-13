@@ -113,8 +113,9 @@ jobs:
           persist-credentials: false
       - name: Install QEMU and allow access to KVM
         run: |
-          sudo apt-get -q update
-          sudo apt-get -q install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
+          # Quiet: errors still reach the log, the man-db trigger and needrestart summaries do not.
+          sudo apt-get -qq update
+          sudo NEEDRESTART_SUSPEND=1 apt-get -qq install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils >/dev/null
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm

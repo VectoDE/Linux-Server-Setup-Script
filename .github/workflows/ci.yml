@@ -32,8 +32,9 @@ jobs:
           persist-credentials: false
       - name: Install tools
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends shfmt
+          # Quiet: errors still reach the log, the man-db trigger and needrestart summaries do not.
+          sudo apt-get -qq update
+          sudo NEEDRESTART_SUSPEND=1 apt-get -qq install -y --no-install-recommends shfmt >/dev/null
           scripts/dev/install-shellcheck.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: ShellCheck
