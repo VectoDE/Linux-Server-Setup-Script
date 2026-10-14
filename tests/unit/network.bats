@@ -199,6 +199,24 @@ KEY_B=TrMvSoP4jYQlY6RIzBgbssQqY3vxI2Pi+y71lOWWXX0=
 	[ "${status}" -eq 1 ]
 }
 
+@test "dns-resolver counts Unbound as online only when the root zone resolves" {
+	load_module dns-resolver
+	# shellcheck disable=SC2329 # called by the function under test
+	_dns_query() {
+		echo "query" >>"${BATS_TEST_TMPDIR}/queries"
+		printf '%s' "${STUB_REPLY}"
+	}
+	STUB_REPLY='4c 53 81 a0 00 01 00 01 00 00 00 00'
+	_dns_online
+	STUB_REPLY='4c 53 81 82 00 01 00 00 00 00 00 00'
+	run ! _dns_online
+	# Silence (blocked outgoing DNS) is retried, three times in all.
+	rm -f "${BATS_TEST_TMPDIR}/queries"
+	STUB_REPLY=''
+	run ! _dns_online
+	[ "$(grep -c . "${BATS_TEST_TMPDIR}/queries")" = 3 ]
+}
+
 # --- ntp-server -------------------------------------------------------------------------------------------------
 
 @test "ntp-server opens port 123 to the WireGuard network or to everyone, rate-limited" {

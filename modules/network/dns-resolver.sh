@@ -272,9 +272,14 @@ EOF
 		svc_restart "${DNS_UNIT}" || die "dns-resolver: Unbound does not start with the new configuration."
 	fi
 	mon_firewall 53/udp 53/tcp
-	# The server switches to Unbound only once it answers.
+	# The server switches to Unbound only once it answers, and only when it reaches the DNS of the Internet: where
+	# outgoing DNS is blocked, the switch would leave the server without any name resolution.
 	_dns_wait
 	mode=$(_dns_system_mode)
+	if [[ ${mode} != none ]] && ! _dns_online; then
+		log_warn "dns-resolver: Unbound reaches no DNS server on the Internet, so this server keeps its previous resolvers; LSS_DNS_RESOLVER_FORWARD names resolvers that are reachable."
+		mode=none
+	fi
 	if [[ ${mode} == none ]]; then
 		_dns_system_undo
 	else
@@ -347,8 +352,26 @@ _dns_wait() {
 	die "dns-resolver: Unbound does not answer on ${DNS_LOOPBACK}:53."
 }
 
+# _dns_root_reply: Unbound's answer for the SOA of the signed root zone. A cold Unbound first fetches the root servers
+# and keys, so it gets three tries.
+_dns_root_reply() {
+	local reply=''
+	for _ in 1 2 3; do
+		reply=$(_dns_query "${DNS_LOOPBACK}" . 6)
+		[[ -z $(_dns_reply_rcode "${reply}" || true) ]] || break
+	done
+	printf '%s' "${reply}"
+	return
+}
+
+# _dns_online: whether Unbound resolves the root zone, which needs the root servers or the forward resolvers.
+_dns_online() {
+	[[ $(_dns_reply_rcode "$(_dns_root_reply)" || true) == 0 ]]
+	return
+}
+
 mod_verify() {
-	local reply rcode address
+	local reply rcode address mode
 	local -a addresses=("${DNS_LOOPBACK}")
 	svc_is_active "${DNS_UNIT}" || die "dns-resolver: ${DNS_UNIT} is not running."
 	_dns_wait
@@ -357,21 +380,20 @@ mod_verify() {
 		die "dns-resolver: Unbound does not validate DNSSEC."
 	[[ -s ${DNS_ANCHOR} ]] || die "dns-resolver: the DNSSEC trust anchor ${DNS_ANCHOR} is missing."
 	# The signed root zone must come back validated (AD). Without a reachable resolver upstream only the offline checks
-	# above apply. A cold Unbound first fetches the root servers and keys, so it gets three tries.
-	for _ in 1 2 3; do
-		reply=$(_dns_query "${DNS_LOOPBACK}" . 6)
-		rcode=$(_dns_reply_rcode "${reply}" || true)
-		[[ -z ${rcode} ]] || break
-	done
+	# above apply, and the server keeps its previous resolvers (mod_configure).
+	reply=$(_dns_root_reply)
+	rcode=$(_dns_reply_rcode "${reply}" || true)
+	mode=$(_dns_system_mode)
 	if [[ ${rcode} == 0 ]]; then
 		_dns_reply_ad "${reply}" || die "dns-resolver: the answer for the root zone is not DNSSEC-validated."
 	else
 		log_warn "dns-resolver: the root zone did not resolve (rcode ${rcode:-none}); DNSSEC was checked offline only."
+		mode=none
 	fi
 	_dns_ipv6 && addresses+=(::1)
 	[[ $(opt access) != vpn ]] || addresses+=("$(fw_vpn_address)")
 	mon_listen_check --process unbound 53 "${addresses[@]}"
-	case $(_dns_system_mode) in
+	case ${mode} in
 	resolved)
 		resolvectl dns 2>/dev/null | grep -qE "^Global: .*${DNS_LOOPBACK}" ||
 			die "dns-resolver: systemd-resolved does not forward to Unbound."

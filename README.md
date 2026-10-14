@@ -301,7 +301,9 @@ endpoint and port) after every change, and `lss secrets show wireguard-psk-NAME`
 the server, not the networks behind it: IP forwarding stays off.
 
 `dns-resolver` runs Unbound on 127.0.0.1 as a validating (DNSSEC) resolver and makes the server use it, through
-systemd-resolved, NetworkManager or `/etc/resolv.conf`; removing the module restores the previous resolver.
+systemd-resolved, NetworkManager or `/etc/resolv.conf`; removing the module restores the previous resolver. Where
+Unbound reaches no DNS server on the Internet (outgoing DNS blocked), the server keeps its previous resolver and lss
+warns; `LSS_DNS_RESOLVER_FORWARD` then names resolvers Unbound can reach.
 `LSS_DNS_RESOLVER_ACCESS=vpn` serves the WireGuard network too, `LSS_DNS_RESOLVER_FORWARD` forwards to other
 resolvers, over TLS with `LSS_DNS_RESOLVER_FORWARD_TLS=true`.
 
