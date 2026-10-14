@@ -136,7 +136,7 @@ _docker_wait() {
 }
 
 mod_verify() {
-	local options listeners
+	local options pid
 	svc_is_active docker.service || die "docker: the daemon is not running; see journalctl -u docker."
 	_docker_wait || die "docker: the daemon does not answer on its socket."
 	[[ $(docker info --format '{{.LiveRestoreEnabled}}') == true ]] || die "docker: live-restore is off."
@@ -150,10 +150,12 @@ mod_verify() {
 	if os_is_debian && [[ $(cat /sys/module/apparmor/parameters/enabled 2>/dev/null) == Y ]]; then
 		[[ ${options} == *name=apparmor* ]] || die "docker: containers run without AppArmor (${options})."
 	fi
-	# The API is root on the host: only the Unix socket, never TCP.
-	listeners=$(ss -Hltnp 2>/dev/null || true)
-	if [[ ${listeners} == *'"dockerd"'* ]]; then
-		die "docker: dockerd listens on a TCP port; remove -H tcp://... from its configuration."
+	# The API is root on the host: only the Unix socket, never TCP. dockerd itself holds the published ports of the
+	# containers, so its listening sockets say nothing; its command line and daemon.json do.
+	pid=$(systemctl show --property=MainPID --value docker.service)
+	if [[ $(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null) == *tcp://* ]] ||
+		jq -e '(.hosts // []) | any(startswith("tcp://"))' /etc/docker/daemon.json >/dev/null 2>&1; then
+		die "docker: dockerd listens on a TCP port; remove tcp:// from its -H options and from hosts in daemon.json."
 	fi
 	[[ $(stat -c '%a %U' /var/run/docker.sock) == '660 root' ]] || die "docker: /var/run/docker.sock must be mode 660 and owned by root."
 	ctr_firewall_verify

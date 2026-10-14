@@ -39,10 +39,12 @@ mysql-generic aarch64 04b2f9791d314167a9eb83abcb476f45a7cd9e4aa88fa7a638cba40d1b
 # security@coreruleset.org, 3600 6F0E 0BA1 6783 2158 8211 38EE ACA1 AB8A 6E72). 4.25 is the long-term-support line;
 # 3.3 serves the ModSecurity v2 of Ubuntu 22.04 (Apache).
 coreruleset-4.25.2 any a2d4b2a5bb4f397f7e40d4e22d0346350706a5f17c1cfefc09e8b9740e00d87e https://github.com/coreruleset/coreruleset/releases/download/v4.25.2/coreruleset-4.25.2-minimal.tar.gz
-coreruleset-3.3.10 any 0c35a9e14f8af3cf02fc29eaae807312c6555d0f9bfa306274268ab5913c1110 https://github.com/coreruleset/coreruleset/releases/download/v3.3.10/coreruleset-3.3.10-minimal.tar.gz
 # modsecurity: libmodsecurity and the nginx connector (every system with nginx), from the .sha256 files the OWASP
 # ModSecurity project publishes with each release.
 libmodsecurity-3.0.17 any f283b33d5c21130fd3a15c84a93a1abe12bd1949edaf44288b12af571b671a50 https://github.com/owasp-modsecurity/ModSecurity/releases/download/v3.0.17/modsecurity-v3.0.17.tar.gz
+# mod_security2 for Apache on Ubuntu 22.04, signed by OWASP ModSecurity <modsecurity@owasp.org>
+# (0B2B A192 4065 B446 9120 2A2A D286 E022 149F 0F6E), checked 2026-10-14.
+modsecurity-apache-2.9.15 any 4fae2d684672a24541607cb0b563d88b88eb4543b88cd090345149bb47309477 https://github.com/owasp-modsecurity/ModSecurity/releases/download/v2.9.15/modsecurity-v2.9.15.tar.gz
 modsecurity-nginx-1.0.4 any 6bdc7570911be884c1e43aaf85046137f9fde0cfa0dd4a55b853c81c45a13313 https://github.com/owasp-modsecurity/ModSecurity-nginx/releases/download/v1.0.4/ModSecurity-nginx-v1.0.4.tar.gz
 # modsecurity: nginx sources of the versions the distributions ship (Ubuntu 22.04 1.18.0, Debian 12 1.22.1, Ubuntu
 # 24.04 1.24.0, Debian 13 1.26.3, Ubuntu 26.04 1.28.3), for the connector build. nginx.org publishes PGP signatures

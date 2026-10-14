@@ -9,30 +9,29 @@ MOD_REQUIRES="apache|nginx"
 MOD_OPTIONS="mode|On|On blocks attacks; DetectionOnly only logs them (to try the rules on a live site first)
 paranoia|1|Paranoia level 1 to 4: higher levels catch more attacks and also block more legitimate requests
 anomaly_inbound|5|Anomaly score from which a request is blocked (5: one critical rule matched; higher values block less)
-exclusions||Rule exclusions for applications, separated by spaces: cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenforo (phpbb and phpmyadmin need CRS 4, which Apache on Ubuntu 22.04 does not get)
+exclusions||Rule exclusions for applications, separated by spaces: cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenforo
 allowed_methods|GET HEAD POST OPTIONS PUT PATCH DELETE|HTTP methods the rules let through, separated by spaces
 max_body||Largest request body ModSecurity accepts and inspects, for example 64m (at most 1g); empty takes max_body of the web server"
 
 # Where the engine and the rules come from:
-#   Apache  libapache2-mod-security2 (Debian, Ubuntu), mod_security (RHEL 9 AppStream, RHEL 10 EPEL).
+#   Apache  libapache2-mod-security2 (Debian, Ubuntu), mod_security (RHEL 9 AppStream, RHEL 10 EPEL). Ubuntu 22.04
+#           ships 2.9.5, too old for CRS 4 (2.9.6), so lss builds mod_security2 there from the signed OWASP release.
 #   nginx   libmodsecurity and the nginx connector, built by lss from checksum-verified sources on every system:
-#           CRS 4.25.1 and 3.3.10 need libmodsecurity 3.0.16 (the fix against XML attribute injection), and the
+#           CRS 4.25.1 needs libmodsecurity 3.0.16 (the fix against XML attribute injection), and the
 #           distributions ship 3.0.6 to 3.0.14 (RHEL 10 none). The connector is a dynamic module (--with-compat)
 #           for the installed nginx, built again only when the nginx version changes.
 #   Rules   The OWASP Core Rule Set from its signed GitHub releases, pinned in data/checksums.txt, so every system
 #           runs the same rules (the distributions ship CRS 3.3 of differing ages, RHEL 10 none). CRS 4 needs
 #           ModSecurity 2.9.6 or 3.0.8; its long-term-support line 4.25 changes less between updates than the
-#           monthly releases. Apache on Ubuntu 22.04 has ModSecurity 2.9.5 and therefore gets CRS 3.3, which is still
-#           maintained.
+#           monthly releases.
 MODSEC_CRS_VERSION=4.25.2
-MODSEC_CRS_LEGACY_VERSION=3.3.10
 MODSEC_LIB_VERSION=3.0.17
+MODSEC_APACHE_VERSION=2.9.15
 MODSEC_CONNECTOR_VERSION=1.0.4
 # Below /usr/local/lib, so SELinux labels the self-built libraries as libraries.
 MODSEC_PREFIX=/usr/local/lib/lss-modsecurity
 MODSEC_CRS_ROOT=/usr/local/share/lss-modsecurity
 MODSEC_PLUGINS="cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenforo"
-MODSEC_LEGACY_EXCLUSIONS="cpanel dokuwiki drupal nextcloud wordpress xenforo"
 # The web server modules serve this file on port 80 for every host name; verify sends its probes there.
 MODSEC_PROBE=/.well-known/acme-challenge/lss-probe
 MODSEC_BUILD_DEPS=()
@@ -49,19 +48,19 @@ _modsecurity_server() {
 	return
 }
 
-# True for Apache on Ubuntu 22.04, whose ModSecurity 2.9.5 is too old for CRS 4.
-_modsecurity_legacy() {
-	[[ ${OS_ID} == ubuntu && ${OS_MAJOR} == 22 && $(web_server) == apache ]]
+# True where lss builds mod_security2 for Apache itself: Ubuntu 22.04 ships 2.9.5, and CRS 4 needs 2.9.6.
+_modsecurity_apache_built() {
+	[[ ${OS_ID} == ubuntu && ${OS_MAJOR} == 22 ]]
 	return
 }
 
-_modsecurity_crs_version() {
-	if _modsecurity_legacy; then printf '%s' "${MODSEC_CRS_LEGACY_VERSION}"; else printf '%s' "${MODSEC_CRS_VERSION}"; fi
+_modsecurity_apache_so() {
+	printf '%s/apache/mod_security2.so' "${MODSEC_PREFIX}"
 	return
 }
 
 _modsecurity_crs_dir() {
-	printf '%s/coreruleset-%s' "${MODSEC_CRS_ROOT}" "$(_modsecurity_crs_version)"
+	printf '%s/coreruleset-%s' "${MODSEC_CRS_ROOT}" "${MODSEC_CRS_VERSION}"
 	return
 }
 
@@ -153,6 +152,8 @@ _modsecurity_json() {
 	local server=$1 engine
 	if [[ ${server} == nginx ]]; then
 		engine=$(_modsecurity_nginx_so)
+	elif _modsecurity_apache_built; then
+		engine=$(_modsecurity_apache_so)
 	elif os_is_debian; then
 		engine=/usr/lib/apache2/modules/mod_security2.so
 	else
@@ -226,8 +227,6 @@ _modsecurity_jobs() {
 	return
 }
 
-# libmodsecurity for nginx. Without curl, GeoIP, LMDB, Lua and ssdeep: the Core Rule Set needs none of them. With YAJL
-# (JSON request bodies) where the distribution has it; RHEL 10 has none. Built again only for a new version.
 # _modsecurity_deb_candidate PACKAGE...: the first of the names apt can install. Runtime libraries change their name
 # with a new ABI (libxml2 is libxml2-16 from Ubuntu 26.04 on).
 _modsecurity_deb_candidate() {
@@ -243,6 +242,8 @@ _modsecurity_deb_candidate() {
 	return
 }
 
+# libmodsecurity for nginx. Without curl, GeoIP, LMDB, Lua and ssdeep: the Core Rule Set needs none of them. With YAJL
+# (JSON request bodies) where the distribution has it; RHEL 10 has none. Built again only for a new version.
 _modsecurity_build_library() {
 	local stamp="${MODSEC_PREFIX}/.libmodsecurity" src yajl=--without-yajl
 	if [[ -f ${MODSEC_PREFIX}/lib/libmodsecurity.so.3 && -f ${stamp} && $(<"${stamp}") == "${MODSEC_LIB_VERSION}" ]]; then
@@ -328,8 +329,38 @@ _modsecurity_build_connector() {
 	return
 }
 
+# mod_security2 for Apache where the distribution's is too old (_modsecurity_apache_built), from the signed OWASP
+# release pinned in data/checksums.txt. With YAJL, without curl, Lua and ssdeep, like libmodsecurity. Built again only
+# for a new version.
+_modsecurity_build_apache() {
+	local so stamp="${MODSEC_PREFIX}/apache/.build" src
+	so=$(_modsecurity_apache_so)
+	if [[ -f ${so} && -f ${stamp} && $(<"${stamp}") == "${MODSEC_APACHE_VERSION}" ]]; then
+		return 0
+	fi
+	pkg_update_once
+	pkg_install libpcre2-8-0 "$(_modsecurity_deb_candidate libxml2-16 libxml2)" libyajl2
+	_modsecurity_build_deps gcc make apache2-dev libpcre2-dev libxml2-dev libyajl-dev
+	_modsecurity_workdir
+	fetch_verified "modsecurity-apache-${MODSEC_APACHE_VERSION}" "${MODSEC_WORK}/modsecurity2.tar.gz"
+	tar -xzf "${MODSEC_WORK}/modsecurity2.tar.gz" -C "${MODSEC_WORK}" --no-same-owner
+	src="${MODSEC_WORK}/modsecurity-v${MODSEC_APACHE_VERSION}"
+	log_info "Building ModSecurity ${MODSEC_APACHE_VERSION} for Apache; this takes a few minutes"
+	(cd "${src}" && log_command ./configure --with-apxs=/usr/bin/apxs --with-pcre2 --with-yajl --without-curl \
+		--without-lua --without-ssdeep --disable-mlogc) || die "modsecurity: mod_security2 does not configure; see the log."
+	log_command make -C "${src}" -j "$(_modsecurity_jobs)" || die "modsecurity: mod_security2 does not build; see the log."
+	install -D -m 0644 "${src}/apache2/.libs/mod_security2.so" "${so}"
+	printf '%s\n' "${MODSEC_APACHE_VERSION}" >"${stamp}"
+	files_note_change "built ModSecurity ${MODSEC_APACHE_VERSION} for Apache"
+	return
+}
+
 _modsecurity_install_apache() {
-	if os_is_debian; then
+	if _modsecurity_apache_built; then
+		# The package of earlier lss versions would load its 2.9.5 instead of the self-built module.
+		pkg_remove libapache2-mod-security2
+		_modsecurity_build_apache
+	elif os_is_debian; then
 		pkg_install libapache2-mod-security2
 	else
 		# RHEL 10 has mod_security only in EPEL.
@@ -402,18 +433,14 @@ mod_install() {
 	return
 }
 
-# _modsecurity_engine_conf SERVER: the engine settings after modsecurity.conf-recommended of ModSecurity, limited to
-# what the oldest engine in use understands (2.9.5 for Apache on Ubuntu 22.04).
+# _modsecurity_engine_conf SERVER: the engine settings after modsecurity.conf-recommended of ModSecurity.
 _modsecurity_engine_conf() {
-	local server=$1 bytes nofiles json=0 modern=1
+	local server=$1 bytes nofiles json=0
 	bytes=$(_modsecurity_bytes "$(_modsecurity_max_body)")
 	# Bodies without uploads (forms, JSON) up to 1 MiB: the recommended 128 KiB turns away ordinary JSON documents.
 	nofiles=$((bytes < 1048576 ? bytes : 1048576))
 	if _modsecurity_json "${server}"; then
 		json=1
-	fi
-	if _modsecurity_legacy; then
-		modern=0
 	fi
 	printf '# Managed by lss (module modsecurity). Engine settings after modsecurity.conf-recommended.\n'
 	printf 'SecRuleEngine %s\nSecRequestBodyAccess On\n' "$(_modsecurity_mode)"
@@ -424,12 +451,10 @@ EOF
 		cat <<'EOF'
 SecRule REQUEST_HEADERS:Content-Type "^application/json" "id:'200001',phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=JSON"
 EOF
-		if [[ ${server} == apache || ${modern} == 1 ]]; then
-			printf 'SecRequestBodyJsonDepthLimit 512\n'
-		fi
+		printf 'SecRequestBodyJsonDepthLimit 512\n'
 	fi
 	printf 'SecRequestBodyLimit %s\nSecRequestBodyNoFilesLimit %s\nSecRequestBodyLimitAction Reject\n' "${bytes}" "${nofiles}"
-	if [[ ${server} == nginx && ${modern} == 1 ]]; then
+	if [[ ${server} == nginx ]]; then
 		cat <<'EOF'
 SecArgumentsLimit 1000
 SecRule &ARGS "@ge 1000" "id:'200007',phase:2,t:none,log,deny,status:400,msg:'Failed to fully parse request body due to large argument count',severity:2"
@@ -467,48 +492,26 @@ EOF
 
 # The CRS settings that crs-setup.conf.example of the release documents; everything else keeps its default.
 _modsecurity_crs_setup() {
-	local version tag='' paranoia=tx.blocking_paranoia_level phase name exclusions=''
+	local version=${MODSEC_CRS_VERSION} tag phase
 	local -a methods=()
-	version=$(_modsecurity_crs_version)
 	read -ra methods <<<"$(opt allowed_methods)"
 	printf '# Managed by lss (module modsecurity). OWASP CRS %s settings.\n' "${version}"
-	if _modsecurity_legacy; then
-		paranoia=tx.paranoia_level
-		printf 'SecDefaultAction "phase:%s,log,auditlog,pass"\n' 1 2
-		for name in $(opt exclusions); do
-			if [[ " ${MODSEC_LEGACY_EXCLUSIONS} " == *" ${name} "* ]]; then
-				exclusions+=",setvar:tx.crs_exclusions_${name}=1"
-			fi
-		done
-	else
-		tag=",tag:'OWASP_CRS',ver:'OWASP_CRS/${version}'"
-		for phase in 1 2 3 4 5; do
-			printf 'SecDefaultAction "phase:%s,log,auditlog,pass"\n' "${phase}"
-		done
-	fi
-	printf 'SecAction "id:900000,phase:1,pass,t:none,nolog%s,setvar:%s=%s"\n' "${tag}" "${paranoia}" "$(opt paranoia)"
+	tag=",tag:'OWASP_CRS',ver:'OWASP_CRS/${version}'"
+	for phase in 1 2 3 4 5; do
+		printf 'SecDefaultAction "phase:%s,log,auditlog,pass"\n' "${phase}"
+	done
+	printf 'SecAction "id:900000,phase:1,pass,t:none,nolog%s,setvar:tx.blocking_paranoia_level=%s"\n' "${tag}" "$(opt paranoia)"
 	printf 'SecAction "id:900110,phase:1,pass,t:none,nolog%s,setvar:tx.inbound_anomaly_score_threshold=%s,setvar:tx.outbound_anomaly_score_threshold=4"\n' \
 		"${tag}" "$(opt anomaly_inbound)"
-	if [[ -n ${exclusions} ]]; then
-		printf 'SecAction "id:900130,phase:1,pass,t:none,nolog%s"\n' "${exclusions}"
-	fi
 	printf "SecAction \"id:900200,phase:1,pass,t:none,nolog%s,setvar:'tx.allowed_methods=%s'\"\n" "${tag}" "${methods[*]}"
 	printf 'SecAction "id:900990,phase:1,pass,t:none,nolog%s,setvar:tx.crs_setup_version=%s"\n' "${tag}" "${version//./}"
 	return
 }
 
 # CRS 4 ships the application exclusions as plugins, one repository each without release files; data/checksums.txt
-# pins their files by commit. CRS 3.3 has them built in (crs-setup.conf switches them on).
+# pins their files by commit.
 _modsecurity_plugins() {
 	local dir=$1 name kind file entry
-	if _modsecurity_legacy; then
-		file_remove "${dir}/plugins"
-		for name in $(opt exclusions); do
-			[[ " ${MODSEC_LEGACY_EXCLUSIONS} " == *" ${name} "* ]] ||
-				log_warn "modsecurity: CRS 3.3 (Apache on Ubuntu 22.04) has no rule exclusions for ${name}; skipped."
-		done
-		return 0
-	fi
 	install -d -m 0755 "${dir}/plugins"
 	for name in ${MODSEC_PLUGINS}; do
 		for kind in config before after; do
@@ -543,7 +546,7 @@ _modsecurity_plugin_includes() {
 # Every file is named, because ModSecurity 3 has no IncludeOptional for patterns without a match.
 _modsecurity_main_conf() {
 	local dir=$1
-	printf '# Managed by lss (module modsecurity). ModSecurity with the OWASP Core Rule Set %s.\n' "$(_modsecurity_crs_version)"
+	printf '# Managed by lss (module modsecurity). ModSecurity with the OWASP Core Rule Set %s.\n' "${MODSEC_CRS_VERSION}"
 	printf 'Include %s\n' "${dir}/modsecurity.conf" "${dir}/crs-setup.conf"
 	_modsecurity_plugin_includes "${dir}" config
 	_modsecurity_plugin_includes "${dir}" before
@@ -580,6 +583,13 @@ _modsecurity_apache_file() {
 
 _modsecurity_apache_enable() {
 	local dir=$1
+	if _modsecurity_apache_built; then
+		file_write 0644 root:root /etc/apache2/mods-available/security2.load <<EOF
+# Depends: unique_id
+# Managed by lss (module modsecurity): ModSecurity ${MODSEC_APACHE_VERSION}, built by lss.
+LoadModule security2_module $(_modsecurity_apache_so)
+EOF
+	fi
 	file_write 0644 root:root "$(_modsecurity_apache_file)" <<EOF
 # Managed by lss (module modsecurity). Settings and rules: ${dir}.
 <IfModule security2_module>
@@ -709,7 +719,12 @@ mod_verify() {
 		fi
 		sleep 1
 	done
-	[[ ${found} == 1 ]] || die "modsecurity: the request with a script tag is missing from the audit log ${log}."
+	if [[ ${found} == 0 ]]; then
+		# The engine reports why it cannot write the audit log in the error log of the web server.
+		ls -l "${log%/*}" >&2 || true
+		tail -n 20 "$(web_log_file "${server}" error)" >&2 || true
+		die "modsecurity: the request with a script tag is missing from the audit log ${log}."
+	fi
 	return
 }
 
@@ -727,6 +742,9 @@ mod_remove() {
 			files_note_change "apache module security2 off"
 		fi
 		file_remove "$(_modsecurity_apache_file)"
+		if _modsecurity_apache_built; then
+			file_remove /etc/apache2/mods-available/security2.load
+		fi
 		svc_dropin_remove "$(web_unit apache).service" lss-modsecurity
 		;;
 	*) ;;
