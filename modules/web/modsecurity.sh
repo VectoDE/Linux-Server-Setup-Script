@@ -381,7 +381,7 @@ _modsecurity_install_nginx() {
 # The Core Rule Set below MODSEC_CRS_ROOT, one directory per version; configure removes older ones.
 _modsecurity_crs_install() {
 	local version dir staging
-	version=$(_modsecurity_crs_version)
+	version=${MODSEC_CRS_VERSION}
 	dir=$(_modsecurity_crs_dir)
 	[[ ! -f ${dir}/rules/REQUEST-949-BLOCKING-EVALUATION.conf ]] || return 0
 	_modsecurity_workdir

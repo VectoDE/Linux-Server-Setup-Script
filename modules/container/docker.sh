@@ -15,6 +15,7 @@ log_max_files|5|Rotated log files kept per container"
 MOD_PORTS="none; published container ports only where a module opened them (container firewall)"
 
 DOCKER_CONFIG=/etc/docker/daemon.json
+DOCKER_SYSCTL=/etc/sysctl.d/70-lss-docker.conf
 # Releases Docker CE has packages for (checked 2026-10-13, data/repos/docker.conf); the RHEL family uses the RHEL 9
 # and 10 repositories.
 DOCKER_CE_SUITES="bookworm trixie jammy noble resolute"
@@ -54,15 +55,18 @@ _docker_source() {
 # local logs, no new privileges, no userland proxy (iptables forwards instead), open-file limits, a user namespace,
 # SELinux labels on the RHEL family. The default seccomp profile stays on.
 _docker_config() {
-	local userns='' selinux=''
+	local userns='' selinux='' backend=''
 	if opt_bool userns_remap; then
 		userns=$'\n  "userns-remap": "default",'
 	fi
 	if os_is_rhel; then
 		selinux=$'\n  "selinux-enabled": true,'
 	fi
+	if _docker_nftables; then
+		backend=$'\n  "firewall-backend": "nftables",'
+	fi
 	cat <<EOF
-{
+{${backend}
   "icc": false,
   "ip": "$(opt bind)",
   "live-restore": true,
@@ -83,6 +87,13 @@ _docker_config() {
 }
 EOF
 	return
+}
+
+# The RHEL 10 kernel lacks the xtables match addrtype that the iptables rules of dockerd need; there dockerd writes
+# nftables rules itself (Docker 29 on). A container without the module tree of its kernel keeps the default.
+_docker_nftables() {
+	[[ -d /lib/modules/$(uname -r) ]] && command -v modprobe >/dev/null 2>&1 || return 1
+	! modprobe -n -q xt_addrtype
 }
 
 mod_install() {
@@ -113,6 +124,15 @@ mod_configure() {
 	if [[ ${changed} == 1 && ${usage} == *--validate* ]]; then
 		log_command dockerd --validate --config-file "${DOCKER_CONFIG}" ||
 			die "docker: dockerd rejects ${DOCKER_CONFIG}; see the log."
+	fi
+	# With nftables rules dockerd leaves IP forwarding to the system and does not start without it.
+	if _docker_nftables; then
+		file_write 0644 root:root "${DOCKER_SYSCTL}" <<-EOF
+			# Managed by lss (module docker). Containers on bridge networks reach the network through the host.
+			net.ipv4.ip_forward = 1
+			net.ipv6.conf.all.forwarding = 1
+		EOF
+		[[ ${LSS_FILE_CHANGED} == 0 ]] || sysctl -q -p "${DOCKER_SYSCTL}"
 	fi
 	ctr_firewall_setup
 	svc_enable docker.socket
@@ -169,6 +189,7 @@ mod_remove() {
 	svc_disable docker.service
 	svc_disable containerd.service
 	file_remove "${DOCKER_CONFIG}"
+	file_remove "${DOCKER_SYSCTL}"
 	ctr_firewall_remove
 	ctr_trivy_remove
 	[[ ${LSS_PURGE:-0} == 1 ]] || return 0
