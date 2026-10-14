@@ -4,6 +4,10 @@
 
 # systemd helpers.
 
+# Seconds lss waits for a unit to start. Some units (MySQL) wait for their service without a limit; a service that
+# never reports ready would stop the run for good.
+SVC_START_TIMEOUT=${SVC_START_TIMEOUT:-300}
+
 svc_exists() {
 	systemctl list-unit-files --no-legend "$1" "$1.service" 2>/dev/null | grep -q .
 	return
@@ -25,7 +29,7 @@ svc_enable() {
 	if svc_is_enabled "${unit}" && svc_is_active "${unit}"; then
 		return 0
 	fi
-	systemctl enable --now "${unit}" >/dev/null 2>&1 || {
+	timeout "${SVC_START_TIMEOUT}" systemctl enable --now "${unit}" >/dev/null 2>&1 || {
 		systemctl status --no-pager "${unit}" >&2 || true
 		journalctl -u "${unit}" -n 30 --no-pager >&2 || true
 		die "Could not start ${unit}."
@@ -55,7 +59,7 @@ svc_disable() {
 }
 
 svc_restart() {
-	systemctl restart "$1" || {
+	timeout "${SVC_START_TIMEOUT}" systemctl restart "$1" || {
 		systemctl status --no-pager "$1" >&2 || true
 		journalctl -u "$1" -n 30 --no-pager >&2 || true
 		return 1
@@ -63,7 +67,7 @@ svc_restart() {
 }
 
 svc_reload() {
-	systemctl reload-or-restart "$1" || {
+	timeout "${SVC_START_TIMEOUT}" systemctl reload-or-restart "$1" || {
 		systemctl status --no-pager "$1" >&2 || true
 		return 1
 	}
