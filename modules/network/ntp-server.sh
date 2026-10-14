@@ -26,6 +26,11 @@ _ntp_conf() {
 	return
 }
 
+_ntp_main_conf() {
+	if os_is_debian; then printf '/etc/chrony/chrony.conf'; else printf '/etc/chrony.conf'; fi
+	return
+}
+
 mod_check() {
 	[[ $(opt access) =~ ^(vpn|public)$ ]] || die "LSS_NTP_SERVER_ACCESS must be vpn or public."
 	opt_bool ratelimit || true
@@ -153,7 +158,11 @@ mod_verify() {
 	done
 	if [[ -z ${first} ]]; then
 		# What chronyd made of its configuration and which sockets it has, for the log.
-		chronyd -p 2>&1 | grep -E '^(port|allow|confdir|cmdport)' | sed 's/^/ntp-server: chronyd -p: /' >&2 || true
+		# chrony's configuration holds no secrets (keys live in a separate key file).
+		chronyd -p 2>&1 | grep -v '^server ' | sed 's/^/ntp-server: chronyd -p: /' >&2 || true
+		grep -n '^confdir' "$(_ntp_main_conf)" 2>&1 | sed 's/^/ntp-server: main file: /' >&2 || true
+		find "$(dirname "$(_ntp_conf)")" -maxdepth 1 -printf '%M %u %s %f\n' 2>&1 | sed 's/^/ntp-server: confdir: /' >&2 || true
+		ps -o args= -C chronyd 2>&1 | sed 's/^/ntp-server: process: /' >&2 || true
 		ss -Hlunp 2>/dev/null | grep chronyd | sed 's/^/ntp-server: socket: /' >&2 || true
 		die "ntp-server: chronyd does not answer NTP requests on port ${NTP_PORT}."
 	fi
