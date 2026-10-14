@@ -72,6 +72,19 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
 | `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |
 | `k3s`              | not measured yet   | not measured yet          | not measured yet | k3s server, about 1 GiB with Traefik       |
+| `restic`           | not measured yet   | not measured yet          | not measured yet | daily backup                               |
+| `db-dumps`         | not measured yet   | not measured yet          | not measured yet | dumps before each backup                   |
+| `node-exporter`    | not measured yet   | not measured yet          | not measured yet | node exporter                              |
+| `prometheus`       | not measured yet   | not measured yet          | not measured yet | Prometheus and its metrics on disk         |
+| `alertmanager`     | not measured yet   | not measured yet          | not measured yet | Alertmanager                               |
+| `grafana`          | not measured yet   | not measured yet          | not measured yet | Grafana                                    |
+| `loki`             | not measured yet   | not measured yet          | not measured yet | Loki and the logs on disk                  |
+| `alloy`            | not measured yet   | not measured yet          | not measured yet | Alloy                                      |
+| `netdata`          | not measured yet   | not measured yet          | not measured yet | Netdata and its plugins                    |
+| `smartd`           | not measured yet   | not measured yet          | not measured yet | smartd                                     |
+| `wireguard`        | not measured yet   | not measured yet          | not measured yet | – (kernel)                                 |
+| `dns-resolver`     | not measured yet   | not measured yet          | not measured yet | Unbound                                    |
+| `ntp-server`       | not measured yet   | not measured yet          | not measured yet | – (the chronyd of `time`)                  |
 
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
 
@@ -128,6 +141,9 @@ LSS_DOCKER_USERNS_REMAP=true
 LSS_PORTAINER_ACCESS=vpn
 LSS_K3S_API_ACCESS=vpn
 LSS_K3S_TRAEFIK=false
+LSS_RESTIC_REPOSITORY=sftp:backup@nas.example.com:/srv/restic/server1
+LSS_WIREGUARD_PEERS=laptop:<public key of the laptop>:10.66.0.2
+LSS_GRAFANA_ACCESS=vpn
 ```
 
 `--set` wins over the environment, which wins over the file, which wins over the profile, which wins over the
@@ -162,7 +178,16 @@ first password with `lss secrets show pgadmin-admin-password`), all on the admin
 together with `docker`). See [Containers](#containers).
 
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
-and where lss deliberately deviates. Backup, monitoring and mail follow as further module groups.
+and where lss deliberately deviates. Mail follows as a further module group.
+
+**Backup:** `restic` (daily, encrypted backups to a local path, SFTP or S3) and `db-dumps` (dumps of the databases
+before each backup). See [Backup](#backup).
+
+**Monitoring:** `node-exporter`, `prometheus`, `alertmanager`, `grafana`, `loki`, `alloy`, `netdata`, `smartd`. See
+[Monitoring](#monitoring).
+
+**Network:** `wireguard` (VPN server), `dns-resolver` (Unbound with DNSSEC), `ntp-server` (chrony serves the time).
+See [WireGuard, DNS and NTP](#wireguard-dns-and-ntp).
 
 ### Web sites
 
@@ -214,6 +239,72 @@ sudo lss install --profile k8s-node --set LSS_ADMIN_USER_NAME=alice --set LSS_AD
 With `docker` or `podman` installed, the guard scans every image daily with Trivy and reports HIGH and CRITICAL
 vulnerabilities per image.
 
+### Backup
+
+`restic` backs up `LSS_RESTIC_PATHS` (configuration, home directories, web roots, the database dumps) every night at
+`LSS_RESTIC_TIME`, keeps 7 daily, 4 weekly and 6 monthly snapshots and checks the repository after each run. The
+repository is a local path (`/var/backups/lss-restic` by default; put it on another disk), `sftp:USER@HOST:/PATH` or
+`s3:https://HOST/BUCKET/PATH`. lss generates the repository password; keep a copy outside the server, since no backup
+can be restored without it:
+
+```bash
+sudo lss secrets show restic-password
+```
+
+For SFTP lss creates an SSH key and prints its public half, which the backup host must accept. For S3,
+`LSS_RESTIC_S3_KEY_ID` and `LSS_RESTIC_S3_SECRET` go into the lss secrets. `/usr/local/lib/lss/backup restic
+snapshots` runs restic with the settings of the server, and `/usr/local/lib/lss/backup restore-test` restores the
+latest backup's test file and reads back 5 % of the data.
+
+`db-dumps` dumps every database engine lss installed (MariaDB, MySQL, PostgreSQL, MongoDB, Redis, Valkey) to
+`/var/backups/lss-db` before each backup. A database added later is dumped without further setup.
+
+### Monitoring
+
+Prometheus scrapes the node exporter, itself, Alertmanager and Loki, and alerts on unreachable targets, full disks,
+low memory, guard findings and backups that failed, are older than 30 hours or did not pass the restore test.
+Alertmanager sends the alerts to `LSS_ALERTMANAGER_EMAIL` or `LSS_ALERTMANAGER_WEBHOOK`. Grafana starts with
+Prometheus, Alertmanager and Loki as data sources; the user is `admin`, the first password `lss secrets show
+grafana-admin-password`. Alloy ships the systemd journal to Loki (Promtail reached its end of life in March 2026).
+
+| Module          | Address                                  | `LSS_<MODULE>_WEB_ADMIN=true` |
+| --------------- | ---------------------------------------- | ----------------------------- |
+| `prometheus`    | `http://127.0.0.1:9090/prometheus/`      | `/prometheus/` on port 8090   |
+| `alertmanager`  | `http://127.0.0.1:9093/alertmanager/`    | `/alertmanager/` on port 8090 |
+| `grafana`       | `http://127.0.0.1:3000/grafana/`         | `/grafana/` on port 8090      |
+| `netdata`       | `http://127.0.0.1:19999/`                | `/netdata/` on port 8090      |
+| `node-exporter` | `http://127.0.0.1:9100/metrics`          | –                             |
+| `loki`          | `http://127.0.0.1:3100`                  | –                             |
+| `alloy`         | `http://127.0.0.1:12345` (always local)  | –                             |
+
+With `LSS_<MODULE>_ACCESS=vpn` a module listens on the server's WireGuard address instead (the first address of
+`LSS_WIREGUARD_NETWORK`, 10.66.0.1 by default) and the firewall opens its port to the WireGuard network only; Netdata
+keeps 127.0.0.1 as well. That needs the `wireguard` module. Debian and Ubuntu get Prometheus, Alertmanager and the
+node exporter from the distribution, the RHEL family the checksum-verified upstream releases; Grafana, Loki and Alloy
+come from Grafana's repository and Netdata from Netdata's, both with pinned keys. `smartd` watches the drives, also in
+virtual machines, where it usually finds none.
+
+The profile `devops` installs `minimal-secure`, `docker` and the monitoring stack without Netdata:
+
+```bash
+sudo lss install --profile devops --set LSS_ADMIN_USER_NAME=alice --set LSS_ADMIN_USER_GITHUB_USER=alice-on-github
+```
+
+### WireGuard, DNS and NTP
+
+`wireguard` sets up `wg0` with the server's key in the lss secrets and one preshared key per peer. Each peer is
+`NAME:PUBLIC_KEY:ADDRESS` in `LSS_WIREGUARD_PEERS`; lss prints the settings a peer needs (the server's public key,
+endpoint and port) after every change, and `lss secrets show wireguard-psk-NAME` the peer's preshared key. Peers reach
+the server, not the networks behind it: IP forwarding stays off.
+
+`dns-resolver` runs Unbound on 127.0.0.1 as a validating (DNSSEC) resolver and makes the server use it, through
+systemd-resolved, NetworkManager or `/etc/resolv.conf`; removing the module restores the previous resolver.
+`LSS_DNS_RESOLVER_ACCESS=vpn` serves the WireGuard network too, `LSS_DNS_RESOLVER_FORWARD` forwards to other
+resolvers, over TLS with `LSS_DNS_RESOLVER_FORWARD_TLS=true`.
+
+`ntp-server` opens chrony of the `time` module to the WireGuard network (or to everyone with
+`LSS_NTP_SERVER_ACCESS=public`), with rate limiting.
+
 ## Guard
 
 The `guard` module checks the server every day: it runs `lss verify`, repairs modules that fail or whose files were
@@ -223,6 +314,10 @@ images with HIGH or CRITICAL vulnerabilities (Trivy, with `docker` or `podman`).
 what the daily AIDE, rkhunter and ClamAV runs found, and reports more failed SSH logins than
 `LSS_GUARD_LOGIN_THRESHOLD` with their main sources. Successful SSH logins and active fail2ban or CrowdSec bans are
 listed as notes. Findings go to a webhook (Slack, Teams, Mattermost, Discord, ntfy) or by e-mail.
+
+With `restic` installed, the guard reports a last successful backup older than `LSS_GUARD_BACKUP_MAX_AGE` hours (30)
+and runs a restore test every week. With `node-exporter` installed, the number of findings goes to Prometheus as
+well, where an alert rule picks it up.
 
 ## Documentation
 

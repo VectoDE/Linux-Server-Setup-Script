@@ -66,6 +66,22 @@ now or later.
 - Supported systems: Debian 12 and 13, Ubuntu 22.04, 24.04 and 26.04, Rocky Linux 9, AlmaLinux 10. CI installs,
   verifies, reinstalls and removes every module on each of them.
 - OpenSSF Scorecard, signed-off commits (DCO), REUSE licensing, security policy and governance.
+- Backup modules: `restic` (encrypted daily backups to a local path, SFTP or S3, retention, repository checks, the
+  password and keys in the lss secrets) and `db-dumps` (consistent dumps of every database engine lss installed,
+  taken before each backup).
+- Monitoring modules: `node-exporter`, `prometheus` (with alert rules for down targets, full disks, guard findings and
+  old or failed backups), `alertmanager` (e-mail and webhook), `grafana`, `loki`, `alloy` (Promtail's successor; it
+  ships the journal to Loki), `netdata` (no cloud, registry or telemetry) and `smartd`. Every interface listens on
+  127.0.0.1 or, with `access=vpn`, on the WireGuard address, and can be published below the web server's admin port.
+- Network modules: `wireguard` (server with peers from the settings, keys in the lss secrets), `dns-resolver` (Unbound
+  with DNSSEC on localhost, optionally for the WireGuard network, used by the server itself) and `ntp-server` (chrony of
+  the time module serves the WireGuard network or everyone, rate-limited).
+- Profile `devops` (minimal-secure, Docker and the monitoring stack); `webhosting` adds restic and db-dumps, `all`
+  every new module.
+- guard checks the age of the last backup (`LSS_GUARD_BACKUP_MAX_AGE`), runs a restore test every week and exports
+  its results for Prometheus through the node exporter.
+- The services of the backup, monitoring and network modules run with a systemd sandbox drop-in; a service that
+  listens on the WireGuard address starts after the interface.
 
 ### Removed
 
