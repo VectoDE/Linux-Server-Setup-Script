@@ -204,6 +204,15 @@ load_backup() {
 	[[ ${output} == *"usage: backup run|init|restore-test|probe|restic ARGS"* ]]
 }
 
+@test "backup restic runs restic with the repository and its password, without --quiet" {
+	load_backup
+	# shellcheck disable=SC2329 # called by dispatch
+	env_stub() {
+		printf '%s|%s|%s\n' "${RESTIC_REPOSITORY:-}" "${RESTIC_PASSWORD_FILE:-}" "$*"
+	}
+	[ "$(RESTIC=env_stub dispatch restic cat config)" = "/srv/repo|${LSS_SECRETS_DIR}/restic-password|cat config" ]
+}
+
 # --- db-dumps ---------------------------------------------------------------------------------------------------
 
 load_dumps() {

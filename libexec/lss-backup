@@ -121,12 +121,18 @@ prepare() {
 	return
 }
 
-# run_restic ARGS: restic with RESTIC_ENV exported in a subshell of its own, so no other process inherits it.
-run_restic() {
+# restic_env ARGS: restic with RESTIC_ENV exported in a subshell of its own, so no other process inherits it.
+restic_env() {
 	(
 		export "${RESTIC_ENV[@]}"
-		"${RESTIC}" "${RESTIC_OPTIONS[@]}" "$@"
+		"${RESTIC}" "$@"
 	)
+	return
+}
+
+# run_restic ARGS: restic_env with the options of the repository, quiet.
+run_restic() {
+	restic_env "${RESTIC_OPTIONS[@]}" "$@"
 	return
 }
 
@@ -320,7 +326,7 @@ dispatch() {
 	probe) cmd_probe ;;
 	restic)
 		prepare
-		"${RESTIC}" "${RESTIC_OPTIONS[@]:1}" "$@"
+		restic_env "${RESTIC_OPTIONS[@]:1}" "$@"
 		;;
 	*)
 		say "usage: backup run|init|restore-test|probe|restic ARGS" >&2
