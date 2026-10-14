@@ -279,13 +279,18 @@ _modsecurity_build_library() {
 # load into the distribution's nginx, which is built with the same switch.
 _modsecurity_build_connector() {
 	local so="${MODSEC_PREFIX}/nginx/ngx_http_modsecurity_module.so" stamp="${MODSEC_PREFIX}/nginx/.build"
-	local version src tree
+	local version src tree pcre=libpcre2-dev
 	local -a env=("MODSECURITY_INC=${MODSEC_PREFIX}/include" "MODSECURITY_LIB=${MODSEC_PREFIX}/lib")
 	if [[ -f ${so} && -f ${stamp} && $(<"${stamp}") == "$(_modsecurity_connector_id)" ]]; then
 		return 0
 	fi
 	if os_is_debian; then
-		_modsecurity_build_deps gcc make libc6-dev libpcre2-dev zlib1g-dev
+		# nginx reads PCRE2 from 1.21.5 on; the nginx 1.18 of Ubuntu 22.04 still needs PCRE1.
+		version=$(_modsecurity_nginx_version)
+		if [[ $(printf '%s\n' 1.21.5 "${version}" | sort -V | head -n 1) != 1.21.5 ]]; then
+			pcre=libpcre3-dev
+		fi
+		_modsecurity_build_deps gcc make libc6-dev "${pcre}" zlib1g-dev
 	else
 		# nginx-mod-devel requires the nginx of its own release and may update nginx; the version is read afterwards.
 		_modsecurity_build_deps gcc make pcre2-devel zlib-devel nginx-mod-devel
