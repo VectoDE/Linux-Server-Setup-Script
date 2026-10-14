@@ -72,19 +72,22 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
 | `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |
 | `k3s`              | not measured yet   | not measured yet          | not measured yet | k3s server, about 1 GiB with Traefik       |
-| `restic`           | not measured yet   | not measured yet          | not measured yet | daily backup                               |
-| `db-dumps`         | not measured yet   | not measured yet          | not measured yet | dumps before each backup                   |
-| `node-exporter`    | not measured yet   | not measured yet          | not measured yet | node exporter                              |
-| `prometheus`       | not measured yet   | not measured yet          | not measured yet | Prometheus and its metrics on disk         |
-| `alertmanager`     | not measured yet   | not measured yet          | not measured yet | Alertmanager                               |
-| `grafana`          | not measured yet   | not measured yet          | not measured yet | Grafana                                    |
-| `loki`             | not measured yet   | not measured yet          | not measured yet | Loki and the logs on disk                  |
-| `alloy`            | not measured yet   | not measured yet          | not measured yet | Alloy                                      |
-| `netdata`          | not measured yet   | not measured yet          | not measured yet | Netdata and its plugins                    |
-| `smartd`           | not measured yet   | not measured yet          | not measured yet | smartd                                     |
-| `wireguard`        | not measured yet   | not measured yet          | not measured yet | – (kernel)                                 |
-| `dns-resolver`     | not measured yet   | not measured yet          | not measured yet | Unbound                                    |
-| `ntp-server`       | not measured yet   | not measured yet          | not measured yet | – (the chronyd of `time`)                  |
+| `restic`           | 35 s               | 700 MiB (dnf), else 220 MiB | 260 MiB (dnf), else 115 MiB | daily backup, weekly restore test                   |
+| `db-dumps`         | measured with the databases | –                         | –       | dumps before each backup                            |
+| `node-exporter`    | 20 s               | 255 MiB                   | 110 MiB | node exporter, about 20 MiB                         |
+| `prometheus`       | 100 s with alertmanager and grafana | 860 MiB together          | 2.2 GiB together | Prometheus about 75 MiB, and its metrics on disk    |
+| `alertmanager`     | see `prometheus`   | see `prometheus`          | see `prometheus` | Alertmanager about 40 MiB                           |
+| `grafana`          | see `prometheus`   | see `prometheus`          | see `prometheus` | Grafana about 350 MiB, its plugins about 30 MiB each |
+| `loki`             | 50 s with alloy    | 545 MiB together          | 700 MiB together | Loki about 155 MiB, and the logs on disk            |
+| `alloy`            | see `loki`         | see `loki`                | see `loki` | Alloy about 230 MiB                                 |
+| `netdata`          | 45 s               | 440 MiB                   | 680 MiB | Netdata and its plugins, about 220 MiB              |
+| `smartd`           | 15 s               | 140 MiB                   | 5 MiB   | smartd about 5 MiB                                  |
+| `wireguard`        | 15 s               | 260 MiB                   | 100 MiB | – (kernel)                                          |
+| `dns-resolver`     | 45 s               | 180 MiB                   | 40 MiB  | Unbound about 20 MiB                                |
+| `ntp-server`       | 15 s               | 195 MiB                   | 10 MiB  | – (the chronyd of `time`, about 10 MiB)             |
+
+Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
+for `wireguard`); those outliers are left out.
 
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
 
