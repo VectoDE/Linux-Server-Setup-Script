@@ -74,7 +74,7 @@ mod_configure() {
 
 mod_verify() {
 	local url metrics
-	url="http://$(mon_address node-exporter):${NODE_PORT}/metrics"
+	url=$(mon_url node-exporter "${NODE_PORT}" /metrics)
 	svc_is_active "${NODE_UNIT}" || die "node-exporter: ${NODE_UNIT} is not running."
 	mon_wait_http "${url}"
 	metrics=$(curl -s --max-time 10 "${url}")

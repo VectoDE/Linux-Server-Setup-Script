@@ -36,20 +36,32 @@ MON_MANAGED_BY='# Managed by lss (module'
 MON_BIN_DIR=/usr/local/bin
 MON_POLICY_RC=/usr/sbin/policy-rc.d
 MON_CACHE_DIR=/var/cache/lss
+# The interfaces speak plain HTTP; see mon_url.
+MON_SCHEME=http
 
 # mon_vpn MODULE: true when MODULE listens on the WireGuard network (LSS_<MODULE>_ACCESS=vpn).
 mon_vpn() {
-	[[ $(config_option "$1" access local) == vpn ]]
+	local module=$1
+	[[ $(config_option "${module}" access local) == vpn ]]
 	return
 }
 
 # mon_address MODULE: the address MODULE listens on, 127.0.0.1 or the WireGuard address of the server.
 mon_address() {
-	if mon_vpn "$1"; then
+	local module=$1
+	if mon_vpn "${module}"; then
 		fw_vpn_address
 	else
 		printf '127.0.0.1'
 	fi
+	return
+}
+
+# mon_url MODULE PORT [PATH]: the URL of MODULE's interface. Plain HTTP is safe here: the interface listens on
+# 127.0.0.1 or on the WireGuard address, and the WireGuard tunnel encrypts everything that leaves the server.
+mon_url() {
+	local module=$1 port=$2 path=${3:-}
+	printf '%s://%s:%s%s' "${MON_SCHEME}" "$(mon_address "${module}")" "${port}" "${path}"
 	return
 }
 
@@ -146,7 +158,8 @@ EOF
 
 # mon_target_remove NAME
 mon_target_remove() {
-	file_remove "${MON_TARGETS_DIR}/$1.yml"
+	local name=$1
+	file_remove "${MON_TARGETS_DIR}/${name}.yml"
 	rmdir "${MON_TARGETS_DIR}" "${MON_ALERTMANAGERS_DIR}" "${MON_PROMETHEUS_DIR}" 2>/dev/null || true
 	return
 }
@@ -323,7 +336,8 @@ mon_delete() {
 
 # mon_http URL: the HTTP status code of URL, 000 while nothing answers.
 mon_http() {
-	curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true
+	local url=$1
+	curl -s --max-time 10 -o /dev/null -w '%{http_code}' "${url}" 2>/dev/null || true
 	return
 }
 
@@ -341,8 +355,8 @@ mon_wait_http() {
 # mon_listen_check [--process NAME] PORT ADDRESS...: every TCP socket listening on PORT (of the process NAME only) is on
 # one of the ADDRESSes.
 mon_listen_check() {
-	local process='' port listeners address
-	if [[ $1 == --process ]]; then
+	local process='' port listeners address first=$1
+	if [[ ${first} == --process ]]; then
 		process=$2
 		shift 2
 	fi

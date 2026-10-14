@@ -58,7 +58,7 @@ loki.source.journal "journal" {
 
 loki.write "local" {
   endpoint {
-    url = "http://$(mon_address loki):3100/loki/api/v1/push"
+    url = "$(mon_url loki 3100 /loki/api/v1/push)"
   }
 }
 EOF
@@ -85,7 +85,7 @@ mod_configure() {
 # _alloy_probe: writes a line to the journal and waits until Loki returns it.
 _alloy_probe() {
 	local token i result='' url
-	url="http://$(mon_address loki):3100/loki/api/v1/query_range"
+	url="$(mon_url loki 3100 /loki/api/v1/query_range)"
 	token="lss-alloy-probe-$(date +%s)-${RANDOM}"
 	logger -t lss-alloy-probe "${token}"
 	for ((i = 0; i < 45; i++)); do

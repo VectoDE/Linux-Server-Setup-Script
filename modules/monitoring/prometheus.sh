@@ -31,7 +31,7 @@ _prom_bin() {
 }
 
 _prom_url() {
-	printf 'http://%s:%s/%s' "$(mon_address prometheus)" "${MON_PROMETHEUS_PORT}" "${PROM_PATH}"
+	mon_url prometheus "${MON_PROMETHEUS_PORT}" "/${PROM_PATH}"
 	return
 }
 
@@ -112,7 +112,7 @@ mod_configure() {
 		svc_reload "${PROM_UNIT}" || die "prometheus: Prometheus does not reload its configuration."
 	fi
 	mon_firewall "${MON_PROMETHEUS_PORT}/tcp"
-	mon_web_admin proxy "http://$(mon_address prometheus):${MON_PROMETHEUS_PORT}"
+	mon_web_admin proxy "$(mon_url prometheus "${MON_PROMETHEUS_PORT}")"
 	mon_datasource Prometheus prometheus "$(_prom_url)" true
 	return
 }

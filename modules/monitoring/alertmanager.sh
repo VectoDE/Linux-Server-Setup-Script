@@ -36,7 +36,7 @@ _am_binary() {
 }
 
 _am_url() {
-	printf 'http://%s:%s/%s' "$(mon_address alertmanager)" "${MON_ALERTMANAGER_PORT}" "${AM_PATH}"
+	mon_url alertmanager "${MON_ALERTMANAGER_PORT}" "/${AM_PATH}"
 	return
 }
 
@@ -135,7 +135,7 @@ EOF
 		svc_reload "${AM_UNIT}" || die "alertmanager: Alertmanager does not reload its configuration."
 	fi
 	mon_firewall "${MON_ALERTMANAGER_PORT}/tcp"
-	mon_web_admin proxy "http://$(mon_address alertmanager):${MON_ALERTMANAGER_PORT}"
+	mon_web_admin proxy "$(mon_url alertmanager "${MON_ALERTMANAGER_PORT}")"
 	mon_datasource Alertmanager alertmanager "$(_am_url)"
 	return
 }

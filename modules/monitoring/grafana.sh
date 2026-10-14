@@ -19,7 +19,7 @@ GRAFANA_PATH=grafana
 GRAFANA_PASSWORD_FILE=${MON_GRAFANA_DIR}/admin-password
 
 _grafana_url() {
-	printf 'http://%s:%s/%s' "$(mon_address grafana)" "${GRAFANA_PORT}" "${GRAFANA_PATH}"
+	mon_url grafana "${GRAFANA_PORT}" "/${GRAFANA_PATH}"
 	return
 }
 
@@ -78,7 +78,7 @@ mod_configure() {
 		log_info "grafana: user admin, password from lss secrets show grafana-admin-password (set when Grafana creates its database; later changes go through Grafana)."
 	fi
 	mon_firewall "${GRAFANA_PORT}/tcp"
-	mon_web_admin proxy "http://$(mon_address grafana):${GRAFANA_PORT}"
+	mon_web_admin proxy "$(mon_url grafana "${GRAFANA_PORT}")"
 	return
 }
 

@@ -19,7 +19,7 @@ LOKI_CONF=/etc/lss/loki/config.yml
 LOKI_DATA=/var/lib/loki
 
 _loki_url() {
-	printf 'http://%s:%s' "$(mon_address loki)" "${LOKI_PORT}"
+	mon_url loki "${LOKI_PORT}"
 	return
 }
 
@@ -34,6 +34,9 @@ mod_check() {
 # _loki_config: one process with every component, an in-memory ring (no gossip port), the TSDB index and the chunks on
 # the local disk; the compactor deletes what is older than the retention.
 _loki_config() {
+	local days hours
+	days=$(opt_int retention_days)
+	hours=$((days * 24))
 	cat <<EOF
 ${MON_MANAGED_BY} loki). Change LSS_LOKI_* in /etc/lss/lss.conf and run lss configure loki.
 auth_enabled: false
@@ -64,7 +67,7 @@ schema_config:
         prefix: index_
         period: 24h
 limits_config:
-  retention_period: $(($(opt_int retention_days) * 24))h
+  retention_period: ${hours}h
 compactor:
   working_directory: ${LOKI_DATA}/compactor
   retention_enabled: true
