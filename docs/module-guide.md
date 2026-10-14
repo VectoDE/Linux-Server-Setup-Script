@@ -102,6 +102,22 @@ All of `lib/` is loaded in every step. The ones modules use most:
 - `fw_trust NETWORK INTERFACE` accepts all traffic from NETWORK arriving on INTERFACE, recorded and removed like a
   port. Only for networks of the server itself (a pod network on its bridge).
 
+### Monitoring and admin interfaces
+
+`lib/monitoring.sh` is for services with a web interface or an API, so they all bind, open and publish the same way:
+
+- `mon_address MODULE` is 127.0.0.1, or the server's WireGuard address (`fw_vpn_address`) with
+  `LSS_<MODULE>_ACCESS=vpn`; `mon_vpn_dropin UNIT` starts the unit after `wg0` in that case, and `mon_firewall
+  PORT/PROTO...` opens the ports to the WireGuard network only.
+- `mon_web_admin KIND URL` publishes the interface below the web server's admin port when `LSS_<MODULE>_WEB_ADMIN`
+  is true (`proxy` keeps the path, `strip` removes the prefix); `mon_web_admin_remove` takes it away.
+- `mon_target NAME JOB HOST:PORT [PATH]` adds a Prometheus scrape target, `mon_datasource NAME TYPE URL` a Grafana data
+  source; both have a `_remove` counterpart.
+- `mon_upstream_install NAME VERSION PROGRAM...` installs programs from a release archive listed in
+  `data/checksums.txt`; `mon_install_stopped PKG...` installs Debian packages without letting them start their
+  service before lss configured it.
+- `mon_wait_http URL [SECONDS]` and `mon_listen_check [--process NAME] PORT ADDRESS...` are for `mod_verify`.
+
 ### Containers
 
 - `ctr_run NAME IMAGE [OPTION...] [-- COMMAND...]` runs a container with the engine of the server (docker or podman)
