@@ -29,6 +29,9 @@ ENGINE_BRIDGES=(docker0 'br-*' 'podman*' 'cni-podman*')
 # k3s (cni0 for pods on this node, flannel for pods on other nodes): only redirected connections (NodePort, hostPort)
 # are checked; pod traffic between nodes is routed to pod addresses directly and passes.
 CLUSTER_BRIDGES=(cni0 'flannel*')
+# Written by the docker module where dockerd uses nftables and lss turned on IP forwarding for it. Forwarding that
+# involves no container network is then dropped, as the iptables rules of dockerd do with their FORWARD policy.
+FORWARD_GUARD=${LSS_CONTAINER_FORWARD_GUARD:-/etc/sysctl.d/70-lss-docker.conf}
 
 # rule PROTO PORT SOURCE: the accept rule for one allowed port; prints nothing for an invalid line.
 rule() {
@@ -62,6 +65,12 @@ ruleset() {
 	for bridge in "${ENGINE_BRIDGES[@]}"; do
 		printf '\t\toifname "%s" ct state new drop\n' "${bridge}"
 	done
+	if [[ -f ${FORWARD_GUARD} ]]; then
+		for bridge in "${ENGINE_BRIDGES[@]}" "${CLUSTER_BRIDGES[@]}"; do
+			printf '\t\toifname "%s" accept\n' "${bridge}"
+		done
+		printf '\t\tdrop\n'
+	fi
 	printf '\t}\n\tchain published {\n'
 	if [[ -r ${PORTS} ]]; then
 		while read -r proto port source; do

@@ -125,16 +125,23 @@ mod_configure() {
 		log_command dockerd --validate --config-file "${DOCKER_CONFIG}" ||
 			die "docker: dockerd rejects ${DOCKER_CONFIG}; see the log."
 	fi
-	# With nftables rules dockerd leaves IP forwarding to the system and does not start without it.
+	# With nftables rules dockerd leaves IP forwarding to the system and does not start without it. The container
+	# firewall drops forwarding that involves no container network once this file exists, so it loads first.
+	local forwarding=0
 	if _docker_nftables; then
 		file_write 0644 root:root "${DOCKER_SYSCTL}" <<-EOF
-			# Managed by lss (module docker). Containers on bridge networks reach the network through the host.
+			# Managed by lss (module docker). Containers on bridge networks reach the network through the host; the
+			# lss container firewall drops all other forwarding.
 			net.ipv4.ip_forward = 1
 			net.ipv6.conf.all.forwarding = 1
 		EOF
-		[[ ${LSS_FILE_CHANGED} == 0 ]] || sysctl -q -p "${DOCKER_SYSCTL}"
+		forwarding=${LSS_FILE_CHANGED}
 	fi
 	ctr_firewall_setup
+	if [[ ${forwarding} == 1 ]]; then
+		svc_reload "${FW_CONTAINER_UNIT}.service" || die "docker: the container firewall does not reload."
+		sysctl -q -p "${DOCKER_SYSCTL}"
+	fi
 	svc_enable docker.socket
 	svc_enable docker.service
 	if [[ ${changed} == 1 ]]; then
@@ -189,7 +196,12 @@ mod_remove() {
 	svc_disable docker.service
 	svc_disable containerd.service
 	file_remove "${DOCKER_CONFIG}"
-	file_remove "${DOCKER_SYSCTL}"
+	if [[ -f ${DOCKER_SYSCTL} ]]; then
+		# Forwarding goes off before the container firewall, which guards it, is removed.
+		file_remove "${DOCKER_SYSCTL}"
+		sysctl -q -w net.ipv4.ip_forward=0 net.ipv6.conf.all.forwarding=0 >/dev/null
+		sysctl -q --system >/dev/null 2>&1 || true
+	fi
 	ctr_firewall_remove
 	ctr_trivy_remove
 	[[ ${LSS_PURGE:-0} == 1 ]] || return 0

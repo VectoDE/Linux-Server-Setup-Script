@@ -349,7 +349,7 @@ record_writes() {
 @test "the container firewall rule set: redirected connections only to listed ports, nothing straight to containers" {
 	local ports=${BATS_TEST_TMPDIR}/ports output
 	printf 'tcp 443 any\ntcp 3000 10.66.0.0/24\nudp 51820-51830 fd00::/64\nicmp 1 any\ntcp 80 nonsense\n\n' >"${ports}"
-	output=$(LSS_CONTAINER_PORTS=${ports} bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
+	output=$(LSS_CONTAINER_PORTS=${ports} LSS_CONTAINER_FORWARD_GUARD=/nonexistent bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
 	[[ ${output} == $'table inet lss_containers\ndelete table inet lss_containers\ntable inet lss_containers {'* ]]
 	[[ ${output} == *$'\t\ttype filter hook forward priority -10; policy accept;\n\t\tct state established,related accept\n'* ]]
 	[[ ${output} == *$'\t\tiifname "br-*" accept\n'* ]]
@@ -363,6 +363,16 @@ record_writes() {
 	[[ ${output} == *$'\t\tdrop\n\t}\n}' ]]
 	run bash "${REPO_ROOT}/libexec/lss-container-firewall" bogus
 	[ "${status}" -eq 2 ]
+}
+
+@test "the container firewall drops other forwarding once lss turned it on for Docker" {
+	local guard=${BATS_TEST_TMPDIR}/70-lss-docker.conf output
+	output=$(LSS_CONTAINER_PORTS=/dev/null LSS_CONTAINER_FORWARD_GUARD=${guard} bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
+	[[ ${output} != *'oifname "docker0" accept'* ]]
+	: >"${guard}"
+	output=$(LSS_CONTAINER_PORTS=/dev/null LSS_CONTAINER_FORWARD_GUARD=${guard} bash "${REPO_ROOT}/libexec/lss-container-firewall" print)
+	[[ ${output} == *$'\t\toifname "cni-podman*" ct state new drop\n\t\toifname "docker0" accept\n'* ]]
+	[[ ${output} == *$'\t\toifname "flannel*" accept\n\t\tdrop\n\t}\n\tchain published {\n'* ]]
 }
 
 # --- engine, Compose, Trivy ---------------------------------------------------------------------------------------
