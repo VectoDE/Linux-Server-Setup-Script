@@ -804,6 +804,16 @@ EOF
 	run ! grep -qE 'fail2ban-client|restart' "${STUB_LOG}"
 }
 
+@test "nginx writes the jails during its own first install, before its state is recorded" {
+	as_test_user
+	test_log_dir
+	use_server fail2ban
+	LSS_MODULE=nginx
+	web_ids_configure
+	grep -qxF '[nginx-http-auth]' "${WEB_FAIL2BAN_JAIL}"
+	grep -qxF '[nginx-botsearch]' "${WEB_FAIL2BAN_JAIL}"
+}
+
 @test "Caddy gets its own basic-auth filter and jail" {
 	as_test_user
 	test_log_dir

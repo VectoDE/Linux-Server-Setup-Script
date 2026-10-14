@@ -160,7 +160,7 @@ _ctr_check_cap() {
 ctr_args() {
 	local engine=$1 name=$2 image=$3 option value registry memory=${CTR_DEFAULT_MEMORY} pids=${CTR_DEFAULT_PIDS}
 	local writable=0 socket=0 tmp=0
-	local -a args=() command=()
+	local -a args=() command=() volumes=()
 	shift 3
 	[[ ${engine} == docker || ${engine} == podman ]] || die "container: unknown engine '${engine}'."
 	[[ ${name} =~ ^[a-z0-9][a-z0-9_.-]*$ ]] || die "container: '${name}' is not a valid container name."
@@ -197,6 +197,9 @@ ctr_args() {
 		--volume)
 			_ctr_check_volume "${name}" "${value}"
 			args+=(--volume "${value}")
+			if [[ ${value} != /* ]]; then
+				volumes+=("${value%%:*}")
+			fi
 			;;
 		--tmpfs)
 			[[ ${value} =~ ^/[A-Za-z0-9._/-]+$ ]] || die "container ${name}: '${value}' is not a valid tmpfs path."
@@ -257,6 +260,33 @@ ctr_args() {
 		args+=(--restart unless-stopped)
 	fi
 	CTR_ARGS=("${args[@]}" "${image}" "${command[@]}")
+	# Named volumes of a container in the host user namespace (see _ctr_root_volumes).
+	CTR_ROOT_VOLUMES=()
+	if [[ ${socket} == 1 ]]; then
+		CTR_ROOT_VOLUMES=("${volumes[@]}")
+	fi
+	return
+}
+
+# _ctr_root_volumes ENGINE: hands the volumes in CTR_ROOT_VOLUMES to root. With Docker's user namespace remapping a
+# new volume belongs to the remapped root, but a container in the host user namespace runs as the real root, which
+# without capabilities may not write there.
+_ctr_root_volumes() {
+	local engine=$1 volume path owner=${CTR_VOLUME_OWNER:-0:0}
+	for volume in "${CTR_ROOT_VOLUMES[@]}"; do
+		if ! "${engine}" volume inspect "${volume}" >/dev/null 2>&1; then
+			log_command "${engine}" volume create "${volume}" || die "container: ${engine} cannot create the volume ${volume}."
+			files_note_change "created the volume ${volume}"
+		fi
+		path=$("${engine}" volume inspect --format '{{.Mountpoint}}' "${volume}") ||
+			die "container: ${engine} cannot inspect the volume ${volume}."
+		[[ -d ${path} ]] || die "container: the volume ${volume} has no directory (${path:-none})."
+		if [[ $(stat -c "%u:%g %a" "${path}") != "${owner} 700" ]]; then
+			chown -R "${owner}" -- "${path}"
+			chmod 0700 -- "${path}"
+			files_note_change "gave the volume ${volume} to root"
+		fi
+	done
 	return
 }
 
@@ -315,6 +345,7 @@ ctr_run() {
 	local name=$1 image=$2 engine hash current unit
 	engine=$(ctr_engine) || die "container ${name}: neither docker nor podman is installed."
 	ctr_args "${engine}" "$@"
+	_ctr_root_volumes "${engine}"
 	hash=$(printf '%s\n' "${engine}" "${CTR_ARGS[@]}" | sha256sum | cut -c 1-16)
 	unit=$(_ctr_unit "${name}")
 	current=$("${engine}" container inspect --format '{{index .Config.Labels "lss.hash"}}' "${name}" 2>/dev/null || true)

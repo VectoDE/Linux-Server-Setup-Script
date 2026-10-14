@@ -16,9 +16,11 @@ rm -rf -- "${out}"
 mkdir -p "${out}"
 docker run --rm --security-opt seccomp=unconfined \
 	-v "${PWD}:/src" -v "${bats_dir}:/bats:ro" -v "$(cd "${out}" && pwd):/out" -w /src \
-	"${image}" kcov --include-path=/src/lib --bash-dont-parse-binary-dir /out /bats/bin/bats tests/unit >"${out}/bats.tap" || {
-	# The failing tests with their output; the rest of the TAP stream is in OUT_DIR/bats.tap.
+	"${image}" kcov --include-path=/src/lib --bash-dont-parse-binary-dir /out /bats/bin/bats tests/unit >"${out}/bats.tap" 2>"${out}/kcov.log" || {
+	# The failing tests with their output; the rest of the TAP stream is in OUT_DIR/bats.tap. kcov's stderr carries
+	# pieces of its bash trace, so it stays in OUT_DIR/kcov.log unless the run fails.
 	grep -A 20 '^not ok' "${out}/bats.tap" >&2 || true
+	tail -n 40 "${out}/kcov.log" >&2
 	exit 1
 }
 report=$(find "${out}" -name coverage.json -path '*bats*' | head -1)

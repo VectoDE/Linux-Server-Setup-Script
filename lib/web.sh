@@ -672,10 +672,15 @@ web_admin_htpasswd() {
 }
 
 # web_ids_configure: lets fail2ban or CrowdSec read the logs of the installed web server. Called by the web server
-# modules and by fail2ban and crowdsec, whichever is installed last.
+# modules and by fail2ban and crowdsec, whichever is installed last. A web server module counts while it is being
+# installed, because its state is recorded only after it.
 web_ids_configure() {
 	local server logs
 	server=$(web_server)
+	case ${LSS_MODULE:-} in
+	nginx | apache | caddy) server=${LSS_MODULE} ;;
+	*) ;;
+	esac
 	if [[ -z ${server} ]]; then
 		file_remove "${WEB_FAIL2BAN_JAIL}"
 		file_remove "${WEB_FAIL2BAN_FILTER}"
