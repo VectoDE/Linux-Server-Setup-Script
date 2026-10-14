@@ -3,6 +3,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-# shellcheck source=tests/fixtures/bin/_stub.bash
-source "$(dirname "$0")/_stub.bash"
-stub_main selinuxenabled "$@"
+# selinuxenabled: SELinux is off unless a test sets STUB_EXIT_selinuxenabled=0.
+printf 'selinuxenabled %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+exit "${STUB_EXIT_selinuxenabled:-1}"
