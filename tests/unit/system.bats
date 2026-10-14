@@ -701,3 +701,14 @@ EOF
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"Repository demo checks no signature."* ]]
 }
+
+@test "repo_add writes a flat repository without components" {
+	repo_root
+	printf 'KEY=demo.asc\nFINGERPRINTS=AAAA1111\nDEB_URL=https://repo.example.invalid/{{id}}/\nDEB_SUITE={{codename}}/\nDEB_COMPONENTS=\n' \
+		>"${LSS_ROOT}/data/repos/flat.conf"
+	use_os debian-13
+	repo_add flat
+	grep -qxF 'URIs: https://repo.example.invalid/debian/' "${BATS_TEST_TMPDIR}/writes"
+	grep -qxF 'Suites: trixie/' "${BATS_TEST_TMPDIR}/writes"
+	run ! grep -q '^Components:' "${BATS_TEST_TMPDIR}/writes"
+}

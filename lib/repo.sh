@@ -81,15 +81,12 @@ repo_add() {
 		mkdir -p /etc/apt/keyrings
 		file_write 0644 root:root "${keyring}" < <(gpg --batch --dearmor <"${key}")
 		local changed=${LSS_FILE_CHANGED}
-		file_write 0644 root:root "/etc/apt/sources.list.d/lss-${name}.sources" <<EOF
-# Managed by lss (repository ${name}).
-Types: deb
-URIs: ${url}
-Suites: ${suites}
-Components: ${components}
-Architectures: $(os_deb_arch)
-Signed-By: ${keyring}
-EOF
+		# A flat repository (a suite ending in /, no DEB_COMPONENTS) must not name components.
+		file_write 0644 root:root "/etc/apt/sources.list.d/lss-${name}.sources" < <(
+			printf '# Managed by lss (repository %s).\nTypes: deb\nURIs: %s\nSuites: %s\n' "${name}" "${url}" "${suites}"
+			[[ -z ${components} ]] || printf 'Components: %s\n' "${components}"
+			printf 'Architectures: %s\nSigned-By: %s\n' "$(os_deb_arch)" "${keyring}"
+		)
 		if [[ ${changed} == 1 || ${LSS_FILE_CHANGED} == 1 || ${LSS_PKG_UPDATED} != 1 ]]; then
 			pkg_update
 		fi

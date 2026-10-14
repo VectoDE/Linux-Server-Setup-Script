@@ -404,6 +404,17 @@ location ^~ /${path}/ {
 	proxy_set_header X-Script-Name /${path};
 }
 EOF
+	elif [[ ${kind} == strip ]]; then
+		# A URI in proxy_pass replaces the matched /PATH/ prefix.
+		cat <<EOF
+location = /${path} {
+	return 301 /${path}/;
+}
+location ^~ /${path}/ {
+	proxy_pass ${target%/}/;
+	include /etc/nginx/lss/proxy.conf;
+}
+EOF
 	else
 		cat <<EOF
 location = /${path} {
@@ -506,6 +517,14 @@ _web_admin_apache() {
 	RequestHeader set X-Script-Name /${path}
 </Location>
 EOF
+	elif [[ ${kind} == strip ]]; then
+		cat <<EOF
+RedirectMatch 301 ^/${path}\$ /${path}/
+<Location /${path}/>
+	ProxyPass ${target%/}/ upgrade=websocket
+	ProxyPassReverse ${target%/}/
+</Location>
+EOF
 	else
 		cat <<EOF
 Alias /${path} ${target}
@@ -553,6 +572,8 @@ _web_admin_caddy() {
 	printf '# Managed by lss (admin path of %s).\n' "${name}"
 	if [[ ${kind} == proxy ]]; then
 		printf 'handle /%s/* {\n\treverse_proxy %s {\n\t\theader_up X-Script-Name /%s\n\t}\n}\n' "${path}" "${target}" "${path}"
+	elif [[ ${kind} == strip ]]; then
+		printf 'redir /%s /%s/\nhandle_path /%s/* {\n\treverse_proxy %s\n}\n' "${path}" "${path}" "${path}" "${target}"
 	else
 		printf 'redir /%s /%s/\nhandle_path /%s/* {\n\troot * %s\n\tphp_fastcgi unix/%s\n\tfile_server\n}\n' \
 			"${path}" "${path}" "${path}" "${target}" "${WEB_PHP_SOCKET}"
@@ -608,15 +629,16 @@ web_site_remove() {
 	return
 }
 
-# web_admin_write NAME PATH php|proxy TARGET: publishes an admin interface below /PATH/ on the admin server
-# (WEB_ADMIN_PORT). TARGET is a directory with PHP files or an upstream URL.
+# web_admin_write NAME PATH php|proxy|strip TARGET: publishes an admin interface below /PATH/ on the admin server
+# (WEB_ADMIN_PORT). TARGET is a directory with PHP files or an upstream URL. proxy passes the whole path on (the
+# upstream serves below /PATH/), strip removes /PATH first (for upstreams that only serve their root, such as Netdata).
 web_admin_write() {
 	local name=$1 path=$2 kind=$3 target=$4 server
 	_web_name_check "${name}"
 	[[ ${path} =~ ^[a-z0-9-]+$ ]] || die "web: '${path}' is not a valid admin path."
 	server=$(web_server)
 	[[ -n ${server} ]] || die "web: no web server is installed (nginx, apache or caddy)."
-	[[ ${kind} != proxy ]] || web_selinux_proxy
+	[[ ${kind} == php ]] || web_selinux_proxy
 	"_web_admin_${server}" "${name}" "${path}" "${kind}" "${target}" |
 		file_write 0644 root:root "$(web_conf_dir "${server}")/admin/${name}.$(_web_ext "${server}")"
 	return
