@@ -16,6 +16,7 @@ MOD_PORTS="none; published container ports only where a module opened them (cont
 
 DOCKER_CONFIG=/etc/docker/daemon.json
 DOCKER_SYSCTL=/etc/sysctl.d/70-lss-docker.conf
+DOCKER_MODULES=/etc/modules-load.d/lss-docker.conf
 # Releases Docker CE has packages for (checked 2026-10-13, data/repos/docker.conf); the RHEL family uses the RHEL 9
 # and 10 repositories.
 DOCKER_CE_SUITES="bookworm trixie jammy noble resolute"
@@ -136,6 +137,9 @@ mod_configure() {
 			net.ipv6.conf.all.forwarding = 1
 		EOF
 		forwarding=${LSS_FILE_CHANGED}
+		# icc=false and the missing userland proxy need the bridge netfilter hooks, which dockerd loads only for iptables.
+		file_write 0644 root:root "${DOCKER_MODULES}" <<<$'# Managed by lss (module docker).\nbr_netfilter'
+		modprobe br_netfilter
 	fi
 	ctr_firewall_setup
 	if [[ ${forwarding} == 1 ]]; then
@@ -199,6 +203,7 @@ mod_remove() {
 	if [[ -f ${DOCKER_SYSCTL} ]]; then
 		# Forwarding goes off before the container firewall, which guards it, is removed.
 		file_remove "${DOCKER_SYSCTL}"
+		file_remove "${DOCKER_MODULES}"
 		sysctl -q -w net.ipv4.ip_forward=0 net.ipv6.conf.all.forwarding=0 >/dev/null
 		sysctl -q --system >/dev/null 2>&1 || true
 	fi
