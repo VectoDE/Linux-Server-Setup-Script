@@ -348,9 +348,12 @@ mod_verify() {
 		die "dns-resolver: Unbound does not validate DNSSEC."
 	[[ -s ${DNS_ANCHOR} ]] || die "dns-resolver: the DNSSEC trust anchor ${DNS_ANCHOR} is missing."
 	# The signed root zone must come back validated (AD). Without a reachable resolver upstream only the offline checks
-	# above apply.
-	reply=$(_dns_query "${DNS_LOOPBACK}" . 6)
-	rcode=$(_dns_reply_rcode "${reply}" || true)
+	# above apply. A cold Unbound first fetches the root servers and keys, so it gets three tries.
+	for _ in 1 2 3; do
+		reply=$(_dns_query "${DNS_LOOPBACK}" . 6)
+		rcode=$(_dns_reply_rcode "${reply}" || true)
+		[[ -z ${rcode} ]] || break
+	done
 	if [[ ${rcode} == 0 ]]; then
 		_dns_reply_ad "${reply}" || die "dns-resolver: the answer for the root zone is not DNSSEC-validated."
 	else
