@@ -35,7 +35,7 @@ calls() {
 
 @test "apt output drops the notices that report nothing to do and keeps the exit status" {
 	use_os ubuntu-24.04
-	export STUB_OUT_apt_get=$'No services need to be restarted.\nSetting up nginx (1.24.0)\nNo containers need to be restarted.\nNo user sessions are running outdated binaries.\nNo VM guests are running outdated hypervisor (qemu) binaries on this host.\nNot building database; man-db/auto-update is not \'true\'.'
+	export STUB_OUT_apt_get=$'No services need to be restarted.\nSetting up nginx (1.24.0)\nNo containers need to be restarted.\nNo user sessions are running outdated binaries.\nNo VM guests are running outdated hypervisor (qemu) binaries on this host.\nNot building database; man-db/auto-update is not \'true\'.\nNot creating home directory `/usr/share/grafana\'.'
 	export STUB_EXIT_apt_get=100
 	run _pkg_apt install nginx
 	[ "${status}" -eq 100 ]
