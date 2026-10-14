@@ -141,7 +141,9 @@ mod_configure() {
 	install -d -m 0700 /etc/wireguard
 	config=$(_wg_config)
 	file_write 0600 root:root "${WG_CONF}" <<<"${config}"
-	svc_sandbox "${WG_UNIT}.service"
+	# wg-quick is a root script that runs ip and wg; under SELinux these switch to their own domains (ifconfig_t),
+	# which NoNewPrivileges forbids, so the interface would never come up on the RHEL family.
+	svc_sandbox "${WG_UNIT}.service" NoNewPrivileges=no
 	fw_allow "$(opt_int port)/udp"
 	svc_enable "${WG_UNIT}"
 	if [[ $(files_changes_of wireguard) != "${before}" ]]; then
