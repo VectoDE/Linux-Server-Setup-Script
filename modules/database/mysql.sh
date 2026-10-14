@@ -191,7 +191,7 @@ _mysql_generic_links() {
 }
 
 mod_install() {
-	local packages
+	local packages limit
 	case $(_mysql_source) in
 	rhel)
 		if [[ ${OS_MAJOR} == 9 ]]; then
@@ -203,6 +203,12 @@ mod_install() {
 	*) ;;
 	esac
 	packages=$(_mysql_packages)
+	# The package scripts initialise the data directory with mysqld itself, outside systemd's limits. With the open file
+	# limit of a container (about a billion) mysqld sizes its tables after it and stalls; 65536 is plenty.
+	limit=$(ulimit -n)
+	if [[ ${limit} == unlimited ]] || ((limit > 65536)); then
+		ulimit -n 65536
+	fi
 	if [[ -n ${packages} ]]; then
 		pkg_install_family "${packages}" "${packages}"
 	fi
