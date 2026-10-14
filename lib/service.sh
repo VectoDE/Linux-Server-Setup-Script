@@ -151,6 +151,23 @@ svc_sandbox() {
 	return
 }
 
+# Settings that turn off every part of the svc_sandbox baseline that needs a mount namespace (the empty ReadWritePaths=
+# clears the list). An AppArmor profile without attach_disconnected cannot name paths seen from such a namespace and
+# refuses the service its systemd notification socket; that profile confines the files of the service instead.
+# shellcheck disable=SC2034 # read by modules
+SVC_SANDBOX_NO_MOUNTS=(ProtectSystem=no ProtectHome=no PrivateTmp=no PrivateDevices=no ProtectKernelTunables=no
+	ProtectKernelModules=no ProtectKernelLogs=no ProtectControlGroups=no ProtectHostname=no ReadWritePaths=)
+
+# svc_apparmor_confined PROGRAM: whether an AppArmor profile confines PROGRAM. Without a readable profile list (in
+# some containers) an enabled AppArmor counts as confining.
+svc_apparmor_confined() {
+	local enabled=${SVC_APPARMOR_ENABLED:-/sys/module/apparmor/parameters/enabled}
+	local profiles=${SVC_APPARMOR_PROFILES:-/sys/kernel/security/apparmor/profiles}
+	[[ $(cat "${enabled}" 2>/dev/null) == Y ]] || return 1
+	[[ -r ${profiles} ]] || return 0
+	grep -qF "$1 (" "${profiles}"
+}
+
 # svc_unit UNIT: writes /etc/systemd/system/UNIT (a unit of lss's own) from stdin and reloads systemd when it
 # changed.
 svc_unit() {
