@@ -86,7 +86,9 @@ _loki_files() {
 	config=$(_loki_config)
 	file_write 0644 root:root "${LOKI_CONF}" <<<"${config}"
 	mon_exec "${LOKI_UNIT}" "/usr/bin/loki -config.file=${LOKI_CONF}"
-	svc_sandbox "${LOKI_UNIT}.service" "ReadWritePaths=-${LOKI_DATA}"
+	# systemd creates the data directory for the user loki on every start (StateDirectory), so the start by the package's
+	# installation script, before mod_configure, finds it writable too and Loki does not end in a restart loop.
+	svc_sandbox "${LOKI_UNIT}.service" "StateDirectory=${LOKI_DATA#/var/lib/}" StateDirectoryMode=0750
 	mon_vpn_dropin "${LOKI_UNIT}.service"
 	return
 }
@@ -110,6 +112,8 @@ mod_configure() {
 	_loki_files
 	/usr/bin/loki -config.file="${LOKI_CONF}" -verify-config >/dev/null 2>&1 ||
 		die "loki: Loki rejects ${LOKI_CONF} (loki -config.file=${LOKI_CONF} -verify-config shows why)."
+	# A start by the package's installation script that failed must not leave the unit at its start limit.
+	systemctl reset-failed "${LOKI_UNIT}.service" >/dev/null 2>&1 || true
 	svc_enable "${LOKI_UNIT}"
 	if [[ $(files_changes_of loki) != "${before}" ]] || ! svc_is_active "${LOKI_UNIT}"; then
 		svc_restart "${LOKI_UNIT}" || die "loki: Loki does not start."
