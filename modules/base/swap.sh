@@ -70,11 +70,12 @@ mod_configure() {
 		chmod 600 "${path}"
 		# mkswap reports on stdout; --quiet exists only from util-linux 2.38 on (Rocky 9 has 2.37).
 		mkswap "${path}" >/dev/null
-		# XFS keeps freshly written blocks as delayed allocations, and swapon refuses those ("Invalid argument").
-		sync -- "${path}"
 		files_note_change "swap file ${path} (${size} MiB)"
 	fi
 	chmod 600 "${path}"
+	# XFS refuses swapon ("Invalid argument", "is not committed") while the file's blocks or its inode, which chmod
+	# touches as well, are not yet in the journal; the flush comes last.
+	sync -- "${path}"
 	svc_unit "${unit}" <<UNIT
 # Managed by lss (module swap).
 [Unit]
