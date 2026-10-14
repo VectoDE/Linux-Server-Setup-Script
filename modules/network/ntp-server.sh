@@ -65,20 +65,33 @@ _ntp_config() {
 	return
 }
 
+# _ntp_exec UNIT: the command line of the distribution's chronyd unit with -x added. It is taken over rather than
+# written anew: Debian starts chronyd with "!" (as root although the unit says User=_chrony) and -n (Type=notify),
+# the RHEL family lets it fork.
+_ntp_exec() {
+	local unit=$1 fragment line
+	fragment=$(systemctl show -p FragmentPath --value "${unit}")
+	line=$(sed -n 's/^ExecStart=\(..*\)$/\1/p' "${fragment}" 2>/dev/null | tail -n 1)
+	[[ -n ${line} ]] || die "ntp-server: ${unit} has no command line in ${fragment:-its unit file}."
+	printf '%s -x' "${line}"
+	return
+}
+
 # _ntp_container_dropin: inside a container chronyd serves the time but must not set the clock it shares with the host
-# (-x), and the unit's condition on CAP_SYS_TIME no longer applies.
+# (-x), and the unit's conditions on CAP_SYS_TIME and on running outside a container no longer apply.
 _ntp_container_dropin() {
-	local unit options=OPTIONS
+	local unit exec
 	unit="$(_ntp_unit).service"
-	os_is_debian && options=DAEMON_OPTS
 	if os_in_container; then
+		exec=$(_ntp_exec "${unit}") || return 1
 		svc_dropin "${unit}" lss-ntp-server <<EOF
 # Managed by lss (module ntp-server): inside a container chronyd serves the time without setting the clock.
 [Unit]
 ConditionCapability=
+ConditionVirtualization=
 [Service]
 ExecStart=
-ExecStart=/usr/sbin/chronyd \$${options} -x
+ExecStart=${exec}
 EOF
 	else
 		LSS_FILE_CHANGED=0

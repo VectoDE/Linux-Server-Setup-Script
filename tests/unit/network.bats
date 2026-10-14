@@ -222,13 +222,26 @@ KEY_B=TrMvSoP4jYQlY6RIzBgbssQqY3vxI2Pi+y71lOWWXX0=
 @test "inside a container chronyd serves the time without setting the clock" {
 	load_module ntp-server
 	export STUB_EXIT_systemd_detect_virt=0
+	# The command line comes from the distribution's unit, which systemctl names.
+	local unit_file=${BATS_TEST_TMPDIR}/chrony.service
+	printf '[Service]\nUser=_chrony\nExecStart=!/usr/sbin/chronyd -n $DAEMON_OPTS\n' >"${unit_file}"
+	# shellcheck disable=SC2329 # called by the functions under test
+	systemctl() {
+		printf '%s\n' "${unit_file}"
+	}
 	_ntp_container_dropin
 	grep -qxF '== 0644 root:root /etc/systemd/system/chrony.service.d/lss-ntp-server.conf' "${WRITES}"
 	grep -qxF 'ConditionCapability=' "${WRITES}"
-	grep -qxF "ExecStart=/usr/sbin/chronyd \$DAEMON_OPTS -x" "${WRITES}"
+	grep -qxF 'ConditionVirtualization=' "${WRITES}"
+	grep -qxF "ExecStart=!/usr/sbin/chronyd -n \$DAEMON_OPTS -x" "${WRITES}"
 	use_os rocky-9
+	printf '[Service]\nExecStart=/usr/sbin/chronyd $OPTIONS\n' >"${unit_file}"
 	_ntp_container_dropin
 	grep -qxF "ExecStart=/usr/sbin/chronyd \$OPTIONS -x" "${WRITES}"
+	: >"${unit_file}"
+	run _ntp_container_dropin
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"chronyd.service has no command line in ${unit_file}."* ]]
 	export STUB_EXIT_systemd_detect_virt=1
 	_ntp_container_dropin
 	[ "${LSS_FILE_CHANGED}" = 0 ]
