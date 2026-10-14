@@ -9,10 +9,13 @@ LSS_PKG_UPDATED=${LSS_PKG_UPDATED:-0}
 
 # DPkg::Lock::Timeout waits for unattended-upgrades or apt-daily instead of failing on their lock; they start on
 # their own on a fresh server and as soon as the auto-updates module enables them.
+# The filter drops the notices that report nothing to do: the needrestart summaries and the man-db trigger on images
+# that switched off man-db/auto-update. Errors and everything else stay in the log.
 _pkg_apt() {
 	DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q -o DPkg::Lock::Timeout=600 \
-		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
-	return
+		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@" 2>&1 |
+		sed -E '/^(No (services|containers) need to be restarted\.|No user sessions are running outdated binaries\.|No VM guests are running outdated hypervisor|Not building database; man-db\/auto-update is not)/d'
+	return "${PIPESTATUS[0]}"
 }
 
 # Mirrors of the RHEL family drop out for minutes at a time; dnf gives up on the first broken mirror list, so a
