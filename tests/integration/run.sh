@@ -214,6 +214,11 @@ if [[ $1 == --profile ]]; then
 	# What Lynis would still change, as the starting point for raising the hardening index.
 	group_start "${system}: Lynis details"
 	in_target "grep -iE 'different value than expected|weak configuration state|incorrect file permissions|permissions .* (not|too)|Result: .*(unsafe|not hardened|exposed)' /var/log/lynis.log | sed -E 's/^[0-9: -]+//' | sort -u | head -n 150" || true
+	# The tests that cost hardening points, which is what the index is made of.
+	in_target "awk '/Performing test ID/ { test = \$0; sub(/.*Performing test ID /, \"\", test) }
+		/Hardening: assigned/ { match(\$0, /assigned [0-9]+/); got = substr(\$0, RSTART + 9, RLENGTH - 9)
+			match(\$0, /max for this item: [0-9]+/); max = substr(\$0, RSTART + 19, RLENGTH - 19)
+			if (got + 0 < max + 0) print \"  -\" (max - got) \" \" test }' /var/log/lynis.log | sort | uniq -c" || true
 	group_end
 	echo "${system}: profile ${profile} passed"
 	exit 0
