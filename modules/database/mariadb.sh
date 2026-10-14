@@ -19,12 +19,13 @@ MARIADB_UNIT=mariadb
 # Where MySQL keeps its data; MariaDB used the same directory until Ubuntu 26.04 moved it to /var/lib/mariadb.
 MARIADB_MYSQL_DATA=/var/lib/mysql
 
-# _mariadb_data: the data directory the installed server is configured for, one of the two the packages use.
+# _mariadb_data: the data directory the installed server uses, one of the two the packages use. The server reports
+# it itself, because Ubuntu 26.04 compiles /var/lib/mariadb in instead of setting datadir in a configuration file.
 _mariadb_data() {
-	local dir='' tool
-	for tool in mariadb-print-defaults my_print_defaults; do
-		command -v "${tool}" >/dev/null 2>&1 || continue
-		dir=$("${tool}" --mysqld 2>/dev/null | sed -n 's/^--datadir=//p' | tail -n 1)
+	local dir='' server
+	for server in /usr/sbin/mariadbd /usr/libexec/mariadbd /usr/sbin/mysqld /usr/libexec/mysqld; do
+		[[ -x ${server} ]] || continue
+		dir=$("${server}" --verbose --help 2>/dev/null | awk '$1 == "datadir" { print $2 }')
 		break
 	done
 	dir=${dir%/}

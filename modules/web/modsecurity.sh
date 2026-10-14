@@ -228,6 +228,21 @@ _modsecurity_jobs() {
 
 # libmodsecurity for nginx. Without curl, GeoIP, LMDB, Lua and ssdeep: the Core Rule Set needs none of them. With YAJL
 # (JSON request bodies) where the distribution has it; RHEL 10 has none. Built again only for a new version.
+# _modsecurity_deb_candidate PACKAGE...: the first of the names apt can install. Runtime libraries change their name
+# with a new ABI (libxml2 is libxml2-16 from Ubuntu 26.04 on).
+_modsecurity_deb_candidate() {
+	local package candidate
+	for package in "$@"; do
+		candidate=$(apt-cache policy "${package}" 2>/dev/null | awk '$1 == "Candidate:" { print $2 }')
+		if [[ -n ${candidate} && ${candidate} != '(none)' ]]; then
+			printf '%s' "${package}"
+			return 0
+		fi
+	done
+	die "modsecurity: apt offers none of $*."
+	return
+}
+
 _modsecurity_build_library() {
 	local stamp="${MODSEC_PREFIX}/.libmodsecurity" src yajl=--without-yajl
 	if [[ -f ${MODSEC_PREFIX}/lib/libmodsecurity.so.3 && -f ${stamp} && $(<"${stamp}") == "${MODSEC_LIB_VERSION}" ]]; then
@@ -235,7 +250,8 @@ _modsecurity_build_library() {
 	fi
 	# The runtime libraries first, so removing the build packages afterwards keeps them.
 	if os_is_debian; then
-		pkg_install libpcre2-8-0 libxml2 libyajl2
+		pkg_update_once
+		pkg_install libpcre2-8-0 "$(_modsecurity_deb_candidate libxml2-16 libxml2)" libyajl2
 		_modsecurity_build_deps g++ make pkg-config libpcre2-dev libxml2-dev libyajl-dev
 		yajl=--with-yajl
 	else
@@ -263,13 +279,18 @@ _modsecurity_build_library() {
 # load into the distribution's nginx, which is built with the same switch.
 _modsecurity_build_connector() {
 	local so="${MODSEC_PREFIX}/nginx/ngx_http_modsecurity_module.so" stamp="${MODSEC_PREFIX}/nginx/.build"
-	local version src tree
+	local version src tree pcre=libpcre2-dev
 	local -a env=("MODSECURITY_INC=${MODSEC_PREFIX}/include" "MODSECURITY_LIB=${MODSEC_PREFIX}/lib")
 	if [[ -f ${so} && -f ${stamp} && $(<"${stamp}") == "$(_modsecurity_connector_id)" ]]; then
 		return 0
 	fi
 	if os_is_debian; then
-		_modsecurity_build_deps gcc make libc6-dev libpcre2-dev zlib1g-dev
+		# nginx reads PCRE2 from 1.21.5 on; the nginx 1.18 of Ubuntu 22.04 still needs PCRE1.
+		version=$(_modsecurity_nginx_version)
+		if [[ $(printf '%s\n' 1.21.5 "${version}" | sort -V | head -n 1) != 1.21.5 ]]; then
+			pcre=libpcre3-dev
+		fi
+		_modsecurity_build_deps gcc make libc6-dev "${pcre}" zlib1g-dev
 	else
 		# nginx-mod-devel requires the nginx of its own release and may update nginx; the version is read afterwards.
 		_modsecurity_build_deps gcc make pcre2-devel zlib-devel nginx-mod-devel
