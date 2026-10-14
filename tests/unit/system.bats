@@ -599,13 +599,27 @@ EOF
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
-@test "svc_apparmor_confined finds the profile of a program, and assumes one where the list is hidden" {
+@test "svc_apparmor_confined needs an enforcing profile, from the list or the label of a running process" {
 	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/enabled SVC_APPARMOR_PROFILES=${BATS_TEST_TMPDIR}/profiles
+	export SVC_PROC=${BATS_TEST_TMPDIR}/proc
+	# shellcheck disable=SC2329 # called by svc_apparmor_confined
+	pidof() {
+		printf '%s\n' "${TEST_PIDS:-}"
+		return
+	}
 	run svc_apparmor_confined /usr/sbin/mysqld
 	[ "${status}" -eq 1 ]
 	echo Y >"${SVC_APPARMOR_ENABLED}"
-	svc_apparmor_confined /usr/sbin/mysqld
-	printf '/usr/sbin/chronyd (enforce)\n' >"${SVC_APPARMOR_PROFILES}"
+	# No profile list and no running process: unconfined, the full sandbox stays.
+	run svc_apparmor_confined /usr/sbin/mysqld
+	[ "${status}" -eq 1 ]
+	mkdir -p "${SVC_PROC}/42/attr"
+	echo '/usr/sbin/mysqld (complain)' >"${SVC_PROC}/42/attr/current"
+	TEST_PIDS=42 run svc_apparmor_confined /usr/sbin/mysqld
+	[ "${status}" -eq 1 ]
+	echo '/usr/sbin/mysqld (enforce)' >"${SVC_PROC}/42/attr/current"
+	TEST_PIDS=42 svc_apparmor_confined /usr/sbin/mysqld
+	printf '/usr/sbin/chronyd (enforce)\n/usr/sbin/mysqld (complain)\n' >"${SVC_APPARMOR_PROFILES}"
 	run svc_apparmor_confined /usr/sbin/mysqld
 	[ "${status}" -eq 1 ]
 	printf '/usr/sbin/mysqld (enforce)\n' >>"${SVC_APPARMOR_PROFILES}"

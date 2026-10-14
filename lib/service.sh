@@ -158,14 +158,23 @@ svc_sandbox() {
 SVC_SANDBOX_NO_MOUNTS=(ProtectSystem=no ProtectHome=no PrivateTmp=no PrivateDevices=no ProtectKernelTunables=no
 	ProtectKernelModules=no ProtectKernelLogs=no ProtectControlGroups=no ProtectHostname=no ReadWritePaths=)
 
-# svc_apparmor_confined PROGRAM: whether an AppArmor profile confines PROGRAM. Without a readable profile list (in
-# some containers) an enabled AppArmor counts as confining.
+# svc_apparmor_confined PROGRAM: whether an enforcing AppArmor profile confines PROGRAM. Without a readable profile
+# list (in a container, whose processes the host's profiles still confine) the label of a running PROGRAM tells;
+# anything else counts as unconfined, so the full sandbox stays.
 svc_apparmor_confined() {
 	local enabled=${SVC_APPARMOR_ENABLED:-/sys/module/apparmor/parameters/enabled}
 	local profiles=${SVC_APPARMOR_PROFILES:-/sys/kernel/security/apparmor/profiles}
+	local proc=${SVC_PROC:-/proc} pid label
 	[[ $(cat "${enabled}" 2>/dev/null) == Y ]] || return 1
-	[[ -r ${profiles} ]] || return 0
-	grep -qF "$1 (" "${profiles}"
+	if [[ -r ${profiles} ]]; then
+		grep -qxF "$1 (enforce)" "${profiles}"
+		return
+	fi
+	for pid in $(pidof "$1" 2>/dev/null); do
+		label=$(cat "${proc}/${pid}/attr/apparmor/current" 2>/dev/null || cat "${proc}/${pid}/attr/current" 2>/dev/null) || continue
+		[[ ${label} == "$1 (enforce)" ]] && return 0
+	done
+	return 1
 }
 
 # svc_unit UNIT: writes /etc/systemd/system/UNIT (a unit of lss's own) from stdin and reloads systemd when it
