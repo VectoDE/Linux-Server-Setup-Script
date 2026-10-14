@@ -234,10 +234,12 @@ KEY_B=TrMvSoP4jYQlY6RIzBgbssQqY3vxI2Pi+y71lOWWXX0=
 	grep -qxF 'ConditionCapability=' "${WRITES}"
 	grep -qxF 'ConditionVirtualization=' "${WRITES}"
 	grep -qxF "ExecStart=!/usr/sbin/chronyd -n \$DAEMON_OPTS -x" "${WRITES}"
+	grep -qxF "Type=simple" "${WRITES}"
 	use_os rocky-9
 	printf '[Service]\nExecStart=/usr/sbin/chronyd $OPTIONS\n' >"${unit_file}"
 	_ntp_container_dropin
 	grep -qxF "ExecStart=/usr/sbin/chronyd \$OPTIONS -x" "${WRITES}"
+	[ "$(grep -c "^Type=simple$" "${WRITES}")" = 1 ]
 	: >"${unit_file}"
 	run _ntp_container_dropin
 	[ "${status}" -eq 1 ]

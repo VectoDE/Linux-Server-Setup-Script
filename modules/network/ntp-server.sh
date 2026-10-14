@@ -80,16 +80,20 @@ _ntp_exec() {
 # _ntp_container_dropin: inside a container chronyd serves the time but must not set the clock it shares with the host
 # (-x), and the unit's conditions on CAP_SYS_TIME and on running outside a container no longer apply.
 _ntp_container_dropin() {
-	local unit exec
+	local unit exec notify=''
 	unit="$(_ntp_unit).service"
 	if os_in_container; then
 		exec=$(_ntp_exec "${unit}") || return 1
+		# chronyd in the foreground (-n) reports readiness to systemd; inside a container chrony 4.8 (Ubuntu 26.04)
+		# cannot reach the notification socket and stops. There systemd counts the started process as ready.
+		[[ " ${exec} " != *' -n '* ]] || notify=$'Type=simple\nNotifyAccess=none'
 		svc_dropin "${unit}" lss-ntp-server <<EOF
 # Managed by lss (module ntp-server): inside a container chronyd serves the time without setting the clock.
 [Unit]
 ConditionCapability=
 ConditionVirtualization=
 [Service]
+${notify}
 ExecStart=
 ExecStart=${exec}
 EOF
