@@ -503,9 +503,10 @@ load_module() {
 	[[ ${output} == *'Environment=GF_SERVER_HTTP_ADDR=127.0.0.1'* ]]
 	[[ ${output} == *'Environment=GF_SERVER_ROOT_URL=http://127.0.0.1:3000/grafana/'* ]]
 	[[ ${output} == *'Environment=GF_SERVER_SERVE_FROM_SUB_PATH=true'* ]]
-	[[ ${output} == *"Environment=GF_SECURITY_ADMIN_PASSWORD__FILE=${MON_GRAFANA_DIR}/admin-password"* ]]
+	[[ ${output} == *"Environment=GF_SECURITY_ADMIN_PASSWORD=\$__file{${MON_GRAFANA_DIR}/admin-password}"* ]]
 	[[ ${output} == *'Environment=GF_ANALYTICS_REPORTING_ENABLED=false'* ]]
-	[[ ${output} != *GF_SECURITY_ADMIN_PASSWORD=* ]]
+	# The password itself never goes into the unit.
+	run ! grep -E '^Environment=GF_SECURITY_ADMIN_PASSWORD=[^$]' <<<"${output}"
 }
 
 @test "Loki keeps every component on this server with retention" {

@@ -45,7 +45,9 @@ Environment=GF_SERVER_ROOT_URL=$(_grafana_url)/
 Environment=GF_SERVER_SERVE_FROM_SUB_PATH=true
 Environment=GF_PATHS_PROVISIONING=${MON_GRAFANA_DIR}/provisioning
 Environment=GF_SECURITY_ADMIN_USER=admin
-Environment=GF_SECURITY_ADMIN_PASSWORD__FILE=${GRAFANA_PASSWORD_FILE}
+# Grafana reads the password from the file itself (its \$__file{} expansion); the GF_*__FILE variables exist only in
+# Grafana's container image, whose entry script resolves them.
+Environment=GF_SECURITY_ADMIN_PASSWORD=\$__file{${GRAFANA_PASSWORD_FILE}}
 Environment=GF_SECURITY_DISABLE_GRAVATAR=true
 Environment=GF_USERS_ALLOW_SIGN_UP=false
 # The admin port of the web server may ask for its own basic auth; Grafana must not take that header for a login.
