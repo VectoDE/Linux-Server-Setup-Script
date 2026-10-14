@@ -4,7 +4,7 @@
 
 MOD_NAME="netdata"
 MOD_GROUP="monitoring"
-MOD_DESCRIPTION="Netdata real-time dashboard without cloud, registry or telemetry; on 127.0.0.1:19999 or the WireGuard network, optionally below /netdata/ on the admin port"
+MOD_DESCRIPTION="Netdata real-time dashboard, never claimed to Netdata Cloud, without registry or telemetry; on 127.0.0.1:19999 or the WireGuard network, optionally below /netdata/ on the admin port"
 MOD_REQUIRES="system"
 MOD_OPTIONS="access|local|Who reaches http://SERVER:19999: local (127.0.0.1 only; SSH tunnel) or vpn (also the WireGuard network)
 web_admin|false|Also publish Netdata below /netdata/ on the admin port of the web server (needs nginx, apache or caddy)
@@ -16,7 +16,6 @@ MOD_PORTS="19999/tcp from the WireGuard network with access vpn; none with acces
 NETDATA_UNIT=netdata
 NETDATA_PORT=19999
 NETDATA_CONF=/etc/netdata/netdata.conf
-NETDATA_CLOUD_CONF=/var/lib/netdata/cloud.d/cloud.conf
 NETDATA_OPT_OUT=/etc/netdata/.opt-out-from-anonymous-statistics
 
 mod_check() {
@@ -51,14 +50,10 @@ _netdata_files() {
 [statsd]
 	enabled = no
 EOF
-	# No anonymous statistics (the file's existence is the opt-out) and no connection to Netdata Cloud.
+	# No anonymous statistics: the file's existence is the opt-out. Netdata 2 has no switch for its Cloud any more
+	# (the API reports cloud-enabled as true on every agent); an agent connects only once it is claimed, which lss
+	# never does, and mod_verify checks that it is not.
 	file_write 0644 root:root "${NETDATA_OPT_OUT}" </dev/null
-	install -d -m 0755 "$(dirname "${NETDATA_CLOUD_CONF}")"
-	file_write 0644 root:root "${NETDATA_CLOUD_CONF}" <<'EOF'
-# Managed by lss (module netdata): this server does not connect to Netdata Cloud.
-[global]
-	enabled = no
-EOF
 	return
 }
 
@@ -99,7 +94,8 @@ mod_verify() {
 	svc_is_active "${NETDATA_UNIT}" || die "netdata: ${NETDATA_UNIT} is not running."
 	mon_wait_http "http://127.0.0.1:${NETDATA_PORT}/api/v1/info" 120
 	info=$(curl -s --max-time 10 "http://127.0.0.1:${NETDATA_PORT}/api/v1/info")
-	[[ ${info} =~ \"cloud-enabled\":[[:space:]]*false ]] || die "netdata: the connection to Netdata Cloud is not off."
+	[[ ${info} =~ \"agent-claimed\":[[:space:]]*false ]] || die "netdata: the agent is claimed to Netdata Cloud."
+	[[ ${info} =~ \"aclk-available\":[[:space:]]*false ]] || die "netdata: the agent is connected to Netdata Cloud."
 	[[ -f ${NETDATA_OPT_OUT} ]] || die "netdata: the opt-out from anonymous statistics is missing."
 	for address in $(_netdata_bind); do
 		addresses+=("${address}")
@@ -117,7 +113,6 @@ mod_remove() {
 	repo_remove netdata
 	file_remove "${NETDATA_CONF}"
 	file_remove "${NETDATA_OPT_OUT}"
-	file_remove "${NETDATA_CLOUD_CONF}"
 	[[ ${LSS_PURGE:-0} == 1 ]] || return 0
 	mon_delete /var/lib/netdata
 	return

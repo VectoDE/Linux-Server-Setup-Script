@@ -71,8 +71,9 @@ now or later.
   taken before each backup).
 - Monitoring modules: `node-exporter`, `prometheus` (with alert rules for down targets, full disks, guard findings and
   old or failed backups), `alertmanager` (e-mail and webhook), `grafana`, `loki`, `alloy` (Promtail's successor; it
-  ships the journal to Loki), `netdata` (no cloud, registry or telemetry) and `smartd`. Every interface listens on
-  127.0.0.1 or, with `access=vpn`, on the WireGuard address, and can be published below the web server's admin port.
+  ships the journal to Loki), `netdata` (never claimed to Netdata Cloud, no registry or telemetry) and `smartd`.
+  Every interface listens on 127.0.0.1 or, with `access=vpn`, on the WireGuard address, and can be published below
+  the web server's admin port.
 - Network modules: `wireguard` (server with peers from the settings, keys in the lss secrets), `dns-resolver` (Unbound
   with DNSSEC on localhost, optionally for the WireGuard network, used by the server itself) and `ntp-server` (chrony of
   the time module serves the WireGuard network or everyone, rate-limited).

@@ -178,6 +178,18 @@ admin_stubs() {
 	[ ! -s "${STUB_LOG}" ]
 }
 
+@test "an admin path the removed web server took along is no longer expected" {
+	local list=${LSS_STATE_DIR}/managed/grafana
+	mkdir -p "${LSS_STATE_DIR}/managed"
+	printf 'abc\t/etc/nginx/lss/admin/grafana.conf\nabc\t/etc/lss/grafana/admin-password\n' >"${list}"
+	admin_stubs
+	TEST_SERVER=''
+	config_set LSS_GRAFANA_WEB_ADMIN true
+	mon_web_admin proxy http://127.0.0.1:3000
+	[ "$(cat "${list}")" = $'abc\t/etc/lss/grafana/admin-password' ]
+	[ ! -s "${STUB_LOG}" ]
+}
+
 # --- Prometheus and Grafana -------------------------------------------------------------------------------------
 
 @test "a scrape target names its job and metrics path for Prometheus" {
@@ -536,7 +548,7 @@ load_module() {
 	[[ ${output} == *"LSS_ALLOY_MAX_AGE must look like 12h or 30m."* ]]
 }
 
-@test "Netdata binds to 127.0.0.1 and the WireGuard address, without registry, cloud or statistics" {
+@test "Netdata binds to 127.0.0.1 and the WireGuard address, without registry or statistics" {
 	load_module netdata
 	# shellcheck disable=SC2329 # called by the functions under test
 	install() {
@@ -546,7 +558,6 @@ load_module() {
 	grep -qxF $'\tbind to = 127.0.0.1' "${WRITES}"
 	grep -qxF '[registry]' "${WRITES}"
 	grep -qxF "== 0644 root:root ${NETDATA_OPT_OUT}" "${WRITES}"
-	grep -qxF "== 0644 root:root ${NETDATA_CLOUD_CONF}" "${WRITES}"
 	config_set LSS_NETDATA_ACCESS vpn
 	[ "$(_netdata_bind)" = '127.0.0.1 10.66.0.1' ]
 }
