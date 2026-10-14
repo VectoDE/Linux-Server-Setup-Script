@@ -202,6 +202,22 @@ write_release() {
 	[ "$(cat "${dest}")" = keep ]
 }
 
+@test "a removed file is no longer expected, also when it was gone already" {
+	local kept=${BATS_TEST_TMPDIR}/kept.conf gone=${BATS_TEST_TMPDIR}/gone.conf taken=${BATS_TEST_TMPDIR}/taken.conf
+	LSS_MODULE=demo
+	file_write 0644 "${OWNER}" "${kept}" <<<"x"
+	file_write 0644 "${OWNER}" "${gone}" <<<"y"
+	file_write 0644 "${OWNER}" "${taken}" <<<"z"
+	file_remove "${gone}"
+	rm "${taken}"
+	[ "$(files_drifted demo)" = "${taken} (missing)" ]
+	file_remove "${taken}"
+	[ -z "$(files_drifted demo)" ]
+	printf 'edited\n' >"${kept}"
+	[ "$(files_drifted demo)" = "${kept}" ]
+	LSS_STATE_DIR=${BATS_TEST_TMPDIR}/none files_forget_path "${kept}"
+}
+
 @test "files_forget drops the checksums of a module" {
 	LSS_MODULE=demo
 	file_write 0644 "${OWNER}" "${BATS_TEST_TMPDIR}/f.conf" <<<"x"

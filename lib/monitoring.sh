@@ -116,8 +116,14 @@ mon_firewall() {
 # /MODULE/ on the admin port (web_admin_write proxy or strip); otherwise removes that path. Reloads the web server
 # only when something changed.
 mon_web_admin() {
-	local kind=$1 url=$2 before
-	[[ -n $(web_server) ]] || return 0
+	local kind=$1 url=$2 before server
+	if [[ -z $(web_server) ]]; then
+		# A web server removed since took the admin path with it; lss verify must not miss it.
+		for server in nginx apache caddy; do
+			files_forget_path "$(web_conf_dir "${server}")/admin/${LSS_MODULE}.$(_web_ext "${server}")"
+		done
+		return 0
+	fi
 	before=$(files_changes_of "${LSS_MODULE}")
 	if config_bool "$(config_key "${LSS_MODULE}" web_admin)"; then
 		web_admin_write "${LSS_MODULE}" "${LSS_MODULE}" "${kind}" "${url}"
