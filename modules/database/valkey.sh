@@ -19,6 +19,8 @@ MOD_SECRETS="valkey-password"
 # Sources: the distribution where it has Valkey (Debian 13, Ubuntu 24.04 and 26.04, RHEL 9 and 10 AppStream),
 # bookworm-backports on Debian 12 and the Valkey project's build for Ubuntu 22.04 (data/checksums.txt), which has no
 # package at all.
+# The package and service name on the RHEL family (Debian and Ubuntu call both valkey-server).
+VALKEY_RPM=valkey
 # The configuration lives in root-owned /etc/lss: root does not write into /etc/valkey, which the valkey user may
 # control.
 VALKEY_CONF=/etc/lss/valkey.conf
@@ -44,7 +46,7 @@ _valkey_source() {
 }
 
 _valkey_unit() {
-	if os_is_debian; then printf 'valkey-server'; else printf 'valkey'; fi
+	if os_is_debian; then printf 'valkey-server'; else printf '%s' "${VALKEY_RPM}"; fi
 	return
 }
 
@@ -188,7 +190,7 @@ mod_install() {
 	backports) _valkey_backports ;;
 	*) ;;
 	esac
-	pkg_install_family "valkey-server valkey-tools" "valkey"
+	pkg_install_family "valkey-server valkey-tools" "${VALKEY_RPM}"
 	return
 }
 
@@ -407,7 +409,7 @@ mod_remove() {
 		file_remove "${VALKEY_BACKPORTS_PIN}"
 		file_remove "${VALKEY_BACKPORTS_SOURCE}"
 		;;
-	*) pkg_remove_family "valkey-server valkey-tools" "valkey" ;;
+	*) pkg_remove_family "valkey-server valkey-tools" "${VALKEY_RPM}" ;;
 	esac
 	_valkey_delete "${VALKEY_DATA}"
 	if getent group "${VALKEY_GROUP}" >/dev/null; then

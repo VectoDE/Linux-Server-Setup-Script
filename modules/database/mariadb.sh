@@ -16,7 +16,25 @@ MOD_PORTS="3306/tcp on 127.0.0.1"
 MOD_SECRETS="mariadb-user-<user>"
 
 MARIADB_UNIT=mariadb
-MARIADB_DATA=/var/lib/mysql
+# Where MySQL keeps its data; MariaDB used the same directory until Ubuntu 26.04 moved it to /var/lib/mariadb.
+MARIADB_MYSQL_DATA=/var/lib/mysql
+
+# _mariadb_data: the data directory the installed server is configured for, one of the two the packages use.
+_mariadb_data() {
+	local dir='' tool
+	for tool in mariadb-print-defaults my_print_defaults; do
+		command -v "${tool}" >/dev/null 2>&1 || continue
+		dir=$("${tool}" --mysqld 2>/dev/null | sed -n 's/^--datadir=//p' | tail -n 1)
+		break
+	done
+	dir=${dir%/}
+	case ${dir} in
+	'') printf '%s' "${MARIADB_MYSQL_DATA}" ;;
+	/var/lib/mysql | /var/lib/mariadb) printf '%s' "${dir}" ;;
+	*) die "mariadb: the data directory ${dir} is not one lss manages (/var/lib/mysql or /var/lib/mariadb)." ;;
+	esac
+	return
+}
 
 _mariadb_conf() {
 	if os_is_debian; then
@@ -66,8 +84,8 @@ mod_check() {
 			die "LSS_MARIADB_USERS: '${database}' is a reserved database."
 	done
 	# MySQL 8 keeps its data dictionary in mysql.ibd; MariaDB cannot open such a data directory.
-	[[ ! -e ${MARIADB_DATA}/mysql.ibd ]] ||
-		die "mariadb: ${MARIADB_DATA} holds MySQL data. Remove it with 'lss remove --purge mysql' or move it away first."
+	[[ ! -e ${MARIADB_MYSQL_DATA}/mysql.ibd ]] ||
+		die "mariadb: ${MARIADB_MYSQL_DATA} holds MySQL data. Remove it with 'lss remove --purge mysql' or move it away first."
 	return
 }
 
@@ -220,7 +238,7 @@ _mariadb_users() {
 }
 
 mod_configure() {
-	local before changed=0 port
+	local before changed=0 port data
 	port=$(opt_int port)
 	before=$(files_changes_of mariadb)
 	_mariadb_selinux_port "${port}"
@@ -239,8 +257,9 @@ default-character-set = utf8mb4
 EOF
 	# The data directory is the only place the server writes outside /run and /var/log. Newer packages (Ubuntu 26.04)
 	# create it on the first start, but the sandbox needs it before.
-	[[ -d ${MARIADB_DATA} ]] || install -d -m 0750 -o mysql -g mysql "${MARIADB_DATA}"
-	svc_sandbox "${MARIADB_UNIT}.service" "ReadWritePaths=${MARIADB_DATA}"
+	data=$(_mariadb_data)
+	[[ -d ${data} ]] || install -d -m 0750 -o mysql -g mysql "${data}"
+	svc_sandbox "${MARIADB_UNIT}.service" "ReadWritePaths=${data}"
 	[[ $(files_changes_of mariadb) == "${before}" ]] || changed=1
 	svc_enable "${MARIADB_UNIT}"
 	if [[ ${changed} == 1 ]]; then
@@ -283,18 +302,20 @@ mod_verify() {
 }
 
 mod_remove() {
-	local path
+	local path data
+	# Read while the server's tools are still installed.
+	data=$(_mariadb_data)
 	svc_disable "${MARIADB_UNIT}"
 	svc_dropin_remove "${MARIADB_UNIT}.service" lss-sandbox
 	file_remove "$(_mariadb_conf)"
 	if [[ ${LSS_PURGE:-0} == 1 ]]; then
 		pkg_remove_family "mariadb-server mariadb-client" "mariadb-server mariadb"
 		# Only the fixed data directory, never through a symbolic link.
-		if [[ -L ${MARIADB_DATA} ]]; then
-			die "mariadb: refusing to delete ${MARIADB_DATA}: it is a symbolic link."
-		elif [[ -d ${MARIADB_DATA} ]]; then
-			rm -rf -- "${MARIADB_DATA}"
-			files_note_change "deleted ${MARIADB_DATA}"
+		if [[ -L ${data} ]]; then
+			die "mariadb: refusing to delete ${data}: it is a symbolic link."
+		elif [[ -d ${data} ]]; then
+			rm -rf -- "${data}"
+			files_note_change "deleted ${data}"
 		fi
 		for path in "${LSS_SECRETS_DIR}"/mariadb-user-*; do
 			[[ -f ${path} ]] || continue

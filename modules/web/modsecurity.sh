@@ -9,20 +9,21 @@ MOD_REQUIRES="apache|nginx"
 MOD_OPTIONS="mode|On|On blocks attacks; DetectionOnly only logs them (to try the rules on a live site first)
 paranoia|1|Paranoia level 1 to 4: higher levels catch more attacks and also block more legitimate requests
 anomaly_inbound|5|Anomaly score from which a request is blocked (5: one critical rule matched; higher values block less)
-exclusions||Rule exclusions for applications, separated by spaces: cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenforo (phpbb and phpmyadmin need CRS 4, which Ubuntu 22.04 does not get)
+exclusions||Rule exclusions for applications, separated by spaces: cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenforo (phpbb and phpmyadmin need CRS 4, which Apache on Ubuntu 22.04 does not get)
 allowed_methods|GET HEAD POST OPTIONS PUT PATCH DELETE|HTTP methods the rules let through, separated by spaces
 max_body||Largest request body ModSecurity accepts and inspects, for example 64m (at most 1g); empty takes max_body of the web server"
 
 # Where the engine and the rules come from:
 #   Apache  libapache2-mod-security2 (Debian, Ubuntu), mod_security (RHEL 9 AppStream, RHEL 10 EPEL).
-#   nginx   libnginx-mod-http-modsecurity (Debian 12/13, Ubuntu 24.04/26.04), nginx-mod-modsecurity with
-#           libmodsecurity (RHEL 9 EPEL). Ubuntu 22.04 packages libmodsecurity3 but no nginx connector, RHEL 10
-#           packages neither: lss builds what is missing from checksum-verified sources as a dynamic module
-#           (--with-compat) for the installed nginx, and builds again only when the nginx version changes.
+#   nginx   libmodsecurity and the nginx connector, built by lss from checksum-verified sources on every system:
+#           CRS 4.25.1 and 3.3.10 need libmodsecurity 3.0.16 (the fix against XML attribute injection), and the
+#           distributions ship 3.0.6 to 3.0.14 (RHEL 10 none). The connector is a dynamic module (--with-compat)
+#           for the installed nginx, built again only when the nginx version changes.
 #   Rules   The OWASP Core Rule Set from its signed GitHub releases, pinned in data/checksums.txt, so every system
 #           runs the same rules (the distributions ship CRS 3.3 of differing ages, RHEL 10 none). CRS 4 needs
 #           ModSecurity 2.9.6 or 3.0.8; its long-term-support line 4.25 changes less between updates than the
-#           monthly releases. Ubuntu 22.04 has 2.9.5 and 3.0.6 and therefore gets CRS 3.3, which is still maintained.
+#           monthly releases. Apache on Ubuntu 22.04 has ModSecurity 2.9.5 and therefore gets CRS 3.3, which is still
+#           maintained.
 MODSEC_CRS_VERSION=4.25.2
 MODSEC_CRS_LEGACY_VERSION=3.3.10
 MODSEC_LIB_VERSION=3.0.17
@@ -48,9 +49,9 @@ _modsecurity_server() {
 	return
 }
 
-# True on Ubuntu 22.04, whose ModSecurity (2.9.5, 3.0.6) is too old for CRS 4.
+# True for Apache on Ubuntu 22.04, whose ModSecurity 2.9.5 is too old for CRS 4.
 _modsecurity_legacy() {
-	[[ ${OS_ID} == ubuntu && ${OS_MAJOR} == 22 ]]
+	[[ ${OS_ID} == ubuntu && ${OS_MAJOR} == 22 && $(web_server) == apache ]]
 	return
 }
 
@@ -129,24 +130,8 @@ _modsecurity_wanted() {
 	return
 }
 
-# True where lss builds the nginx connector itself (Ubuntu 22.04, RHEL 10).
-_modsecurity_nginx_build() {
-	if os_is_debian; then
-		_modsecurity_legacy
-	else
-		[[ ${OS_MAJOR} -ge 10 ]]
-	fi
-	return
-}
-
 _modsecurity_nginx_so() {
-	if _modsecurity_nginx_build; then
-		printf '%s/nginx/ngx_http_modsecurity_module.so' "${MODSEC_PREFIX}"
-	elif os_is_debian; then
-		printf '/usr/lib/nginx/modules/ngx_http_modsecurity_module.so'
-	else
-		printf '/usr/lib64/nginx/modules/ngx_http_modsecurity_module.so'
-	fi
+	printf '%s/nginx/ngx_http_modsecurity_module.so' "${MODSEC_PREFIX}"
 	return
 }
 
@@ -157,9 +142,8 @@ _modsecurity_nginx_version() {
 
 # What the self-built nginx connector was built for; a different value means building it again.
 _modsecurity_connector_id() {
-	local library=distribution
-	os_is_debian || library=${MODSEC_LIB_VERSION}
-	printf 'nginx %s, connector %s, libmodsecurity %s' "$(_modsecurity_nginx_version)" "${MODSEC_CONNECTOR_VERSION}" "${library}"
+	printf 'nginx %s, connector %s, libmodsecurity %s' "$(_modsecurity_nginx_version)" "${MODSEC_CONNECTOR_VERSION}" \
+		"${MODSEC_LIB_VERSION}"
 	return
 }
 
@@ -242,16 +226,22 @@ _modsecurity_jobs() {
 	return
 }
 
-# libmodsecurity for RHEL 10, which packages none. Without curl, GeoIP, LMDB, Lua and ssdeep: the Core Rule Set needs
-# none of them. Built again only for a new version.
+# libmodsecurity for nginx. Without curl, GeoIP, LMDB, Lua and ssdeep: the Core Rule Set needs none of them. With YAJL
+# (JSON request bodies) where the distribution has it; RHEL 10 has none. Built again only for a new version.
 _modsecurity_build_library() {
-	local stamp="${MODSEC_PREFIX}/.libmodsecurity" src
+	local stamp="${MODSEC_PREFIX}/.libmodsecurity" src yajl=--without-yajl
 	if [[ -f ${MODSEC_PREFIX}/lib/libmodsecurity.so.3 && -f ${stamp} && $(<"${stamp}") == "${MODSEC_LIB_VERSION}" ]]; then
 		return 0
 	fi
 	# The runtime libraries first, so removing the build packages afterwards keeps them.
-	pkg_install pcre2 libxml2
-	_modsecurity_build_deps gcc-c++ make pkgconf-pkg-config pcre2-devel libxml2-devel
+	if os_is_debian; then
+		pkg_install libpcre2-8-0 libxml2 libyajl2
+		_modsecurity_build_deps g++ make pkg-config libpcre2-dev libxml2-dev libyajl-dev
+		yajl=--with-yajl
+	else
+		pkg_install pcre2 libxml2
+		_modsecurity_build_deps gcc-c++ make pkgconf-pkg-config pcre2-devel libxml2-devel
+	fi
 	_modsecurity_workdir
 	fetch_verified "libmodsecurity-${MODSEC_LIB_VERSION}" "${MODSEC_WORK}/libmodsecurity.tar.gz"
 	tar -xzf "${MODSEC_WORK}/libmodsecurity.tar.gz" -C "${MODSEC_WORK}" --no-same-owner
@@ -259,7 +249,7 @@ _modsecurity_build_library() {
 	log_info "Building libmodsecurity ${MODSEC_LIB_VERSION}; this takes a few minutes"
 	(cd "${src}" && log_command ./configure --prefix="${MODSEC_PREFIX}" --disable-static --disable-examples \
 		--disable-doxygen-doc --with-pcre2 --without-curl --without-geoip --without-maxmind --without-lmdb \
-		--without-lua --without-ssdeep --without-yajl) || die "modsecurity: libmodsecurity does not configure; see the log."
+		--without-lua --without-ssdeep "${yajl}") || die "modsecurity: libmodsecurity does not configure; see the log."
 	log_command make -C "${src}" -j "$(_modsecurity_jobs)" || die "modsecurity: libmodsecurity does not build; see the log."
 	log_command make -C "${src}" install-strip || die "modsecurity: libmodsecurity does not install; see the log."
 	printf '%s\n' "${MODSEC_LIB_VERSION}" >"${stamp}"
@@ -269,21 +259,20 @@ _modsecurity_build_library() {
 }
 
 # The nginx connector as a dynamic module for the installed nginx: from the nginx.org sources of that version on
-# Ubuntu 22.04 (verified by data/checksums.txt), from nginx-mod-devel on RHEL 10. --with-compat makes it load into the
-# distribution's nginx, which is built with the same switch.
+# Debian and Ubuntu (verified by data/checksums.txt), from nginx-mod-devel on the RHEL family. --with-compat makes it
+# load into the distribution's nginx, which is built with the same switch.
 _modsecurity_build_connector() {
 	local so="${MODSEC_PREFIX}/nginx/ngx_http_modsecurity_module.so" stamp="${MODSEC_PREFIX}/nginx/.build"
 	local version src tree
-	local -a env=()
+	local -a env=("MODSECURITY_INC=${MODSEC_PREFIX}/include" "MODSECURITY_LIB=${MODSEC_PREFIX}/lib")
 	if [[ -f ${so} && -f ${stamp} && $(<"${stamp}") == "$(_modsecurity_connector_id)" ]]; then
 		return 0
 	fi
 	if os_is_debian; then
-		_modsecurity_build_deps gcc make libc6-dev libpcre3-dev zlib1g-dev libmodsecurity-dev
+		_modsecurity_build_deps gcc make libc6-dev libpcre2-dev zlib1g-dev
 	else
 		# nginx-mod-devel requires the nginx of its own release and may update nginx; the version is read afterwards.
 		_modsecurity_build_deps gcc make pcre2-devel zlib-devel nginx-mod-devel
-		env=("MODSECURITY_INC=${MODSEC_PREFIX}/include" "MODSECURITY_LIB=${MODSEC_PREFIX}/lib")
 	fi
 	version=$(_modsecurity_nginx_version)
 	[[ -n ${version} ]] || die "modsecurity: cannot read the version of nginx."
@@ -330,20 +319,10 @@ _modsecurity_install_apache() {
 }
 
 _modsecurity_install_nginx() {
-	if os_is_debian; then
-		if _modsecurity_nginx_build; then
-			pkg_install libmodsecurity3
-			_modsecurity_build_connector
-		else
-			pkg_install libnginx-mod-http-modsecurity
-		fi
-	elif _modsecurity_nginx_build; then
-		_modsecurity_build_library
-		_modsecurity_build_connector
-	else
-		pkg_enable_epel
-		pkg_install nginx-mod-modsecurity
-	fi
+	# Packages of earlier lss versions: their module would be loaded next to the self-built one.
+	pkg_remove_family "libnginx-mod-http-modsecurity" "nginx-mod-modsecurity"
+	_modsecurity_build_library
+	_modsecurity_build_connector
 	return
 }
 
@@ -403,7 +382,7 @@ mod_install() {
 }
 
 # _modsecurity_engine_conf SERVER: the engine settings after modsecurity.conf-recommended of ModSecurity, limited to
-# what the oldest engine in use understands (2.9.5 for Apache, 3.0.6 for nginx on Ubuntu 22.04).
+# what the oldest engine in use understands (2.9.5 for Apache on Ubuntu 22.04).
 _modsecurity_engine_conf() {
 	local server=$1 bytes nofiles json=0 modern=1
 	bytes=$(_modsecurity_bytes "$(_modsecurity_max_body)")
@@ -505,7 +484,7 @@ _modsecurity_plugins() {
 		file_remove "${dir}/plugins"
 		for name in $(opt exclusions); do
 			[[ " ${MODSEC_LEGACY_EXCLUSIONS} " == *" ${name} "* ]] ||
-				log_warn "modsecurity: CRS 3.3 (Ubuntu 22.04) has no rule exclusions for ${name}; skipped."
+				log_warn "modsecurity: CRS 3.3 (Apache on Ubuntu 22.04) has no rule exclusions for ${name}; skipped."
 		done
 		return 0
 	fi
@@ -602,14 +581,12 @@ _modsecurity_nginx_enable() {
 	so=$(_modsecurity_nginx_so)
 	[[ -f ${so} ]] || die "modsecurity: the nginx module ${so} is missing."
 	if os_is_debian; then modules=/etc/nginx/modules-enabled; else modules=/usr/share/nginx/modules; fi
-	if _modsecurity_nginx_build || ! grep -qs 'ngx_http_modsecurity_module' "${modules}"/*.conf; then
-		file_write 0644 root:root /etc/nginx/lss/modules/modsecurity.conf <<EOF
+	! grep -qs 'ngx_http_modsecurity_module' "${modules}"/*.conf ||
+		die "modsecurity: ${modules} still loads another ModSecurity module for nginx."
+	file_write 0644 root:root /etc/nginx/lss/modules/modsecurity.conf <<EOF
 # Managed by lss (module modsecurity).
 load_module ${so};
 EOF
-	else
-		file_remove /etc/nginx/lss/modules/modsecurity.conf
-	fi
 	file_write 0644 root:root /etc/nginx/lss/http/modsecurity.conf <<EOF
 # Managed by lss (module modsecurity). Settings and rules: ${dir}.
 modsecurity on;
@@ -680,7 +657,12 @@ mod_verify() {
 	web_test "${server}" || die "modsecurity: the ${server} configuration does not load."
 	# Captured first: grep -q ends early, and the web server's output would hit a closed pipe (pipefail).
 	if [[ ${server} == apache ]]; then
-		config=$(apachectl -M 2>/dev/null || true)
+		# RHEL's apachectl takes only the service commands; httpd itself lists the modules there.
+		if os_is_debian; then
+			config=$(apache2ctl -M 2>/dev/null || true)
+		else
+			config=$(httpd -M 2>/dev/null || true)
+		fi
 		grep -q 'security2_module' <<<"${config}" || die "modsecurity: Apache has not loaded mod_security2."
 	else
 		config=$(nginx -T 2>/dev/null || true)
@@ -740,7 +722,8 @@ mod_remove() {
 	if [[ ${server} == apache ]]; then
 		pkg_remove_family "libapache2-mod-security2" "mod_security"
 	else
-		pkg_remove_family "libnginx-mod-http-modsecurity libmodsecurity3" "nginx-mod-modsecurity libmodsecurity"
+		# Packages of earlier lss versions; the self-built engine goes with MODSEC_PREFIX below.
+		pkg_remove_family "libnginx-mod-http-modsecurity" "nginx-mod-modsecurity"
 	fi
 	# Downloads and builds, reproducible from data/checksums.txt; the audit logs stay like the web server's own logs.
 	if [[ -e ${MODSEC_PREFIX} || -e ${MODSEC_CRS_ROOT} ]]; then

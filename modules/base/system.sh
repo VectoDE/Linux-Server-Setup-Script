@@ -10,7 +10,8 @@ locale|C.UTF-8|System locale, for example C.UTF-8, en_US.UTF-8 or de_DE.UTF-8
 upgrade|true|Install all available updates on every run"
 
 # Packages lss itself needs on every server. They are never removed again.
-SYSTEM_PACKAGES_DEB="ca-certificates curl gnupg sudo cron logrotate procps iproute2 openssl"
+# locales: its package scripts write /etc/default/locale, so it is installed before lss sets the locale there.
+SYSTEM_PACKAGES_DEB="ca-certificates curl gnupg sudo cron logrotate procps iproute2 openssl locales"
 SYSTEM_PACKAGES_RPM="ca-certificates curl gnupg2 sudo cronie logrotate procps-ng iproute openssl"
 
 mod_check() {
@@ -54,6 +55,7 @@ _system_hostname() {
 			file_ensure_lines 0644 root:root /etc/hosts <<<"127.0.1.1 ${hostname} ${short}"
 		fi
 	fi
+	return
 }
 
 _system_locale() {

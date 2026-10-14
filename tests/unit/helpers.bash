@@ -17,8 +17,6 @@ lss_test_setup() {
 	export LSS_COLOR=never
 	export LSS_VERSION=0.0.0-test
 	export STUB_LOG=${BATS_TEST_TMPDIR}/stub.log
-	# Systems without SELinux unless a test switches it on.
-	export STUB_EXIT_selinuxenabled=1
 	export PATH="${REPO_ROOT}/tests/fixtures/bin:${PATH}"
 	OWNER="$(id -un):$(id -gn)"
 	export OWNER
