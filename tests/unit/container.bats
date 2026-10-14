@@ -120,6 +120,26 @@ setup() {
 	[[ ${CTR_ARGS[*]} == *"--volume /run/podman/podman.sock:/var/run/docker.sock --userns host --security-opt label=disable"* ]]
 }
 
+@test "the named volumes of the socket container belong to root, so the host user namespace can write them" {
+	local data=${BATS_TEST_TMPDIR}/volume
+	CTR_VOLUME_OWNER="$(id -u):$(id -g)"
+	mkdir -p "${data}"
+	chmod 0755 "${data}"
+	# shellcheck disable=SC2329 # called by _ctr_root_volumes
+	docker() {
+		printf '%s\n' "$*" >>"${BATS_TEST_TMPDIR}/engine.log"
+		[[ $* != "volume inspect --format {{.Mountpoint}} lss-portainer-data" ]] || printf '%s\n' "${data}"
+		return 0
+	}
+	ctr_args docker web "${IMAGE}" --volume web-data:/data
+	[ "${#CTR_ROOT_VOLUMES[@]}" -eq 0 ]
+	ctr_args docker lss-portainer "${IMAGE}" --socket --volume lss-portainer-data:/data --volume "${BATS_TEST_TMPDIR}/pw:/run/pw:ro"
+	[ "${CTR_ROOT_VOLUMES[*]}" = lss-portainer-data ]
+	_ctr_root_volumes docker
+	[ "$(stat -c '%a' "${data}")" = 700 ]
+	[ "$(files_changes_of core)" = 1 ]
+}
+
 # --- ctr_run and ctr_remove ---------------------------------------------------------------------------------------
 
 # A stub engine: "container inspect" answers from CTR_HASH and CTR_RUNNING; every call is logged.
