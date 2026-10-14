@@ -340,7 +340,7 @@ _modsecurity_build_apache() {
 	fi
 	pkg_update_once
 	pkg_install libpcre2-8-0 "$(_modsecurity_deb_candidate libxml2-16 libxml2)" libyajl2
-	_modsecurity_build_deps gcc make apache2-dev libpcre2-dev libxml2-dev libyajl-dev
+	_modsecurity_build_deps gcc make pkg-config apache2-dev libpcre2-dev libxml2-dev libyajl-dev
 	_modsecurity_workdir
 	fetch_verified "modsecurity-apache-${MODSEC_APACHE_VERSION}" "${MODSEC_WORK}/modsecurity2.tar.gz"
 	tar -xzf "${MODSEC_WORK}/modsecurity2.tar.gz" -C "${MODSEC_WORK}" --no-same-owner
@@ -723,6 +723,10 @@ mod_verify() {
 		# The engine reports why it cannot write the audit log in the error log of the web server.
 		ls -l "${log%/*}" >&2 || true
 		tail -n 20 "$(web_log_file "${server}" error)" >&2 || true
+		# Which process holds the audit log open, as which user, and what the kernel refused.
+		ps -o pid,user,args -p "$(pgrep -d , -x 'nginx|apache2|httpd')" >&2 || true
+		find /proc/[0-9]*/fd -lname "${log}*" 2>/dev/null >&2 || true
+		journalctl -k -n 400 --no-pager 2>/dev/null | grep -iE 'denied|audit' | tail -n 20 >&2 || true
 		die "modsecurity: the request with a script tag is missing from the audit log ${log}."
 	fi
 	return
