@@ -142,8 +142,9 @@ mod_configure() {
 	config=$(_wg_config)
 	file_write 0600 root:root "${WG_CONF}" <<<"${config}"
 	# wg-quick is a root script that runs ip and wg; under SELinux these switch to their own domains (ifconfig_t),
-	# which NoNewPrivileges forbids, so the interface would never come up on the RHEL family.
-	svc_sandbox "${WG_UNIT}.service" NoNewPrivileges=no
+	# which NoNewPrivileges forbids, so the interface would never come up on the RHEL family. wg reads its settings
+	# from a pipe through /dev/fd, which SELinux denies wg in the private /dev of PrivateDevices.
+	svc_sandbox "${WG_UNIT}.service" NoNewPrivileges=no PrivateDevices=no
 	fw_allow "$(opt_int port)/udp"
 	svc_enable "${WG_UNIT}"
 	if [[ $(files_changes_of wireguard) != "${before}" ]]; then
