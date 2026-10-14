@@ -137,7 +137,7 @@ setup() {
 	[ "${CTR_ROOT_VOLUMES[*]}" = lss-portainer-data ]
 	_ctr_root_volumes docker
 	[ "$(stat -c '%a' "${data}")" = 700 ]
-	[ "$(files_changes_of core)" = 1 ]
+	grep -qF "gave the volume lss-portainer-data to root" "$(_files_run_dir)/changes"
 }
 
 # --- ctr_run and ctr_remove ---------------------------------------------------------------------------------------
