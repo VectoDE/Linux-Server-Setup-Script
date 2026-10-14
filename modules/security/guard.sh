@@ -13,6 +13,7 @@ webhook||Send findings to this HTTPS webhook (Slack, Teams, Mattermost, Discord 
 disk_threshold|90|Report file systems that are fuller than this (percent)
 lynis_min|0|Report a Lynis hardening index below this (needs the lynis module)
 login_threshold|50|Report more failed SSH logins than this within 24 hours
+backup_max_age|30|Report a last successful backup older than this (hours; needs the restic module, which the guard also restore-tests weekly)
 daily_summary|false|Also send a message when everything is fine"
 
 GUARD_SCRIPT=/usr/local/lib/lss/guard
@@ -28,6 +29,7 @@ mod_check() {
 	(($(opt_int disk_threshold) <= 100)) || die "LSS_GUARD_DISK_THRESHOLD must be at most 100."
 	opt_int lynis_min >/dev/null
 	opt_int login_threshold >/dev/null
+	(($(opt_int backup_max_age) >= 1)) || die "LSS_GUARD_BACKUP_MAX_AGE must be at least 1."
 	email=$(opt email)
 	webhook=$(opt webhook)
 	[[ -z ${email} || ${email} =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "LSS_GUARD_EMAIL '${email}' is not an e-mail address."
@@ -59,7 +61,7 @@ mod_configure() {
 		printf 'GUARD_DAILY_SUMMARY=%s\n' "${bool}"
 		printf 'GUARD_EMAIL=%s\nGUARD_WEBHOOK=%s\n' "$(opt email)" "$(opt webhook)"
 		printf 'GUARD_DISK_THRESHOLD=%s\nGUARD_LYNIS_MIN=%s\n' "$(opt_int disk_threshold)" "$(opt_int lynis_min)"
-		printf 'GUARD_LOGIN_THRESHOLD=%s\n' "$(opt_int login_threshold)"
+		printf 'GUARD_LOGIN_THRESHOLD=%s\nGUARD_BACKUP_MAX_AGE=%s\n' "$(opt_int login_threshold)" "$(opt_int backup_max_age)"
 	)
 	svc_unit "${GUARD_UNIT}.service" <<EOF
 # Managed by lss (module guard).

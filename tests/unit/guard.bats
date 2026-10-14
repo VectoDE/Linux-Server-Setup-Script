@@ -173,3 +173,72 @@ STUB
 	[ "${#FINDINGS[@]}" -eq 0 ]
 	[ "${#NOTES[@]}" -eq 0 ]
 }
+
+# --- backup and metrics -----------------------------------------------------------------------------------------
+
+# A backup script that records its call and exits with $BACKUP_EXIT; stamps of the last run in $BACKUP_STATE.
+fake_backup() {
+	BACKUP=${BATS_TEST_TMPDIR}/backup
+	BACKUP_STATE=${BATS_TEST_TMPDIR}/restic
+	mkdir -p "${BACKUP_STATE}"
+	printf '#!/bin/sh\necho "backup $*" >>"%s"\nexit ${BACKUP_EXIT:-0}\n' "${STUB_LOG}" >"${BACKUP}"
+	chmod +x "${BACKUP}"
+	return
+}
+
+@test "without the restic module the backup is not checked" {
+	BACKUP=${BATS_TEST_TMPDIR}/missing
+	check_backup
+	[ "${#FINDINGS[@]}" -eq 0 ]
+}
+
+@test "a backup older than GUARD_BACKUP_MAX_AGE is a finding, also when none ever succeeded" {
+	fake_backup
+	printf 'GUARD_BACKUP_MAX_AGE=24\n' >"${LSS_GUARD_CONF}"
+	date -d '-30 hours' +%s >"${BACKUP_STATE}/last-success"
+	date +%s >"${BACKUP_STATE}/restore-test"
+	check_backup
+	[ "${#FINDINGS[@]}" -eq 1 ]
+	[[ ${FINDINGS[0]} == "The last successful backup is 30 hours old, more than 24 (journalctl -u lss-backup)." ]]
+	FINDINGS=()
+	rm -f "${BACKUP_STATE}/last-success"
+	mkdir -p "${STATE_DIR}/modules"
+	printf 'status=installed\ninstalled_at=%s\n' "$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ)" >"${STATE_DIR}/modules/restic"
+	check_backup
+	[[ ${FINDINGS[0]} == "The last successful backup is 48 hours old, more than 24 (journalctl -u lss-backup)." ]]
+	run ! grep -q restore-test "${STUB_LOG}"
+}
+
+@test "the restore test runs weekly; a failed one is a finding until the next one passes" {
+	fake_backup
+	date +%s >"${BACKUP_STATE}/last-success"
+	check_backup
+	grep -qxF 'backup restore-test' "${STUB_LOG}"
+	[ "${#FINDINGS[@]}" -eq 0 ]
+	: >"${STUB_LOG}"
+	date -d '-2 days' +%s >"${BACKUP_STATE}/restore-test"
+	printf '0\n' >"${BACKUP_STATE}/restore-test-success"
+	check_backup
+	run ! grep -q restore-test "${STUB_LOG}"
+	[[ ${FINDINGS[0]} == "The last restore test of the backup failed (${BACKUP} restore-test shows why)." ]]
+	FINDINGS=()
+	date -d '-8 days' +%s >"${BACKUP_STATE}/restore-test"
+	BACKUP_EXIT=1 check_backup
+	[[ ${FINDINGS[0]} == "The weekly restore test of the backup failed (${BACKUP} restore-test shows why)." ]]
+}
+
+@test "the result of the run goes to the node exporter when it is installed" {
+	TEXTFILE_DIR=${BATS_TEST_TMPDIR}/textfile
+	export_metrics
+	[ ! -e "${TEXTFILE_DIR}" ]
+	mkdir -p "${TEXTFILE_DIR}"
+	FINDINGS=(one two)
+	FIXED=(ssh-hardening)
+	NOTES=()
+	export_metrics
+	grep -qxF 'lss_guard_findings 2' "${TEXTFILE_DIR}/lss_guard.prom"
+	grep -qxF 'lss_guard_fixed 1' "${TEXTFILE_DIR}/lss_guard.prom"
+	grep -qxF 'lss_guard_notes 0' "${TEXTFILE_DIR}/lss_guard.prom"
+	grep -q '^lss_guard_last_run_timestamp_seconds [0-9]*$' "${TEXTFILE_DIR}/lss_guard.prom"
+	[ "$(stat -c '%a' "${TEXTFILE_DIR}/lss_guard.prom")" = 644 ]
+}
