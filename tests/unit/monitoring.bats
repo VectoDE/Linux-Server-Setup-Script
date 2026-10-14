@@ -302,8 +302,15 @@ admin_stubs() {
 	pkg_install() {
 		die "apt failed"
 	}
-	run mon_install_stopped prometheus
+	# With set -u, as lss runs: the trap must not depend on the locals of the dying function.
+	# shellcheck disable=SC2329 # called through run
+	nounset() {
+		set -u
+		"$@"
+	}
+	run nounset mon_install_stopped prometheus
 	[ "${status}" -eq 1 ]
+	[[ ${output} != *"unbound variable"* ]]
 	[ ! -e "${MON_POLICY_RC}" ]
 }
 

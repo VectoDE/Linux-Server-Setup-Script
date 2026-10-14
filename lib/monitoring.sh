@@ -208,7 +208,8 @@ mon_install_stopped() {
 		return
 	fi
 	(
-		trap 'rm -f -- "${policy}"' EXIT
+		# The global name: when pkg_install dies, the trap runs after the locals of this function are gone.
+		trap 'rm -f -- "${MON_POLICY_RC}"' EXIT
 		printf '#!/bin/sh\n# Written by lss for one package installation.\nexit 101\n' >"${policy}"
 		chmod 0755 "${policy}"
 		pkg_install "$@"
