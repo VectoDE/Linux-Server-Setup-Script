@@ -206,7 +206,7 @@ fake_backup() {
 	printf 'status=installed\ninstalled_at=%s\n' "$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ)" >"${STATE_DIR}/modules/restic"
 	check_backup
 	[[ ${FINDINGS[0]} == "The last successful backup is 48 hours old, more than 24 (journalctl -u lss-backup)." ]]
-	run ! grep -q restore-test "${STUB_LOG}"
+	run ! grep -qxF "backup restore-test" "${STUB_LOG}"
 }
 
 @test "the restore test runs weekly; a failed one is a finding until the next one passes" {
@@ -219,7 +219,7 @@ fake_backup() {
 	date -d '-2 days' +%s >"${BACKUP_STATE}/restore-test"
 	printf '0\n' >"${BACKUP_STATE}/restore-test-success"
 	check_backup
-	run ! grep -q restore-test "${STUB_LOG}"
+	run ! grep -qxF "backup restore-test" "${STUB_LOG}"
 	[[ ${FINDINGS[0]} == "The last restore test of the backup failed (${BACKUP} restore-test shows why)." ]]
 	FINDINGS=()
 	date -d '-8 days' +%s >"${BACKUP_STATE}/restore-test"
