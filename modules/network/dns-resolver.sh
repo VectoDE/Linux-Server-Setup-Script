@@ -257,6 +257,15 @@ mod_configure() {
 	file_write 0644 root:root "${DNS_CONF}" <<<"${config}"
 	unbound-checkconf "${DNS_CONF}" >/dev/null || die "dns-resolver: unbound-checkconf rejects ${DNS_CONF}."
 	svc_sandbox "${DNS_UNIT}.service" ReadWritePaths=/var/lib/unbound
+	if os_is_rhel; then
+		# The unit of the RHEL family runs unbound-anchor before every start and fails when it cannot reach the root
+		# servers. Unbound keeps the anchor current itself (RFC 5011, _dns_anchor), so the unit's own update stays off.
+		svc_dropin "${DNS_UNIT}.service" lss-config <<'EOF'
+# Managed by lss (module dns-resolver): Unbound updates its trust anchor itself.
+[Service]
+Environment=DISABLE_UNBOUND_ANCHOR=yes
+EOF
+	fi
 	mon_vpn_dropin "${DNS_UNIT}.service"
 	svc_enable "${DNS_UNIT}"
 	if [[ $(files_changes_of dns-resolver) != "${before}" ]]; then
@@ -381,6 +390,7 @@ mod_remove() {
 	svc_disable "${DNS_UNIT}"
 	svc_dropin_remove "${DNS_UNIT}.service" lss-sandbox
 	svc_dropin_remove "${DNS_UNIT}.service" lss-vpn
+	svc_dropin_remove "${DNS_UNIT}.service" lss-config
 	file_remove "${DNS_CONF}"
 	pkg_remove_family "unbound unbound-anchor" unbound
 	[[ ${LSS_PURGE:-0} == 1 ]] || return 0
