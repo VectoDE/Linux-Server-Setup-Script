@@ -91,3 +91,13 @@ k3s-selinux-el10 any 7ab503adacf07c3235ba543b94b6a109ec7b192596b887c200c90ab7a8b
 # as the asset digests GitHub reports (2026-10-13). 0.75.0 was out for less than two weeks then.
 trivy-0.74.0 x86_64 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
 trivy-0.74.0 aarch64 b94ce1976bbf3c15b514b605ee88be7c6d94a29be2302847ff01cb794d47aad5 https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-ARM64.tar.gz
+
+# Prometheus 3.13.4 (the 3.13 long-term support release; 3.13.4 is younger than two weeks but fixes two security
+# issues), Alertmanager 0.34.1 and node_exporter 1.12.1 for the RHEL family, which has no packages for them: SHA-256 from
+# sha256sums.txt of each GitHub release, the same as the asset digests GitHub reports (2026-10-14).
+prometheus-3.13.4 x86_64 87f21a66f96c597a189cef8d640e8921b621fc17a9feff707c332c4f3b3ddd56 https://github.com/prometheus/prometheus/releases/download/v3.13.4/prometheus-3.13.4.linux-amd64.tar.gz
+prometheus-3.13.4 aarch64 ffa86c7d6e7f7e7dc8a79c81c5c2a6c9164464b79335f25613f4327c863b8489 https://github.com/prometheus/prometheus/releases/download/v3.13.4/prometheus-3.13.4.linux-arm64.tar.gz
+alertmanager-0.34.1 x86_64 265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8 https://github.com/prometheus/alertmanager/releases/download/v0.34.1/alertmanager-0.34.1.linux-amd64.tar.gz
+alertmanager-0.34.1 aarch64 d98d6cbaf52151c7e76e24355fec88b11cebcb9875d4cdd8b76ddce7a7e5535c https://github.com/prometheus/alertmanager/releases/download/v0.34.1/alertmanager-0.34.1.linux-arm64.tar.gz
+node_exporter-1.12.1 x86_64 b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63 https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-amd64.tar.gz
+node_exporter-1.12.1 aarch64 ad35b605f9954b9f1ffddf5ba054bdc5a98d790b9eae5291e1eeb83f1ecbd0e7 https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-arm64.tar.gz

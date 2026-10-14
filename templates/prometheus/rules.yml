@@ -1,0 +1,58 @@
+# Managed by lss (module prometheus). Alert rules for the server lss set up; lss configure prometheus replaces local
+# changes. Alertmanager (module alertmanager) sends them on; without it they show in Prometheus and Grafana.
+groups:
+  - name: lss
+    rules:
+      - alert: LssTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} on {{ $labels.instance }} cannot be scraped"
+      - alert: LssDiskAlmostFull
+        expr: >-
+          node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} < 0.10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} has less than 10 % free space"
+      - alert: LssMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "less than 5 % of the memory is available"
+      - alert: LssGuardFindings
+        expr: lss_guard_findings > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "the lss guard reports {{ $value }} finding(s); see journalctl -u lss-guard"
+      - alert: LssGuardStale
+        expr: time() - lss_guard_last_run_timestamp_seconds > 26 * 3600
+        labels:
+          severity: warning
+        annotations:
+          summary: "the lss guard has not run for more than 26 hours"
+      - alert: LssBackupFailed
+        expr: lss_backup_last_run_success == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "the last backup failed; see journalctl -u lss-backup"
+      - alert: LssBackupTooOld
+        expr: time() - lss_backup_last_success_timestamp_seconds > 30 * 3600
+        labels:
+          severity: critical
+        annotations:
+          summary: "the last successful backup is more than 30 hours old"
+      - alert: LssRestoreTestFailed
+        expr: lss_backup_restore_test_success == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "the last restore test of the backup failed"
