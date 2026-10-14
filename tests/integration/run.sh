@@ -117,7 +117,12 @@ stop_target() {
 				journalctl -u "${unit}" -n 40 --no-pager
 			done
 			ps -eo pid,ppid,etime,args --forest | tail -n 60
+			tail -n 30 /var/log/mysql/error.log /var/log/mariadb/mariadb.log 2>/dev/null
 			journalctl -p warning -n 80 --no-pager' </dev/null 2>&1 || diagnostics=$?
+		# Containers share the kernel of the runner, whose AppArmor profiles still apply to them.
+		if [[ ${system} != vm-* && ${system} != host ]]; then
+			sudo dmesg 2>/dev/null | grep -F 'apparmor=' | tail -n 30
+		fi
 		echo "Diagnostics finished (status ${diagnostics})."
 	fi
 	if [[ ${system} == vm-* ]]; then
