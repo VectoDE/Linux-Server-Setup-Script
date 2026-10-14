@@ -499,8 +499,10 @@ EOF
 	elif os_is_rhel; then
 		_mysql_rhel_initialize
 	fi
+	# The error log and the socket directory as well: the Debian and Ubuntu packages log to /var/log/mysql and create
+	# /run/mysqld in ExecStartPre, without RuntimeDirectory.
 	svc_sandbox "${unit}.service" "ReadWritePaths=${MYSQL_DATA}" ReadWritePaths=-/var/lib/mysql-files \
-		ReadWritePaths=-/var/lib/mysql-keyring
+		ReadWritePaths=-/var/lib/mysql-keyring ReadWritePaths=-/var/log/mysql ReadWritePaths=-/run/mysqld
 	[[ $(files_changes_of mysql) == "${before}" ]] || changed=1
 	svc_enable "${unit}"
 	if [[ ${changed} == 1 ]]; then
