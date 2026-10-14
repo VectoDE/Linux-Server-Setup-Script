@@ -23,6 +23,8 @@ shift
 }
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
+# A run that hangs ends after 40 minutes, so the diagnostics below still show what it waited for.
+LSS_RUN="timeout --kill-after=60 2400 lss"
 # shellcheck source=tests/integration/vm.sh
 source tests/integration/vm.sh
 # shellcheck source=tests/integration/pebble.sh
@@ -82,7 +84,7 @@ start_target() {
 # Fails when a second install changed anything: every step must be idempotent.
 install_again() {
 	local second
-	second=$(in_target "lss --yes --no-color install $* 2>&1") || {
+	second=$(in_target "${LSS_RUN} --yes --no-color install $* 2>&1") || {
 		printf '%s\n' "${second}"
 		exit 1
 	}
@@ -114,6 +116,7 @@ stop_target() {
 				echo "--- ${unit}"
 				journalctl -u "${unit}" -n 40 --no-pager
 			done
+			ps -eo pid,ppid,etime,args --forest | tail -n 60
 			journalctl -p warning -n 80 --no-pager' </dev/null 2>&1 || diagnostics=$?
 		echo "Diagnostics finished (status ${diagnostics})."
 	fi
@@ -173,13 +176,13 @@ if [[ $1 == --profile ]]; then
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
-	in_target "lss --yes --no-color install --profile ${profile}"
-	in_target "lss --yes --no-color verify"
+	in_target "${LSS_RUN} --yes --no-color install --profile ${profile}"
+	in_target "${LSS_RUN} --yes --no-color verify"
 	resources_report "${system} profile ${profile}" "${before}" "${started}"
 	install_again --profile "${profile}"
 	group_end
 	group_start "${system}: Lynis audit"
-	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
+	in_target "${LSS_RUN} --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
 	group_end
 	# The daily and weekly scans run once inside their systemd sandbox; a path the sandbox blocks fails the unit.
 	group_start "${system}: scheduled scans"
@@ -214,13 +217,13 @@ for item in "$@"; do
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
-	in_target "lss --yes --no-color install ${set[*]}"
-	in_target "lss --yes --no-color verify"
+	in_target "${LSS_RUN} --yes --no-color install ${set[*]}"
+	in_target "${LSS_RUN} --yes --no-color verify"
 	resources_report "${system} ${set[*]}" "${before}" "${started}"
 	install_again "${set[@]}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
 		for ((i = ${#set[@]} - 1; i >= 0; i--)); do
-			in_target "lss --yes --no-color remove ${set[i]}"
+			in_target "${LSS_RUN} --yes --no-color remove ${set[i]}"
 			in_target "! lss status | grep -q '^${set[i]} '"
 		done
 	fi
