@@ -646,7 +646,14 @@ mod_configure() {
 	log=$(_modsecurity_audit_log "${server}")
 	# Packages, builds and rules from mod_install in this run bring a new module: restart. Settings alone: reload.
 	installed=$(files_changes_of modsecurity)
-	if os_is_debian; then
+	if [[ ${server} == nginx ]]; then
+		# libmodsecurity 3 opens the audit log in the worker processes, which run as the web server user: they may
+		# reach the directory and append to the file, nothing else.
+		install -d -m 0710 -o root -g "$(web_user nginx)" "$(dirname "${log}")"
+		[[ -f ${log} ]] || : >"${log}"
+		chown "$(web_user nginx):root" "${log}"
+		chmod 0640 "${log}"
+	elif os_is_debian; then
 		install -d -m 0750 -o root -g adm "$(dirname "${log}")"
 	else
 		install -d -m 0700 -o root -g root "$(dirname "${log}")"
