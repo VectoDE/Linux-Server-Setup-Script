@@ -5,8 +5,9 @@
 
 # lss backup: restic backups of the server. Installed by the restic module as /usr/local/lib/lss/backup and run daily
 # by lss-backup.timer. Settings come from /etc/lss/backup.conf (KEY=value lines, parsed, never sourced); the
-# repository password and the credentials stay in /etc/lss/secrets and reach restic through files and the environment,
-# never through its command line.
+# repository password and the credentials stay in /etc/lss/secrets and reach restic through files and the environment
+# of the restic process alone, never through its command line; the database dumps and every other child never see
+# them.
 #
 #   backup run            database dumps (db-dumps module), backup, forget and prune by the retention, check
 #   backup init           creates the repository unless it exists
@@ -33,6 +34,10 @@ TAG=lss
 PROBE_TAG=lss-probe
 # Global also when the script is sourced inside a function (the unit tests).
 declare -ga RESTIC_OPTIONS=()
+# NAME=value pairs that only the restic process gets in its environment (run_restic); never exported here.
+declare -ga RESTIC_ENV=()
+REPOSITORY=''
+BACKUP_TMP=''
 
 say() {
 	printf 'lss-backup: %s\n' "$*"
@@ -78,30 +83,29 @@ sftp_target() {
 	return
 }
 
-# prepare: the environment and options restic needs for the configured repository.
+# prepare: the environment (RESTIC_ENV) and options restic needs for the configured repository.
 prepare() {
-	local repository target key_id secret
+	local repository target key_id secret region
 	repository=$(setting BACKUP_REPOSITORY)
 	[[ -n ${repository} ]] || {
 		say "BACKUP_REPOSITORY is empty in ${CONF}." >&2
 		return 1
 	}
-	export RESTIC_REPOSITORY=${repository}
-	export RESTIC_PASSWORD_FILE
-	RESTIC_PASSWORD_FILE=$(secret_file restic-password)
-	export RESTIC_CACHE_DIR=${CACHE}
-	export TMPDIR=${CACHE}/tmp
-	mkdir -p "${TMPDIR}"
-	chmod 0700 "${CACHE}" "${TMPDIR}"
+	REPOSITORY=${repository}
+	BACKUP_TMP=${CACHE}/tmp
+	mkdir -p "${BACKUP_TMP}"
+	chmod 0700 "${CACHE}" "${BACKUP_TMP}"
+	RESTIC_ENV=("RESTIC_REPOSITORY=${repository}" "RESTIC_PASSWORD_FILE=$(secret_file restic-password)"
+	"RESTIC_CACHE_DIR=${CACHE}" "TMPDIR=${BACKUP_TMP}")
 	RESTIC_OPTIONS=(--quiet)
 	case ${repository} in
 	s3:*)
 		key_id=$(<"$(secret_file restic-s3-key-id)")
 		secret=$(<"$(secret_file restic-s3-secret)")
-		export AWS_ACCESS_KEY_ID=${key_id} AWS_SECRET_ACCESS_KEY=${secret}
-		if [[ -n $(setting BACKUP_S3_REGION) ]]; then
-			export AWS_DEFAULT_REGION
-			AWS_DEFAULT_REGION=$(setting BACKUP_S3_REGION)
+		RESTIC_ENV+=("AWS_ACCESS_KEY_ID=${key_id}" "AWS_SECRET_ACCESS_KEY=${secret}")
+		region=$(setting BACKUP_S3_REGION)
+		if [[ -n ${region} ]]; then
+			RESTIC_ENV+=("AWS_DEFAULT_REGION=${region}")
 		fi
 		;;
 	sftp:*)
@@ -117,8 +121,12 @@ prepare() {
 	return
 }
 
+# run_restic ARGS: restic with RESTIC_ENV exported in a subshell of its own, so no other process inherits it.
 run_restic() {
-	"${RESTIC}" "${RESTIC_OPTIONS[@]}" "$@"
+	(
+		export "${RESTIC_ENV[@]}"
+		"${RESTIC}" "${RESTIC_OPTIONS[@]}" "$@"
+	)
 	return
 }
 
@@ -186,7 +194,7 @@ cmd_init() {
 		return 0
 	fi
 	run_restic init >/dev/null
-	say "created the repository ${RESTIC_REPOSITORY%%\?*}."
+	say "created the repository ${REPOSITORY%%\?*}."
 	return
 }
 
@@ -195,13 +203,14 @@ cmd_run() {
 	local -a paths=() excludes=() patterns=()
 	now=$(date +%s)
 	stamp last-run "${now}"
-	prepare
+	# The dumps run before prepare reads any credential.
 	if [[ -x ${DB_DUMPS} && -f ${DB_DUMPS_CONF} ]]; then
 		"${DB_DUMPS}" || {
 			status=1
 			say "the database dumps failed; the backup goes on with the files."
 		}
 	fi
+	prepare
 	cmd_init
 	mapfile -t paths < <(backup_paths)
 	# Read as words, never expanded as globs here: the patterns are restic's.
@@ -250,7 +259,7 @@ restore_test() {
 	local tag=${1:-${TAG}} target expected actual status=0 subset
 	prepare
 	expected=$(stamp_get canary-last)
-	target=$(mktemp -d "${TMPDIR}/restore.XXXXXX")
+	target=$(mktemp -d "${BACKUP_TMP}/restore.XXXXXX")
 	if ! run_restic restore latest --host "$(hostname)" --tag "${tag}" --target "${target}" --include "${CANARY}"; then
 		say "restic restore of the latest snapshot failed."
 		status=1

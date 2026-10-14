@@ -25,6 +25,9 @@ STATUS_DIR=${LSS_DB_DUMPS_STATE:-${LSS_STATE_DIR:-/var/lib/lss}/db-dumps}
 ETC_DIR=${LSS_DB_DUMPS_ETC:-/etc/lss}
 DATA_ROOT=${LSS_DB_DUMPS_DATA:-/var/lib}
 ENGINES="mariadb mysql postgresql mongodb redis valkey"
+# The dump programs start with an empty environment and this PATH: nothing of the unit's or the caller's environment
+# reaches them, and nothing at all a process of another user (postgres).
+CLEAN_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 say() {
 	printf 'lss-db-dumps: %s\n' "$*"
@@ -85,7 +88,7 @@ dump_mysql() {
 	if [[ -f /root/.my.cnf ]]; then
 		options=(--defaults-extra-file=/root/.my.cnf "${options[@]}")
 	fi
-	"${dump}" "${options[@]}" --user=root --all-databases --single-transaction --routines --events --triggers \
+	env -i "PATH=${CLEAN_PATH}" "${dump}" "${options[@]}" --user=root --all-databases --single-transaction --routines --events --triggers \
 		--hex-blob >"${out}"
 	return
 }
@@ -95,7 +98,7 @@ dump_postgresql() {
 	dumpall=$(first_program pg_dumpall /usr/pgsql-*/bin/pg_dumpall) || return 1
 	port=$(setting DB_POSTGRESQL_PORT 5432)
 	# As postgres from /, so the dump runs with the peer login and never inside a directory a user controls.
-	(cd / && runuser -u postgres -- "${dumpall}" -p "${port}" --clean --if-exists) >"${out}"
+	(cd / && runuser -u postgres -- env -i "PATH=${CLEAN_PATH}" "${dumpall}" -p "${port}" --clean --if-exists) >"${out}"
 	return
 }
 
@@ -107,7 +110,7 @@ dump_mongodb() {
 	password=$(<"${SECRETS_DIR}/mongodb-admin")
 	config=$(mktemp)
 	printf 'password: "%s"\n' "${password}" >"${config}"
-	mongodump --quiet --config="${config}" --host=127.0.0.1 --port="${port}" --username=lss-admin \
+	env -i "PATH=${CLEAN_PATH}" mongodump --quiet --config="${config}" --host=127.0.0.1 --port="${port}" --username=lss-admin \
 		--authenticationDatabase=admin --archive="${out}" || status=$?
 	rm -f -- "${config}"
 	return "${status}"

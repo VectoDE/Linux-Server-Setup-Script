@@ -60,21 +60,27 @@ load_backup() {
 	[ "${status}" -eq 1 ]
 	printf 'BACKUP_REPOSITORY=sftp:backup@nas.example.com:/srv/restic\n' >"${LSS_BACKUP_CONF}"
 	prepare
-	[ "${RESTIC_REPOSITORY}" = sftp:backup@nas.example.com:/srv/restic ]
-	[ "${RESTIC_PASSWORD_FILE}" = "${LSS_SECRETS_DIR}/restic-password" ]
+	[ "${RESTIC_ENV[0]}" = RESTIC_REPOSITORY=sftp:backup@nas.example.com:/srv/restic ]
+	[ "${RESTIC_ENV[1]}" = "RESTIC_PASSWORD_FILE=${LSS_SECRETS_DIR}/restic-password" ]
 	[[ ${RESTIC_OPTIONS[2]} == "sftp.command=ssh -i ${LSS_SECRETS_DIR}/restic-ssh-key "*"-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${LSS_BACKUP_STATE}/known_hosts backup@nas.example.com -s sftp" ]]
 }
 
-@test "s3 repositories take their keys from the secrets, through the environment" {
+@test "s3 repositories take their keys from the secrets, through the environment of restic alone" {
 	load_backup
 	printf 'BACKUP_REPOSITORY=s3:https://s3.example.com/bucket/host\nBACKUP_S3_REGION=eu-central-1\n' >"${LSS_BACKUP_CONF}"
 	printf 'KEYID' >"${LSS_SECRETS_DIR}/restic-s3-key-id"
 	printf 'SECRET' >"${LSS_SECRETS_DIR}/restic-s3-secret"
 	prepare
-	[ "${AWS_ACCESS_KEY_ID}" = KEYID ]
-	[ "${AWS_SECRET_ACCESS_KEY}" = SECRET ]
-	[ "${AWS_DEFAULT_REGION}" = eu-central-1 ]
+	[[ " ${RESTIC_ENV[*]} " == *' AWS_ACCESS_KEY_ID=KEYID AWS_SECRET_ACCESS_KEY=SECRET AWS_DEFAULT_REGION=eu-central-1 '* ]]
 	[ "${RESTIC_OPTIONS[*]}" = --quiet ]
+	# Nothing of it is exported: restic gets it, nothing else does.
+	[ -z "$(printenv AWS_SECRET_ACCESS_KEY)" ]
+	[ -z "$(printenv RESTIC_PASSWORD_FILE)" ]
+	# shellcheck disable=SC2329 # called by run_restic
+	env_stub() {
+		printenv AWS_SECRET_ACCESS_KEY
+	}
+	[ "$(RESTIC=env_stub run_restic snapshots)" = SECRET ]
 	printf 'BACKUP_REPOSITORY=\n' >"${LSS_BACKUP_CONF}"
 	run prepare
 	[ "${status}" -eq 1 ]
@@ -119,6 +125,21 @@ load_backup() {
 	RESTIC_FAIL=forget run cmd_run
 	[[ ${output} == *"restic forget and prune failed."* ]]
 	grep -qxF 'lss_backup_last_run_success 0' "${LSS_TEXTFILE_DIR}/lss_backup.prom"
+}
+
+@test "the database dumps never see the credentials of the repository" {
+	load_backup
+	printf 'BACKUP_REPOSITORY=s3:https://s3.example.com/bucket/host\nBACKUP_PATHS=/etc\n' >"${LSS_BACKUP_CONF}"
+	printf 'KEYID' >"${LSS_SECRETS_DIR}/restic-s3-key-id"
+	printf 'SECRET' >"${LSS_SECRETS_DIR}/restic-s3-secret"
+	printf '#!/bin/sh\nenv >"%s/dumps.env"\n' "${BATS_TEST_TMPDIR}" >"${LSS_DB_DUMPS}"
+	chmod +x "${LSS_DB_DUMPS}"
+	: >"${LSS_DB_DUMPS_CONF}"
+	cmd_run
+	[ -s "${BATS_TEST_TMPDIR}/dumps.env" ]
+	run grep -E '^(AWS_|RESTIC_)' "${BATS_TEST_TMPDIR}/dumps.env"
+	[ "${status}" -eq 1 ]
+	run ! grep -q '=SECRET$' "${BATS_TEST_TMPDIR}/dumps.env"
 }
 
 @test "failed database dumps fail the run but the files are still backed up" {
@@ -244,6 +265,13 @@ load_dumps() {
 	first_program() {
 		printf '%s' "$1"
 	}
+	# env -i PATH=... COMMAND: the stub runs COMMAND, so the functions below stand in for the programs.
+	# shellcheck disable=SC2329 # called by the functions under test
+	env() {
+		[[ $1 == -i && $2 == "PATH=${CLEAN_PATH}" ]] || return 1
+		shift 2
+		"$@"
+	}
 	# shellcheck disable=SC2329 # called by the functions under test
 	mariadb-dump() {
 		printf 'mariadb-dump %s\n' "$*" >>"${STUB_LOG}"
@@ -255,7 +283,7 @@ load_dumps() {
 	dump mariadb "${BATS_TEST_TMPDIR}/m.sql"
 	grep -qxF 'mariadb-dump --user=root --all-databases --single-transaction --routines --events --triggers --hex-blob' "${STUB_LOG}"
 	dump postgresql "${BATS_TEST_TMPDIR}/p.sql"
-	grep -qxF 'runuser -u postgres -- pg_dumpall -p 5433 --clean --if-exists' "${STUB_LOG}"
+	grep -qxF "runuser -u postgres -- env -i PATH=${CLEAN_PATH} pg_dumpall -p 5433 --clean --if-exists" "${STUB_LOG}"
 	[ "$(file_of mongodb)" = mongodb.archive ]
 	[ "$(file_of valkey)" = valkey.rdb ]
 	[ "$(file_of mysql)" = mysql.sql ]
