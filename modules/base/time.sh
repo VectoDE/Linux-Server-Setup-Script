@@ -41,8 +41,32 @@ mod_install() {
 	return
 }
 
+# The directory chrony reads further settings from, where ntp-server puts its own: inside chrony's directory of /etc,
+# which the AppArmor profile of chronyd on Ubuntu lets it read.
+_time_confdir() {
+	if os_is_debian; then printf '/etc/chrony/conf.d'; else printf '/etc/chrony.d'; fi
+	return
+}
+
+# _time_chrony_config: writes chrony's configuration (sets LSS_FILE_CHANGED). ntp-server calls it as well, inside a
+# container, where this module leaves chrony out.
+_time_chrony_config() {
+	local server suffix=''
+	opt_bool nts && suffix=' nts'
+	TIME_SOURCES=''
+	for server in $(opt servers); do
+		TIME_SOURCES+="server ${server} iburst${suffix}"$'\n'
+	done
+	TIME_SOURCES=${TIME_SOURCES%$'\n'}
+	if os_is_debian; then TIME_DRIFTFILE=/var/lib/chrony/chrony.drift; else TIME_DRIFTFILE=/var/lib/chrony/drift; fi
+	TIME_CONFDIR=$(_time_confdir)
+	install -d -m 0755 "${TIME_CONFDIR}"
+	template_install time chrony.conf 0644 root:root "$(_time_config)"
+	return
+}
+
 mod_configure() {
-	local timezone zone_file server suffix=''
+	local timezone zone_file
 	timezone=$(opt timezone)
 	zone_file="/usr/share/zoneinfo/${timezone}"
 	[[ -f ${zone_file} ]] || die "Unknown time zone '${timezone}' (no ${zone_file})."
@@ -60,14 +84,7 @@ mod_configure() {
 		return 0
 	fi
 
-	opt_bool nts && suffix=' nts'
-	TIME_SOURCES=''
-	for server in $(opt servers); do
-		TIME_SOURCES+="server ${server} iburst${suffix}"$'\n'
-	done
-	TIME_SOURCES=${TIME_SOURCES%$'\n'}
-	if os_is_debian; then TIME_DRIFTFILE=/var/lib/chrony/chrony.drift; else TIME_DRIFTFILE=/var/lib/chrony/drift; fi
-	template_install time chrony.conf 0644 root:root "$(_time_config)"
+	_time_chrony_config
 	local changed=${LSS_FILE_CHANGED}
 	# systemd-timesyncd must not fight chrony for the clock.
 	svc_disable systemd-timesyncd
