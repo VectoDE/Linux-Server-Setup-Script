@@ -115,6 +115,15 @@ stop_target() {
 				echo "--- ${unit}"
 				journalctl -u "${unit}" -n 40 --no-pager
 			done
+			for engine in docker podman; do
+				command -v "${engine}" >/dev/null 2>&1 || continue
+				"${engine}" ps --all
+				for name in $("${engine}" ps --all --format "{{.Names}}"); do
+					echo "--- ${engine} logs ${name}"
+					"${engine}" logs --tail 40 "${name}"
+				done
+			done
+			ss -ltnp
 			journalctl -p warning -n 80 --no-pager' </dev/null 2>&1 || diagnostics=$?
 		echo "Diagnostics finished (status ${diagnostics})."
 	fi
