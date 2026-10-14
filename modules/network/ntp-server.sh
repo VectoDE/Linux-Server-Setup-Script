@@ -151,7 +151,12 @@ mod_verify() {
 		[[ -z ${first} ]] || break
 		sleep 1
 	done
-	[[ -n ${first} ]] || die "ntp-server: chronyd does not answer NTP requests on port ${NTP_PORT}."
+	if [[ -z ${first} ]]; then
+		# What chronyd made of its configuration and which sockets it has, for the log.
+		chronyd -p 2>&1 | grep -E '^(port|allow|confdir|cmdport)' | sed 's/^/ntp-server: chronyd -p: /' >&2 || true
+		ss -Hlunp 2>/dev/null | grep chronyd | sed 's/^/ntp-server: socket: /' >&2 || true
+		die "ntp-server: chronyd does not answer NTP requests on port ${NTP_PORT}."
+	fi
 	(((first & 7) == 4)) || die "ntp-server: the answer on port ${NTP_PORT} is no NTP server reply (mode $((first & 7)))."
 	ss -Hlun "sport = :${NTP_PORT}" | grep -q . || die "ntp-server: nothing listens on ${NTP_PORT}/udp."
 	return
