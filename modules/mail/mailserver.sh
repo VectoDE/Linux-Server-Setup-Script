@@ -371,6 +371,9 @@ _ms_dovecot() {
 		printf '%s\n' "${output}" >&2
 		die "mailserver: Dovecot rejects ${MS_DOVECOT_CONF}."
 	}
+	# Dovecot puts its sockets for Postfix there; Postfix 3.10 creates the directory only on its first start, which
+	# comes later, and the sandbox needs it to exist. Postfix's own owner and mode.
+	[[ -d /var/spool/postfix/private ]] || install -d -m 0700 -o postfix -g root /var/spool/postfix/private
 	svc_sandbox dovecot.service "ReadWritePaths=${MS_VMAIL}" ReadWritePaths=-/var/lib/dovecot \
 		ReadWritePaths=/var/spool/postfix/private
 	svc_enable dovecot

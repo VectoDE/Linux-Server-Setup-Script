@@ -121,9 +121,18 @@ fake_dns() {
 	fail "Rspamd does not answer after the restart."
 }
 
+# full_curl: the RHEL family installs curl-minimal, which speaks no SMTP and IMAP; the test swaps in the full curl.
+full_curl() {
+	[[ $(curl -V) != *' smtp '* ]] || return 0
+	dnf -y -q install --allowerasing curl libcurl >/dev/null || fail "the full curl does not install."
+	[[ $(curl -V) == *' smtp '* ]] || fail "curl still speaks no SMTP."
+	return
+}
+
 server() {
 	local alice bob domain selector token mail result output ip i symbol
 	local -a mailboxes=()
+	full_curl
 	HOSTNAME_MAIL=$(state mailserver hostname)
 	domain=$(state mailserver domain)
 	selector=$(sed -nE 's/^([a-z0-9-]+)\._domainkey\..*/\1/p' "${DNS_FILE}" | head -n 1)

@@ -145,13 +145,13 @@ _rc_database() {
 	if command -v restorecon >/dev/null 2>&1; then
 		restorecon -R "${RC_DATA}" 2>/dev/null || true
 	fi
-	if [[ ! -s ${RC_DB} ]]; then
-		log_command _rc_run "${RC_DIR}/bin/initdb.sh" --dir="${RC_DIR}/SQL" || die "webmail: Roundcube could not create its database."
-		files_note_change "created the Roundcube database"
-	elif [[ $(state_get webmail schema) != "${RC_VERSION}" ]]; then
+	# Roundcube's SQLite driver creates the schema itself on the first connection to a new file, so updatedb.sh both
+	# creates the database and brings an existing one to the schema of this release.
+	if [[ ! -s ${RC_DB} || $(state_get webmail schema) != "${RC_VERSION}" ]]; then
 		log_command _rc_run "${RC_DIR}/bin/updatedb.sh" --package=roundcube --dir="${RC_DIR}/SQL" ||
-			die "webmail: Roundcube could not update its database to ${RC_VERSION}."
-		files_note_change "updated the Roundcube database"
+			die "webmail: Roundcube could not set up its database for ${RC_VERSION}."
+		[[ -s ${RC_DB} ]] || die "webmail: Roundcube did not create its database ${RC_DB}."
+		files_note_change "set up the Roundcube database"
 	fi
 	state_set webmail schema "${RC_VERSION}"
 	return
