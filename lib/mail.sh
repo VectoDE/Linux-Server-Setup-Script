@@ -38,10 +38,25 @@ mail_valid_domain() {
 	return
 }
 
-# mail_postfix_unit: the unit that runs the Postfix master. Debian and Ubuntu start it as the instance postfix@-;
-# postfix.service there only groups the instances.
+# mail_postfix_unit: the unit that runs the Postfix master. Debian and Ubuntu up to Postfix 3.9 start it as the
+# instance postfix@-, and postfix.service there only groups the instances (ExecStart=/bin/true); from Debian 13 and
+# Ubuntu 26.04 on (Postfix 3.10), and on the RHEL family, postfix.service runs the master itself.
 mail_postfix_unit() {
-	if os_is_debian; then printf 'postfix@-'; else printf 'postfix'; fi
+	local fragment
+	if os_is_debian; then
+		fragment=$(systemctl show -P FragmentPath postfix.service 2>/dev/null) || fragment=''
+		if [[ -z ${fragment} || ! -r ${fragment} ]] || grep -q '^ExecStart=/bin/true' "${fragment}"; then
+			printf 'postfix@-'
+			return
+		fi
+	fi
+	printf 'postfix'
+	return
+}
+
+# mail_postfix_template: the unit file the sandbox drop-in of the Postfix master belongs to.
+mail_postfix_template() {
+	if [[ $(mail_postfix_unit) == postfix@- ]]; then printf 'postfix@.service'; else printf 'postfix.service'; fi
 	return
 }
 
@@ -102,9 +117,7 @@ EOF
 # mail_postfix_sandbox [DIRECTIVE...]: the systemd sandbox of the Postfix master and its daemons. They write the queue,
 # their state and the local mailboxes only. Postfix needs /dev/log of the host for syslog, so /dev stays.
 mail_postfix_sandbox() {
-	local unit=postfix.service
-	os_is_debian && unit=postfix@.service
-	svc_sandbox "${unit}" PrivateDevices=no ReadWritePaths=/var/spool/postfix ReadWritePaths=/var/lib/postfix \
+	svc_sandbox "$(mail_postfix_template)" PrivateDevices=no ReadWritePaths=/var/spool/postfix ReadWritePaths=/var/lib/postfix \
 		"$@"
 	return
 }

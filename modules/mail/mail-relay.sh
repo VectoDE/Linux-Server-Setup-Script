@@ -116,8 +116,8 @@ allow_mail_to_files =
 transport_maps = inline:{ ${MAIL_VERIFY_LOCALPART}@${hostname}=discard: }
 relayhost = ${nexthop}
 smtp_tls_security_level = ${level}
-smtp_tls_mandatory_protocols = >=TLSv1.2
-smtp_tls_protocols = >=TLSv1.2
+smtp_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtp_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
 smtp_tls_CAfile = $(mail_ca_bundle)
 smtp_tls_loglevel = 1
 EOF
@@ -149,8 +149,9 @@ _relay_tables() {
 	local hostname=$1 forward from password
 	forward=$(opt forward)
 	{
-		printf '# Managed by lss (module mail-relay).\npostmaster: root\nabuse: root\n'
-		[[ -z ${forward} ]] || printf 'root: %s\n' "${forward}"
+		# texthash reads "key value" lines, not the "key: value" lines of aliases(5).
+		printf '# Managed by lss (module mail-relay).\npostmaster root\nabuse root\n'
+		[[ -z ${forward} ]] || printf 'root %s\n' "${forward}"
 	} | file_write 0644 root:root "${RELAY_ALIASES}"
 	if [[ -n $(opt user) ]]; then
 		password=$(opt password)
@@ -206,8 +207,8 @@ mod_verify() {
 }
 
 mod_remove() {
-	local unit=postfix.service
-	os_is_debian && unit=postfix@.service
+	local unit
+	unit=$(mail_postfix_template)
 	svc_disable "$(mail_postfix_unit)"
 	svc_disable postfix
 	svc_dropin_remove "${unit}" lss-sandbox

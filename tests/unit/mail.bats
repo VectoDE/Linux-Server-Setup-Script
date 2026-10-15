@@ -56,6 +56,15 @@ load_module() {
 
 @test "the Postfix unit is the instance postfix@- on Debian and postfix on the RHEL family" {
 	[ "$(mail_postfix_unit)" = 'postfix@-' ]
+	[ "$(mail_postfix_template)" = 'postfix@.service' ]
+	# Postfix 3.10 on Debian 13 and Ubuntu 26.04: postfix.service runs the master itself.
+	printf '[Service]\nExecStart=/usr/sbin/postfix start\n' >"${BATS_TEST_TMPDIR}/postfix.service"
+	systemctl() { printf '%s\n' "${BATS_TEST_TMPDIR}/postfix.service"; }
+	[ "$(mail_postfix_unit)" = postfix ]
+	[ "$(mail_postfix_template)" = postfix.service ]
+	printf '[Service]\nExecStart=/bin/true\n' >"${BATS_TEST_TMPDIR}/postfix.service"
+	[ "$(mail_postfix_unit)" = 'postfix@-' ]
+	unset -f systemctl
 	use_os rocky-9
 	[ "$(mail_postfix_unit)" = postfix ]
 	[ "$(mail_ca_bundle)" = /etc/pki/tls/certs/ca-bundle.crt ]
@@ -123,7 +132,7 @@ load_module() {
 	[ "$(secret_get mail-relay-password)" = s3cret ]
 	grep -qxF "== 0600 root:root /etc/postfix/lss-sasl-passwd" "${WRITES}"
 	grep -qxF '[smtp.example.com]:25 relay@example.com:s3cret' "${WRITES}"
-	grep -qxF 'root: admin@example.com' "${WRITES}"
+	grep -qxF 'root admin@example.com' "${WRITES}"
 }
 
 # --- mailserver --------------------------------------------------------------------------------------------------
@@ -194,7 +203,7 @@ load_module() {
 	grep -qxF 'team@example.com alice@example.com,bob@example.com,someone@example.net' "${WRITES}"
 	grep -qxF 'alice@example.com alice@example.com' "${WRITES}"
 	grep -qxF 'lss-verify@example.com REJECT' "${WRITES}"
-	grep -qxF 'root: postmaster@example.com' "${WRITES}"
+	grep -qxF 'root postmaster@example.com' "${WRITES}"
 	run grep -c '^team@example.com ' "${WRITES}"
 	[ "${output}" = 2 ]
 }

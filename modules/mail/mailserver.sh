@@ -512,7 +512,8 @@ _ms_tables() {
 		file_write 0644 root:root "${MS_RECIPIENT_ACCESS}"
 	{
 		printf '# Managed by lss (module mailserver). Mail for root and the system accounts.\n'
-		printf 'postmaster: root\nabuse: root\nroot: postmaster@%s\n' "${MS_DOMAINS[0]}"
+		# texthash reads "key value" lines, not the "key: value" lines of aliases(5).
+		printf 'postmaster root\nabuse root\nroot postmaster@%s\n' "${MS_DOMAINS[0]}"
 	} | file_write 0644 root:root "${MS_ALIASES}"
 	return
 }
@@ -564,14 +565,14 @@ smtpd_sasl_tls_security_options = noanonymous
 smtpd_tls_chain_files = ${cert}/privkey.pem, ${cert}/fullchain.pem
 smtpd_tls_security_level = may
 smtpd_tls_auth_only = yes
-smtpd_tls_protocols = >=TLSv1.2
-smtpd_tls_mandatory_protocols = >=TLSv1.2
+smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtpd_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
 smtpd_tls_mandatory_ciphers = high
 smtpd_tls_received_header = yes
 smtpd_tls_loglevel = 1
 smtp_tls_security_level = ${level}
-smtp_tls_protocols = >=TLSv1.2
-smtp_tls_mandatory_protocols = >=TLSv1.2
+smtp_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtp_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
 smtp_tls_CAfile = $(mail_ca_bundle)
 smtp_tls_loglevel = 1
 # Every message passes Rspamd: spam filter, DKIM signing, SPF, DKIM and DMARC checks. While Rspamd is down, mail waits.
@@ -790,11 +791,12 @@ mod_verify() {
 		sleep 2
 	done
 	[[ ${result} == *'Action: reject'* && ${result} == *GTUBE* ]] || die "mailserver: Rspamd does not reject the GTUBE test message."
-	# The DNS records name the DKIM key Rspamd signs with.
+	# The DNS records name the DKIM key Rspamd signs with (its TXT strings joined, as resolvers do).
 	for domain in "${MS_DOMAINS[@]}"; do
 		key="${MS_DKIM_DIR}/${domain}.$(opt dkim_selector).key"
 		[[ -s ${key} ]] || die "mailserver: the DKIM key ${key} is missing."
-		grep -qF "p=$(openssl pkey -in "${key}" -pubout -outform DER 2>/dev/null | base64 -w 0)" "${MS_DNS_FILE}" ||
+		sed 's/" "//g' "${MS_DNS_FILE}" |
+			grep -qF "p=$(openssl pkey -in "${key}" -pubout -outform DER 2>/dev/null | base64 -w 0)" ||
 			die "mailserver: ${MS_DNS_FILE} does not carry the DKIM key of ${domain}."
 	done
 	# A message through the whole server: sendmail, Postfix, Rspamd (signs it), LMTP into the verify mailbox.
@@ -817,8 +819,8 @@ mod_verify() {
 }
 
 mod_remove() {
-	local unit=postfix.service
-	os_is_debian && unit=postfix@.service
+	local unit
+	unit=$(mail_postfix_template)
 	svc_disable rspamd
 	svc_disable dovecot
 	svc_disable "$(mail_postfix_unit)"
