@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web, runtime, database, database-alt, container]
+        group: [base, security, scanners, web, runtime, database, database-alt, container, backup, backup-alt, monitoring, network]
         arch: [x64, arm64]
         include:
           - group: base
@@ -54,6 +54,18 @@ jobs:
           # k3s need a kernel of their own (bridges, iptables, cgroups) and run in the VM jobs below.
           - group: container
             modules: podman
+          # restic alone (local repository), then the database dumps of every engine; the conflicting engines in a job
+          # of their own, as above.
+          - group: backup
+            modules: restic mariadb,postgresql,redis,restic,db-dumps
+          - group: backup-alt
+            modules: mysql,valkey,mongodb,restic,db-dumps
+          # The Prometheus stack, Grafana below the admin port of nginx, logs from the journal to Loki, Netdata on the
+          # WireGuard address (LSS_NETDATA_ACCESS=vpn) and smartd without drives.
+          - group: monitoring
+            modules: node-exporter prometheus,alertmanager,grafana nginx,prometheus,grafana loki,alloy wireguard,netdata smartd
+          - group: network
+            modules: wireguard dns-resolver ntp-server
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -85,7 +97,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install, verify, reinstall, remove
-        run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard
+        run: tests/integration/run.sh host time swap firewall kernel-hardening mac auditd usbguard wireguard
 
   profile:
     name: ${{ matrix.runner }} VM / profile minimal-secure
@@ -121,9 +133,10 @@ jobs:
         # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases: on
         # Debian 13 for every change, on every distribution in the nightly and the manual runs. Docker with Portainer,
         # then k3s (after Docker is removed; they conflict) on every supported system, in a clean VM because the runner
-        # already has Docker; minimal-secure on the newest Ubuntu release; the Kubernetes node profile with a Lynis audit.
+        # already has Docker; minimal-secure on the newest Ubuntu release; the Kubernetes node profile with a Lynis audit;
+        # Docker with the monitoring stack, as on a DevOps server.
         include: >-
-          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"}',
+          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"}',
           (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
           && '{"system":"debian-12","run":"profile all"},{"system":"debian-13","run":"profile all"},{"system":"rocky-9","run":"profile all"},{"system":"almalinux-10","run":"profile all"},{"system":"ubuntu-22.04","run":"profile all"},{"system":"ubuntu-24.04","run":"profile all"},{"system":"ubuntu-26.04","run":"profile all"}'
           || '{"system":"debian-13","run":"profile all"}')) }}
@@ -153,7 +166,7 @@ jobs:
           RUN: ${{ matrix.run }}
         run: |
           if [[ $RUN == kernel ]]; then
-            tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard
+            tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard wireguard
           elif [[ $RUN == containers ]]; then
             tests/integration/run.sh "$SYSTEM" firewall,docker,portainer firewall,k3s
           else

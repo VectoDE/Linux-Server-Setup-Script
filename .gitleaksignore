@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Findings of gitleaks that are no secrets, by fingerprint (commit:file:rule:line).
+# WireGuard public keys from the wg(8) examples, used as peers in the unit tests; public keys are meant to be shared.
+78ea7af4af2a90de1e21a4a07aec3f6b0f8c5371:tests/unit/network.bats:generic-api-key:34
+78ea7af4af2a90de1e21a4a07aec3f6b0f8c5371:tests/unit/network.bats:generic-api-key:35

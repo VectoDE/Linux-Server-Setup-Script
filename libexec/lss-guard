@@ -10,7 +10,8 @@
 # when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, vulnerable packages (debsecan
 # on Debian, dnf updateinfo on the RHEL family), failed SSH logins and active bans, the results of the daily AIDE,
 # rkhunter and ClamAV runs, the Lynis hardening index, certificates that expire soon, HIGH and CRITICAL vulnerabilities
-# in the container images of Docker and Podman (Trivy).
+# in the container images of Docker and Podman (Trivy), the age of the last backup and a weekly restore test (restic).
+# The numbers of findings, fixes and notes also go to the node exporter for Prometheus (lss_guard_*).
 # Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
 # Notes (logins, bans) are part of the summary but do not make the run fail.
 set -Eeuo pipefail
@@ -24,6 +25,13 @@ TLS_DIR=${LSS_TLS_DIR:-/etc/lss/tls}
 # Installed by the docker and podman modules (lib/container.sh).
 TRIVY=${LSS_GUARD_TRIVY:-/usr/local/bin/trivy}
 TRIVY_CACHE=${LSS_GUARD_TRIVY_CACHE:-/var/cache/lss-trivy}
+# Installed by the restic module (libexec/lss-backup), with its state next to it.
+BACKUP=${LSS_GUARD_BACKUP:-/usr/local/lib/lss/backup}
+BACKUP_STATE=${LSS_BACKUP_STATE:-${STATE_DIR}/restic}
+# The node exporter's textfile collector (lib/monitoring.sh); the guard's metrics go there when it exists.
+TEXTFILE_DIR=${LSS_TEXTFILE_DIR:-/var/lib/prometheus/node-exporter}
+# A restore test every week, a little earlier so a daily run at the same time does not slip to the next day.
+RESTORE_TEST_INTERVAL=$((7 * 86400 - 3600))
 # Global also when the script is sourced inside a function (the unit tests).
 declare -ga FINDINGS=() FIXED=() NOTES=()
 
@@ -326,6 +334,64 @@ check_containers() {
 	return
 }
 
+# backup_stamp NAME: a time or result the backup script recorded (libexec/lss-backup); nothing when it never did.
+backup_stamp() {
+	local file=${BACKUP_STATE}/$1 value=''
+	[[ -f ${file} ]] && value=$(<"${file}")
+	[[ ${value} =~ ^[0-9]+$ ]] && printf '%s' "${value}"
+	return 0
+}
+
+# The restic backup (when the restic module is installed): the last successful backup must be younger than
+# GUARD_BACKUP_MAX_AGE hours (counted from the installation until the first one), and once a week a restore test
+# proves that the latest backup comes back.
+check_backup() {
+	local max now last installed age tested
+	[[ -x ${BACKUP} ]] || return 0
+	max=$(setting GUARD_BACKUP_MAX_AGE 30)
+	now=$(date +%s)
+	last=$(backup_stamp last-success)
+	if [[ -z ${last} ]]; then
+		installed=$(sed -n 's/^installed_at=//p' "${STATE_DIR}/modules/restic" 2>/dev/null || true)
+		last=$(date -d "${installed:-now}" +%s 2>/dev/null || printf '%s' "${now}")
+	fi
+	age=$(((now - last) / 3600))
+	if ((age >= max)); then
+		finding "The last successful backup is ${age} hours old, more than ${max} (journalctl -u lss-backup)."
+	fi
+	[[ -n $(backup_stamp last-success) ]] || return 0
+	tested=$(backup_stamp restore-test)
+	if [[ -z ${tested} ]] || ((now - tested >= RESTORE_TEST_INTERVAL)); then
+		if "${BACKUP}" restore-test >/dev/null 2>&1; then
+			logger -t lss-guard -p auth.info -- "Backup restore test passed"
+		else
+			finding "The weekly restore test of the backup failed (${BACKUP} restore-test shows why)."
+		fi
+	elif [[ $(backup_stamp restore-test-success) == 0 ]]; then
+		finding "The last restore test of the backup failed (${BACKUP} restore-test shows why)."
+	fi
+	return
+}
+
+# export_metrics: the result of this run for Prometheus, through the node exporter's textfile collector.
+export_metrics() {
+	local file=${TEXTFILE_DIR}/lss_guard.prom
+	[[ -d ${TEXTFILE_DIR} ]] || return 0
+	{
+		printf '# HELP lss_guard_findings Findings of the last lss guard run.\n# TYPE lss_guard_findings gauge\n'
+		printf 'lss_guard_findings %s\n' "${#FINDINGS[@]}"
+		printf '# HELP lss_guard_fixed Modules the last lss guard run restored.\n# TYPE lss_guard_fixed gauge\n'
+		printf 'lss_guard_fixed %s\n' "${#FIXED[@]}"
+		printf '# HELP lss_guard_notes Notes of the last lss guard run.\n# TYPE lss_guard_notes gauge\n'
+		printf 'lss_guard_notes %s\n' "${#NOTES[@]}"
+		printf '# HELP lss_guard_last_run_timestamp_seconds End of the last lss guard run.\n'
+		printf '# TYPE lss_guard_last_run_timestamp_seconds gauge\nlss_guard_last_run_timestamp_seconds %s\n' "$(date +%s)"
+	} >"${file}.tmp"
+	chmod 0644 "${file}.tmp"
+	mv -f -- "${file}.tmp" "${file}"
+	return
+}
+
 json_escape() {
 	local text=$1
 	text=${text//\\/\\\\}
@@ -375,6 +441,8 @@ main() {
 	check_lynis
 	check_certificates
 	check_containers
+	check_backup
+	export_metrics
 	local summary host
 	host=$(hostname -f 2>/dev/null || hostname)
 	if [[ ${#FINDINGS[@]} -eq 0 && ${#FIXED[@]} -eq 0 ]]; then

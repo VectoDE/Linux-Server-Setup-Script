@@ -124,13 +124,24 @@ file_write() {
 	log_debug "Wrote ${dest}"
 }
 
-# file_remove PATH: deletes a managed file with backup.
+# file_remove PATH: deletes a managed file with backup. lss verify no longer expects it, also when it was gone already
+# (a drop-in a module stops writing, a file the web server took with it).
 file_remove() {
 	local path=$1
+	files_forget_path "${path}"
 	[[ -e ${path} || -L ${path} ]] || return 0
 	files_backup "${path}"
 	rm -rf -- "${path}"
 	files_note_change "removed ${path}"
+}
+
+# files_forget_path PATH: drops PATH from the checksums of the current module.
+files_forget_path() {
+	local path=$1 list="${LSS_STATE_DIR}/managed/${LSS_MODULE:-core}"
+	[[ -f ${list} ]] || return 0
+	awk -F '\t' -v path="${path}" '$2 != path' "${list}" >"${list}.tmp"
+	mv -f -- "${list}.tmp" "${list}"
+	return
 }
 
 # Prints managed files of MODULE whose content no longer matches what lss wrote.

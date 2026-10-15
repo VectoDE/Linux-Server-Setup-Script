@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# lss db-dumps: consistent dumps of the databases lss installed, for the restic backup. Installed by the db-dumps
+# module as /usr/local/lib/lss/db-dumps; lss-backup runs it before every backup. Settings come from
+# /etc/lss/db-dumps.conf (KEY=value lines, parsed, never sourced).
+#
+# Which engines exist is read at run time from the lss module state (/var/lib/lss/modules), so a database installed
+# later is dumped without touching this module:
+#   mariadb, mysql   mariadb-dump / mysqldump of every database in one transaction, with routines, events and triggers
+#   postgresql       pg_dumpall (roles, every database) as the postgres user
+#   mongodb          mongodump of every database as an archive, with the administrator from the lss secrets
+#   redis, valkey    BGSAVE, then a copy of the RDB snapshot
+# One file per engine in /var/backups/lss-db (root only), replaced on every run; restic keeps the history.
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+CONF=${LSS_DB_DUMPS_CONF:-/etc/lss/db-dumps.conf}
+SECRETS_DIR=${LSS_SECRETS_DIR:-/etc/lss/secrets}
+MODULES_DIR=${LSS_STATE_DIR:-/var/lib/lss}/modules
+STATUS_DIR=${LSS_DB_DUMPS_STATE:-${LSS_STATE_DIR:-/var/lib/lss}/db-dumps}
+# The password files of Redis and Valkey (their modules write them) and the parent of their data directories.
+ETC_DIR=${LSS_DB_DUMPS_ETC:-/etc/lss}
+DATA_ROOT=${LSS_DB_DUMPS_DATA:-/var/lib}
+ENGINES="mariadb mysql postgresql mongodb redis valkey"
+# The dump programs start with an empty environment and this PATH: nothing of the unit's or the caller's environment
+# reaches them, and nothing at all a process of another user (postgres).
+CLEAN_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+say() {
+	printf 'lss-db-dumps: %s\n' "$*"
+	return
+}
+
+setting() {
+	local key=$1 default=${2-} line
+	if [[ -r ${CONF} ]]; then
+		while IFS= read -r line || [[ -n ${line} ]]; do
+			if [[ ${line} == "${key}="* ]]; then
+				printf '%s' "${line#*=}"
+				return 0
+			fi
+		done <"${CONF}"
+	fi
+	printf '%s' "${default}"
+}
+
+# installed ENGINE: lss installed the module ENGINE.
+installed() {
+	local file=${MODULES_DIR}/$1
+	[[ -f ${file} ]] && grep -qx 'status=installed' "${file}"
+	return
+}
+
+dump_dir() {
+	setting DB_DUMPS_DIR /var/backups/lss-db
+	return
+}
+
+# first_program NAME...: the first program that exists, by path or in the PATH.
+first_program() {
+	local program
+	for program in "$@"; do
+		if [[ ${program} == /* && -x ${program} ]] || { [[ ${program} != /* ]] && command -v "${program}" >/dev/null 2>&1; }; then
+			printf '%s' "${program}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# The SQL servers: root logs in through the Unix socket (MariaDB, MySQL on Debian and Ubuntu) or with the password in
+# /root/.my.cnf (MySQL on the RHEL family), which a service does not find on its own (no HOME).
+dump_mysql() {
+	local engine=$1 out=$2 dump socket=''
+	local -a options=()
+	if [[ ${engine} == mariadb ]]; then
+		dump=$(first_program mariadb-dump mysqldump) || return 1
+	else
+		dump=$(first_program /opt/mysql/bin/mysqldump mysqldump) || return 1
+		# GTID metadata would make the dump fail to load on a server with its own GTIDs.
+		options+=(--set-gtid-purged=OFF)
+		if [[ -S /run/mysqld/mysqld.sock ]]; then socket=/run/mysqld/mysqld.sock; else socket=/var/lib/mysql/mysql.sock; fi
+		options+=(--socket="${socket}")
+	fi
+	if [[ -f /root/.my.cnf ]]; then
+		options=(--defaults-extra-file=/root/.my.cnf "${options[@]}")
+	fi
+	env -i "PATH=${CLEAN_PATH}" "${dump}" "${options[@]}" --user=root --all-databases --single-transaction --routines --events --triggers \
+		--hex-blob >"${out}"
+	return
+}
+
+dump_postgresql() {
+	local out=$1 dumpall port
+	dumpall=$(first_program pg_dumpall /usr/pgsql-*/bin/pg_dumpall) || return 1
+	port=$(setting DB_POSTGRESQL_PORT 5432)
+	# As postgres from /, so the dump runs with the peer login and never inside a directory a user controls.
+	(cd / && runuser -u postgres -- env -i "PATH=${CLEAN_PATH}" "${dumpall}" -p "${port}" --clean --if-exists) >"${out}"
+	return
+}
+
+# MongoDB: the password goes to mongodump in a configuration file of root's, never on the command line.
+dump_mongodb() {
+	local out=$1 port password config status=0
+	command -v mongodump >/dev/null 2>&1 || return 1
+	port=$(setting DB_MONGODB_PORT 27017)
+	password=$(<"${SECRETS_DIR}/mongodb-admin")
+	config=$(mktemp)
+	printf 'password: "%s"\n' "${password}" >"${config}"
+	env -i "PATH=${CLEAN_PATH}" mongodump --quiet --config="${config}" --host=127.0.0.1 --port="${port}" --username=lss-admin \
+		--authenticationDatabase=admin --archive="${out}" || status=$?
+	rm -f -- "${config}"
+	return "${status}"
+}
+
+# Redis and Valkey: a fresh snapshot (BGSAVE), copied once LASTSAVE moves. The password goes through the environment.
+dump_rdb() {
+	local engine=$1 out=$2 cli password port before i now
+	if [[ ${engine} == redis ]]; then
+		cli=$(first_program redis-cli) || return 1
+	else
+		cli=$(first_program /opt/valkey/bin/valkey-cli valkey-cli) || return 1
+	fi
+	password=$(<"${ETC_DIR}/${engine}-password")
+	port=$(setting "DB_${engine^^}_PORT" 6379)
+	before=$(REDISCLI_AUTH=${password} VALKEYCLI_AUTH=${password} "${cli}" -p "${port}" --no-auth-warning lastsave)
+	[[ ${before} =~ ^[0-9]+$ ]] || return 1
+	REDISCLI_AUTH=${password} VALKEYCLI_AUTH=${password} "${cli}" -p "${port}" --no-auth-warning bgsave >/dev/null
+	for ((i = 0; i < 300; i++)); do
+		now=$(REDISCLI_AUTH=${password} VALKEYCLI_AUTH=${password} "${cli}" -p "${port}" --no-auth-warning lastsave)
+		[[ ${now} == "${before}" ]] || break
+		sleep 1
+	done
+	[[ ${now} != "${before}" ]] || return 1
+	cp -- "${DATA_ROOT}/${engine}/dump.rdb" "${out}"
+	return
+}
+
+dump() {
+	local engine=$1 out=$2
+	case ${engine} in
+	mariadb | mysql) dump_mysql "${engine}" "${out}" ;;
+	postgresql) dump_postgresql "${out}" ;;
+	mongodb) dump_mongodb "${out}" ;;
+	redis | valkey) dump_rdb "${engine}" "${out}" ;;
+	*) return 1 ;;
+	esac
+	return
+}
+
+file_of() {
+	case $1 in
+	mariadb | mysql | postgresql) printf '%s.sql' "$1" ;;
+	mongodb) printf 'mongodb.archive' ;;
+	*) printf '%s.rdb' "$1" ;;
+	esac
+	return
+}
+
+# run_dumps: one dump per installed engine; fails when one of them failed.
+run_dumps() {
+	local dir engine out failed=0 count=0
+	dir=$(dump_dir)
+	mkdir -p "${dir}" "${STATUS_DIR}"
+	chmod 0700 "${dir}" "${STATUS_DIR}"
+	: >"${STATUS_DIR}/status.tmp"
+	for engine in ${ENGINES}; do
+		installed "${engine}" || continue
+		count=$((count + 1))
+		out=${dir}/$(file_of "${engine}")
+		# The dump goes to a temporary file first, so a failed run never replaces the last good dump.
+		if dump "${engine}" "${out}.part" && [[ -s ${out}.part ]]; then
+			mv -f -- "${out}.part" "${out}"
+			printf '%s ok %s\n' "${engine}" "$(date +%s)" >>"${STATUS_DIR}/status.tmp"
+			say "dumped ${engine} to ${out}."
+		else
+			rm -f -- "${out}.part"
+			printf '%s failed %s\n' "${engine}" "$(date +%s)" >>"${STATUS_DIR}/status.tmp"
+			say "the dump of ${engine} failed; ${out} keeps the previous one."
+			failed=1
+		fi
+	done
+	mv -f -- "${STATUS_DIR}/status.tmp" "${STATUS_DIR}/status"
+	((count > 0)) || say "lss installed 0 databases here; nothing to dump."
+	return "${failed}"
+}
+
+main() {
+	[[ ${EUID} -eq 0 ]] || {
+		say "must run as root." >&2
+		exit 1
+	}
+	umask 077
+	run_dumps
+}
+
+# The unit tests source this file without running it.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi

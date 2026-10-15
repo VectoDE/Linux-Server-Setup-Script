@@ -25,6 +25,21 @@ fw_vpn_network() {
 	return
 }
 
+# fw_vpn_address: the address of this server in the WireGuard network, the first host of it (10.66.0.1 for
+# 10.66.0.0/24). The wireguard module gives it to wg0; admin interfaces with access vpn listen on it.
+fw_vpn_address() {
+	local network prefix base
+	network=$(fw_vpn_network)
+	[[ ${network} =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})$ ]] ||
+		die "LSS_WIREGUARD_NETWORK '${network}' must be an IPv4 network such as 10.66.0.0/24."
+	prefix=$((10#${BASH_REMATCH[2]}))
+	((prefix >= 8 && prefix <= 30)) || die "LSS_WIREGUARD_NETWORK needs a prefix from /8 to /30, got /${prefix}."
+	base=$(_fw_ipv4_int "${network%/*}")
+	base=$(((base >> (32 - prefix) << (32 - prefix)) + 1))
+	printf '%s.%s.%s.%s' $((base >> 24 & 255)) $((base >> 16 & 255)) $((base >> 8 & 255)) $((base & 255))
+	return
+}
+
 fw_is_enabled() {
 	if [[ $(fw_backend) == ufw ]]; then
 		command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'

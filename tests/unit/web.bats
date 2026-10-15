@@ -748,6 +748,28 @@ EOF
 	[ -f "${conf}/adminer.caddy" ]
 }
 
+@test "strip admin paths hand the upstream its root, on every web server" {
+	as_test_user
+	use_server nginx
+	web_admin_write netdata netdata strip http://127.0.0.1:19999
+	local conf=${BATS_TEST_TMPDIR}/conf
+	grep -qxF 'location = /netdata {' "${conf}/nginx/admin/netdata.conf"
+	grep -qxF $'\treturn 301 /netdata/;' "${conf}/nginx/admin/netdata.conf"
+	grep -qxF $'\tproxy_pass http://127.0.0.1:19999/;' "${conf}/nginx/admin/netdata.conf"
+	state_set nginx status removed
+	use_server apache
+	web_admin_write netdata netdata strip http://127.0.0.1:19999/
+	grep -qxF 'RedirectMatch 301 ^/netdata$ /netdata/' "${conf}/apache/admin/netdata.conf"
+	grep -qxF $'\tProxyPass http://127.0.0.1:19999/ upgrade=websocket' "${conf}/apache/admin/netdata.conf"
+	grep -qxF $'\tProxyPassReverse http://127.0.0.1:19999/' "${conf}/apache/admin/netdata.conf"
+	state_set apache status removed
+	use_server caddy
+	web_admin_write netdata netdata strip http://127.0.0.1:19999
+	grep -qxF 'redir /netdata /netdata/' "${conf}/caddy/admin/netdata.caddy"
+	grep -qxF 'handle_path /netdata/* {' "${conf}/caddy/admin/netdata.caddy"
+	grep -qxF $'\treverse_proxy http://127.0.0.1:19999' "${conf}/caddy/admin/netdata.caddy"
+}
+
 @test "admin paths need a valid name, a plain path and an installed web server" {
 	as_test_user
 	run web_admin_write pgadmin ../pgadmin proxy http://127.0.0.1:5050

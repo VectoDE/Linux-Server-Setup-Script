@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# lss backup: restic backups of the server. Installed by the restic module as /usr/local/lib/lss/backup and run daily
+# by lss-backup.timer. Settings come from /etc/lss/backup.conf (KEY=value lines, parsed, never sourced); the
+# repository password and the credentials stay in /etc/lss/secrets and reach restic through files and the environment
+# of the restic process alone, never through its command line; the database dumps and every other child never see
+# them.
+#
+#   backup run            database dumps (db-dumps module), backup, forget and prune by the retention, check
+#   backup init           creates the repository unless it exists
+#   backup restore-test   restores the canary file of the latest backup and compares it, then reads a part of the data
+#   backup probe          a small backup of the canary file and its restore test (lss verify, before the first run)
+#   backup restic ARGS    restic with the settings of this server, for example: backup restic snapshots
+#
+# The state (time and result of the last run and restore test) is kept in /var/lib/lss/restic and written as metrics
+# for the node exporter, which the guard and the Prometheus alert rules read.
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+CONF=${LSS_BACKUP_CONF:-/etc/lss/backup.conf}
+SECRETS_DIR=${LSS_SECRETS_DIR:-/etc/lss/secrets}
+STATE=${LSS_BACKUP_STATE:-/var/lib/lss/restic}
+TEXTFILE_DIR=${LSS_TEXTFILE_DIR:-/var/lib/prometheus/node-exporter}
+DB_DUMPS=${LSS_DB_DUMPS:-/usr/local/lib/lss/db-dumps}
+DB_DUMPS_CONF=${LSS_DB_DUMPS_CONF:-/etc/lss/db-dumps.conf}
+CACHE=${LSS_BACKUP_CACHE:-/var/cache/restic}
+RESTIC=${LSS_RESTIC:-restic}
+CANARY_DIR=${STATE}/canary
+CANARY=${CANARY_DIR}/canary
+TAG=lss
+PROBE_TAG=lss-probe
+# Global also when the script is sourced inside a function (the unit tests).
+declare -ga RESTIC_OPTIONS=()
+# NAME=value pairs that only the restic process gets in its environment (run_restic); never exported here.
+declare -ga RESTIC_ENV=()
+REPOSITORY=''
+BACKUP_TMP=''
+
+say() {
+	printf 'lss-backup: %s\n' "$*"
+	return
+}
+
+setting() {
+	local key=$1 default=${2-} line
+	if [[ -r ${CONF} ]]; then
+		while IFS= read -r line || [[ -n ${line} ]]; do
+			if [[ ${line} == "${key}="* ]]; then
+				printf '%s' "${line#*=}"
+				return 0
+			fi
+		done <"${CONF}"
+	fi
+	printf '%s' "${default}"
+}
+
+secret_file() {
+	printf '%s/%s' "${SECRETS_DIR}" "$1"
+	return
+}
+
+# sftp_target REPOSITORY: user@host (and -p PORT) of an sftp repository, as ssh arguments separated by spaces.
+# Repositories look like sftp:user@host:/path or sftp://user@host:port//path.
+sftp_target() {
+	local repository=$1 rest host port=''
+	if [[ ${repository} == sftp://* ]]; then
+		rest=${repository#sftp://}
+		host=${rest%%/*}
+		if [[ ${host} =~ ^(.+):([0-9]+)$ ]]; then
+			host=${BASH_REMATCH[1]}
+			port=${BASH_REMATCH[2]}
+		fi
+	else
+		rest=${repository#sftp:}
+		host=${rest%%:*}
+	fi
+	[[ ${host} =~ ^[A-Za-z0-9._@-]+$ ]] || return 1
+	printf '%s' "${host}"
+	[[ -z ${port} ]] || printf ' -p %s' "${port}"
+	return
+}
+
+# prepare: the environment (RESTIC_ENV) and options restic needs for the configured repository.
+prepare() {
+	local repository target key_id secret region
+	repository=$(setting BACKUP_REPOSITORY)
+	[[ -n ${repository} ]] || {
+		say "BACKUP_REPOSITORY is empty in ${CONF}." >&2
+		return 1
+	}
+	REPOSITORY=${repository}
+	BACKUP_TMP=${CACHE}/tmp
+	mkdir -p "${BACKUP_TMP}"
+	chmod 0700 "${CACHE}" "${BACKUP_TMP}"
+	RESTIC_ENV=("RESTIC_REPOSITORY=${repository}" "RESTIC_PASSWORD_FILE=$(secret_file restic-password)"
+	"RESTIC_CACHE_DIR=${CACHE}" "TMPDIR=${BACKUP_TMP}")
+	RESTIC_OPTIONS=(--quiet)
+	case ${repository} in
+	s3:*)
+		key_id=$(<"$(secret_file restic-s3-key-id)")
+		secret=$(<"$(secret_file restic-s3-secret)")
+		RESTIC_ENV+=("AWS_ACCESS_KEY_ID=${key_id}" "AWS_SECRET_ACCESS_KEY=${secret}")
+		region=$(setting BACKUP_S3_REGION)
+		if [[ -n ${region} ]]; then
+			RESTIC_ENV+=("AWS_DEFAULT_REGION=${region}")
+		fi
+		;;
+	sftp:*)
+		target=$(sftp_target "${repository}") || {
+			say "BACKUP_REPOSITORY '${repository}' names no host." >&2
+			return 1
+		}
+		# The key in the secrets, the host key pinned on first contact, never a password prompt.
+		RESTIC_OPTIONS+=(-o "sftp.command=ssh -i $(secret_file restic-ssh-key) -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${STATE}/known_hosts ${target} -s sftp")
+		;;
+	*) ;;
+	esac
+	return
+}
+
+# restic_env ARGS: restic with RESTIC_ENV exported in a subshell of its own, so no other process inherits it.
+restic_env() {
+	(
+		export "${RESTIC_ENV[@]}"
+		"${RESTIC}" "$@"
+	)
+	return
+}
+
+# run_restic ARGS: restic_env with the options of the repository, quiet.
+run_restic() {
+	restic_env "${RESTIC_OPTIONS[@]}" "$@"
+	return
+}
+
+stamp() {
+	local name=$1 value=$2
+	mkdir -p "${STATE}"
+	printf '%s\n' "${value}" >"${STATE}/${name}.tmp"
+	mv -f -- "${STATE}/${name}.tmp" "${STATE}/${name}"
+	return
+}
+
+stamp_get() {
+	local file=${STATE}/$1
+	if [[ -f ${file} ]]; then
+		printf '%s' "$(<"${file}")"
+	fi
+	return
+}
+
+# metrics: the stamps as Prometheus metrics for the node exporter's textfile collector (when it is installed).
+metrics() {
+	local file name value
+	[[ -d ${TEXTFILE_DIR} ]] || return 0
+	file=${TEXTFILE_DIR}/lss_backup.prom
+	for name in last_run_timestamp_seconds:last-run last_run_success:last-run-success \
+		last_success_timestamp_seconds:last-success restore_test_timestamp_seconds:restore-test \
+		restore_test_success:restore-test-success; do
+		value=$(stamp_get "${name#*:}")
+		[[ ${value} =~ ^[0-9]+$ ]] || continue
+		printf '# TYPE lss_backup_%s gauge\nlss_backup_%s %s\n' "${name%%:*}" "${name%%:*}" "${value}"
+	done >"${file}.tmp"
+	chmod 0644 "${file}.tmp"
+	mv -f -- "${file}.tmp" "${file}"
+	return
+}
+
+# backup_paths: the configured paths that exist (restic counts a missing one as an error).
+backup_paths() {
+	local path
+	local -a paths=()
+	read -ra paths <<<"$(setting BACKUP_PATHS /etc)"
+	for path in "${paths[@]}"; do
+		if [[ -e ${path} ]]; then
+			printf '%s\n' "${path}"
+		fi
+	done
+	printf '%s\n' "${CANARY_DIR}"
+	return
+}
+
+# canary: a file with fresh content in every backup; the restore test compares it with what it gets back.
+canary() {
+	local value
+	mkdir -p "${CANARY_DIR}"
+	chmod 0700 "${STATE}" "${CANARY_DIR}"
+	value="$(date +%s) $(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+	printf '%s\n' "${value}" >"${CANARY}"
+	printf '%s' "${value}"
+	return
+}
+
+cmd_init() {
+	prepare
+	if run_restic cat config >/dev/null 2>&1; then
+		return 0
+	fi
+	run_restic init >/dev/null
+	say "created the repository ${REPOSITORY%%\?*}."
+	return
+}
+
+cmd_run() {
+	local status=0 code=0 value now pattern
+	local -a paths=() excludes=() patterns=()
+	now=$(date +%s)
+	stamp last-run "${now}"
+	# The dumps run before prepare reads any credential.
+	if [[ -x ${DB_DUMPS} && -f ${DB_DUMPS_CONF} ]]; then
+		"${DB_DUMPS}" || {
+			status=1
+			say "the database dumps failed; the backup goes on with the files."
+		}
+	fi
+	prepare
+	cmd_init
+	mapfile -t paths < <(backup_paths)
+	# Read as words, never expanded as globs here: the patterns are restic's.
+	read -ra patterns <<<"$(setting BACKUP_EXCLUDE)"
+	for pattern in "${patterns[@]}"; do
+		excludes+=(--exclude "${pattern}")
+	done
+	value=$(canary)
+	run_restic backup --tag "${TAG}" --exclude-caches "${excludes[@]}" "${paths[@]}" || code=$?
+	case ${code} in
+	0) stamp canary-last "${value}" ;;
+	3)
+		# Some files could not be read; the snapshot exists without them.
+		stamp canary-last "${value}"
+		status=1
+		say "restic could not read some files; see the lines above."
+		;;
+	*)
+		status=1
+		say "restic backup failed (exit code ${code})."
+		;;
+	esac
+	if ! run_restic forget --tag "${TAG}" --group-by host,tags --prune \
+		--keep-daily "$(setting BACKUP_KEEP_DAILY 7)" --keep-weekly "$(setting BACKUP_KEEP_WEEKLY 4)" \
+		--keep-monthly "$(setting BACKUP_KEEP_MONTHLY 6)"; then
+		status=1
+		say "restic forget and prune failed."
+	fi
+	if ! run_restic check; then
+		status=1
+		say "restic check reports errors in the repository."
+	fi
+	if ((status == 0)); then
+		stamp last-success "${now}"
+		stamp last-run-success 1
+		say "backup complete."
+	else
+		stamp last-run-success 0
+	fi
+	metrics
+	return "${status}"
+}
+
+# restore_test [TAG]: restores the canary of the latest snapshot of this host and compares it.
+restore_test() {
+	local tag=${1:-${TAG}} target expected actual status=0 subset
+	prepare
+	expected=$(stamp_get canary-last)
+	target=$(mktemp -d "${BACKUP_TMP}/restore.XXXXXX")
+	if ! run_restic restore latest --host "$(hostname)" --tag "${tag}" --target "${target}" --include "${CANARY}"; then
+		say "restic restore of the latest snapshot failed."
+		status=1
+	fi
+	actual=''
+	if [[ -f ${target}${CANARY} ]]; then
+		actual=$(<"${target}${CANARY}")
+	fi
+	rm -rf -- "${target}"
+	if ((status == 0)) && [[ -z ${actual} || ${actual} != "${expected}" ]]; then
+		say "the restored canary file differs from the one backed up last."
+		status=1
+	fi
+	# Reads a share of the packs, so damage on the storage side shows up without downloading everything every week.
+	subset=$(setting BACKUP_CHECK_SUBSET 5%)
+	if ((status == 0)) && ! run_restic check --read-data-subset="${subset}"; then
+		say "restic check --read-data-subset=${subset} reports errors."
+		status=1
+	fi
+	return "${status}"
+}
+
+cmd_restore_test() {
+	local status=0
+	restore_test || status=$?
+	stamp restore-test "$(date +%s)"
+	if ((status == 0)); then
+		stamp restore-test-success 1
+		say "restore test passed."
+	else
+		stamp restore-test-success 0
+	fi
+	metrics
+	return "${status}"
+}
+
+# cmd_probe: proves that the repository takes a backup and gives it back, with the canary file only.
+cmd_probe() {
+	local value
+	cmd_init
+	value=$(canary)
+	run_restic backup --tag "${PROBE_TAG}" "${CANARY_DIR}"
+	stamp canary-last "${value}"
+	restore_test "${PROBE_TAG}"
+	run_restic forget --tag "${PROBE_TAG}" --keep-last 1 >/dev/null
+	say "probe passed: the repository takes a backup and restores it."
+	return
+}
+
+# dispatch COMMAND [ARGS]: runs one subcommand.
+dispatch() {
+	local command=${1:-run}
+	shift || true
+	case ${command} in
+	run) cmd_run ;;
+	init) cmd_init ;;
+	restore-test) cmd_restore_test ;;
+	probe) cmd_probe ;;
+	restic)
+		prepare
+		restic_env "${RESTIC_OPTIONS[@]:1}" "$@"
+		;;
+	*)
+		say "usage: backup run|init|restore-test|probe|restic ARGS" >&2
+		exit 2
+		;;
+	esac
+}
+
+main() {
+	[[ ${EUID} -eq 0 ]] || {
+		say "must run as root." >&2
+		exit 1
+	}
+	umask 077
+	dispatch "$@"
+}
+
+# The unit tests source this file without running it.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi
