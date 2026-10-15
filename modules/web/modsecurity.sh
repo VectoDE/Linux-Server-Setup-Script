@@ -35,6 +35,8 @@ MODSEC_PLUGINS="cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenf
 # The web server modules serve this file on port 80 for every host name; verify sends its probes there.
 MODSEC_PROBE=/.well-known/acme-challenge/lss-probe
 MODSEC_BUILD_DEPS=()
+# Where nginx-dev puts the patched nginx sources of Debian and Ubuntu.
+MODSEC_NGINX_DEV_SRC=/usr/share/nginx/src
 MODSEC_WORK=''
 
 # The web server ModSecurity is added to.
@@ -139,10 +141,48 @@ _modsecurity_nginx_version() {
 	return
 }
 
-# What the self-built nginx connector was built for; a different value means building it again.
+# _modsecurity_nginx_package: the package and its version that hold the nginx binary ("nginx 1.24.0-2ubuntu7").
+_modsecurity_nginx_package() {
+	local binary package
+	binary=$(readlink -f "$(command -v nginx)") || return 0
+	if os_is_debian; then
+		package=$(dpkg-query -S "${binary}" 2>/dev/null | head -n 1 | cut -d : -f 1)
+		[[ -z ${package} ]] || printf '%s %s' "${package}" "$(dpkg-query -W -f '${Version}' "${package}" 2>/dev/null)"
+	else
+		rpm -qf --qf '%{NAME} %{VERSION}-%{RELEASE}' "${binary}" 2>/dev/null || true
+	fi
+	return
+}
+
+# What the self-built nginx connector was built for; a different value means building it again. The package version
+# counts as well: a distribution update of the same nginx release can change the structures the module uses.
 _modsecurity_connector_id() {
-	printf 'nginx %s, connector %s, libmodsecurity %s' "$(_modsecurity_nginx_version)" "${MODSEC_CONNECTOR_VERSION}" \
-		"${MODSEC_LIB_VERSION}"
+	printf 'nginx %s (%s), connector %s, libmodsecurity %s' "$(_modsecurity_nginx_version)" \
+		"$(_modsecurity_nginx_package)" "${MODSEC_CONNECTOR_VERSION}" "${MODSEC_LIB_VERSION}"
+	return
+}
+
+# _modsecurity_nginx_headers TREE: Debian and Ubuntu patch nginx, and a patch can change the layout of its structures
+# (Ubuntu 26.04 adds a port field to ngx_http_request_t), which --with-compat does not detect. A module built from the
+# plain nginx.org sources then writes beside the fields it means; on Ubuntu 26.04 requests were never freed, so the log
+# phase and with it the audit log never ran. nginx-dev holds the patched sources of exactly the installed package;
+# they replace those of the nginx.org TREE. Releases without nginx-dev build from the nginx.org sources alone.
+_modsecurity_nginx_headers() {
+	local tree=$1 package version
+	read -r package version <<<"$(_modsecurity_nginx_package)"
+	[[ -n ${version} ]] || return 0
+	pkg_update_once
+	if ! apt-cache show "nginx-dev=${version}" >/dev/null 2>&1; then
+		log_info "modsecurity: nginx-dev ${version} is unavailable for ${package}; the module builds from the nginx.org sources."
+		return 0
+	fi
+	if ! pkg_is_installed nginx-dev; then
+		MODSEC_BUILD_DEPS+=(nginx-dev)
+	fi
+	pkg_install "nginx-dev=${version}"
+	[[ -d ${MODSEC_NGINX_DEV_SRC}/src ]] ||
+		die "modsecurity: nginx-dev ${version} has no nginx sources in ${MODSEC_NGINX_DEV_SRC}."
+	cp -a "${MODSEC_NGINX_DEV_SRC}/src/." "${tree}/src/"
 	return
 }
 
@@ -305,6 +345,7 @@ _modsecurity_build_connector() {
 		fetch_verified "nginx-${version}" "${MODSEC_WORK}/nginx.tar.gz"
 		tar -xzf "${MODSEC_WORK}/nginx.tar.gz" -C "${MODSEC_WORK}" --no-same-owner
 		src="${MODSEC_WORK}/nginx-${version}"
+		_modsecurity_nginx_headers "${src}"
 	else
 		tree=$(rpm -E '%{_nginx_srcdir}')
 		[[ -f ${tree}/configure ]] || die "modsecurity: nginx-mod-devel has no nginx sources in ${tree}."
@@ -730,33 +771,9 @@ mod_verify() {
 		# The engine reports why it cannot write the audit log in the error log of the web server.
 		ls -l "${log%/*}" >&2 || true
 		tail -n 20 "$(web_log_file "${server}" error)" >&2 || true
-		[[ ${server} != nginx ]] || _modsecurity_debug_probe "${url}" "${unit}" "${log}" >&2 || true
 		die "modsecurity: the request with a script tag is missing from the audit log ${log}."
 	fi
 	return
-}
-
-# _modsecurity_debug_probe URL UNIT LOG: sends the blocked request again with the engine's debug log switched on and
-# prints what the engine says about its audit log; the configuration is put back afterwards.
-_modsecurity_debug_probe() {
-	local url=$1 unit=$2 log=$3 main debug
-	main=$(_modsecurity_conf_dir nginx)/main.conf
-	debug=${log%/*}/debug.log
-	install -m 0640 -o "$(web_user nginx)" -g root /dev/null "${debug}"
-	cp -p -- "${main}" "${main}.lss-debug"
-	printf 'SecDebugLog %s\nSecDebugLogLevel 9\n' "${debug}" >>"${main}"
-	if svc_reload "${unit}"; then
-		sleep 2
-		curl -s --max-time 10 -o /dev/null -H 'Host: localhost' "${url}?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E" || true
-		sleep 2
-		echo "--- ModSecurity debug log (audit and logging lines)"
-		grep -iE 'audit|relevant|logging|save' "${debug}" | tail -n 40
-		echo "--- last lines"
-		tail -n 15 "${debug}"
-	fi
-	mv -f -- "${main}.lss-debug" "${main}"
-	rm -f -- "${debug}"
-	svc_reload "${unit}"
 }
 
 mod_remove() {
