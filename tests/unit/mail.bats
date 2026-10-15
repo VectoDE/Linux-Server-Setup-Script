@@ -59,6 +59,7 @@ load_module() {
 	[ "$(mail_postfix_template)" = 'postfix@.service' ]
 	# Postfix 3.10 on Debian 13 and Ubuntu 26.04: postfix.service runs the master itself.
 	printf '[Service]\nExecStart=/usr/sbin/postfix start\n' >"${BATS_TEST_TMPDIR}/postfix.service"
+	# shellcheck disable=SC2329 # called by mail_postfix_unit
 	systemctl() { printf '%s\n' "${BATS_TEST_TMPDIR}/postfix.service"; }
 	[ "$(mail_postfix_unit)" = postfix ]
 	[ "$(mail_postfix_template)" = postfix.service ]
@@ -252,6 +253,14 @@ load_module() {
 	config_set LSS_MAILSERVER_DOMAINS example.com
 	config_set LSS_MAILSERVER_USERS alice
 	_ms_parse
+	# A stand-in for "openssl passwd -6 [-salt SALT] -stdin" (the test image has no openssl): salt and digest.
+	# shellcheck disable=SC2329 # called by _ms_hash
+	openssl() {
+		local salt="${RANDOM}${RANDOM}" password
+		[[ $3 != -salt ]] || salt=$4
+		read -r password
+		printf '$6$%s$%s\n' "${salt}" "$(printf '%s:%s' "${salt}" "${password}" | sha256sum | cut -c 1-43)"
+	}
 	MS_USERS=${BATS_TEST_TMPDIR}/lss-users
 	_ms_users_file >"${MS_USERS}"
 	grep -qE '^alice@example.com:\{SHA512-CRYPT\}\$6\$[^:]+:990:990::/var/vmail/example.com/alice::$' "${MS_USERS}"
