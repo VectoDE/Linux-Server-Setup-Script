@@ -20,6 +20,7 @@ setup() {
 
 # scratch_repo VERSION: a repository with the files prepare.sh changes, one tagged release and one commit after it.
 scratch_repo() {
+	command -v git >/dev/null || skip 'git is missing'
 	REPO=${BATS_TEST_TMPDIR}/repo
 	cd "${BATS_TEST_TMPDIR}" || return 1
 	rm -rf -- "${REPO}"
