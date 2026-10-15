@@ -313,7 +313,7 @@ EOF
 	export STUB_EXIT_openssl_req=1
 	run web_default_cert
 	[ "${status}" -eq 1 ]
-	[[ ${output} == *'web: could not create the self-signed default certificate.'* ]]
+	[[ ${output} == *'web: could not create a self-signed certificate for web.example.com.'* ]]
 }
 
 @test "the names of a certificate are read from its subjectAltName" {

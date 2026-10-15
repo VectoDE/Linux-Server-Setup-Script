@@ -216,7 +216,7 @@ docker() {
 		printf 'issue %s\n' "$*" >>"${STUB_LOG}"
 	}
 	app_site 8081
-	grep -qxF 'placeholder demo' "${STUB_LOG}"
+	grep -qxF 'placeholder demo cloud.example.com www.example.com' "${STUB_LOG}"
 	grep -qxF 'site demo proxy http://127.0.0.1:8081 cloud.example.com www.example.com' "${STUB_LOG}"
 	grep -qxF reload "${STUB_LOG}"
 	run ! grep -q '^issue' "${STUB_LOG}"
