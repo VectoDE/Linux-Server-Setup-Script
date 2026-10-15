@@ -85,9 +85,12 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `wireguard`        | 15 s               | 260 MiB                   | 100 MiB | – (kernel)                                          |
 | `dns-resolver`     | 45 s               | 180 MiB                   | 40 MiB  | Unbound about 20 MiB                                |
 | `ntp-server`       | 15 s               | 195 MiB                   | 10 MiB  | – (the chronyd of `time`, about 10 MiB)             |
+| `mail-relay`       | 35 s               | 250 MiB                   | 180 MiB (dnf), else 135 MiB | Postfix (master, queue manager, pickup)  |
+| `mailserver`       | 90 s               | 800 MiB (dnf), else 225 MiB | 235 MiB (dnf), else 120 MiB | Postfix, Dovecot and Rspamd, up to 180 MiB |
+| `webmail`          | 135 s with nginx, php and mailserver | 390 MiB together | 265 MiB together | Roundcube in PHP-FPM; with nginx and the mail server up to 290 MiB |
 
 Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
-for `wireguard`); those outliers are left out.
+for `wireguard`); those outliers are left out, like one Rocky 9 container run of `mail-relay` that took six minutes.
 
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
 
