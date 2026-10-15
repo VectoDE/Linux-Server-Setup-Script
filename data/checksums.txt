@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Direct downloads (lib/fetch.sh): <name> <arch|any> <sha256> <url>. Every checksum is the one the vendor publishes;
+# the source of each is noted above its lines. Raising a version means replacing the URL and the checksum together.
+
+# Composer 2.10.3: https://getcomposer.org/download/2.10.3/composer.phar.sha256sum (2026-10-13).
+composer any 7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6 https://getcomposer.org/download/2.10.3/composer.phar
+
+# Go 1.27.2: https://go.dev/dl/?mode=json and https://dl.google.com/go/go1.27.2.linux-<arch>.tar.gz.sha256 (2026-10-13).
+go x86_64 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 https://go.dev/dl/go1.27.2.linux-amd64.tar.gz
+go aarch64 94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 https://go.dev/dl/go1.27.2.linux-arm64.tar.gz
+
+# phpMyAdmin 5.2.3: SHA-256 from https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.xz.sha256
+# (checked 2026-10-13).
+phpmyadmin-5.2.3 any 57881348297c4412f86c410547cf76b4d8a236574dd2c6b7d6a2beebe7fc44e3 https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.xz
+# Adminer 6.1.2: SHA-256 digest of the release asset on GitHub (gh api repos/vrana/adminer/releases/tags/v6.1.2,
+# checked 2026-10-13).
+adminer-6.1.2 any b32316156bd18ffa99c1a27617142c2e5ad72260e37f15da4e9937a3dbb15f57 https://github.com/vrana/adminer/releases/download/v6.1.2/adminer-6.1.2.php
+# pgAdmin 4 9.18 and gunicorn 26.2.0: SHA-256 of the wheels as published by PyPI (https://pypi.org/pypi/pgadmin4/9.18/json,
+# https://pypi.org/pypi/gunicorn/26.2.0/json, checked 2026-10-13).
+pgadmin4-9.18 any 9ea084fc416265e4fc95c9fb6e6ae0f6668d34da8670c9b65c79cea054124356 https://files.pythonhosted.org/packages/0e/80/86d7e7123e2b6de41890bd1edc3e27348e2572acea337088faa0ec41c7f5/pgadmin4-9.18-py3-none-any.whl
+gunicorn-26.2.0 any bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3 https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl
+
+# Valkey 8.1.10, upstream build for Ubuntu 22.04, which has no Valkey package. SHA-256 from the .sha256 files next to
+# the archives (https://valkey.io/download/), 2026-10-13.
+valkey-jammy x86_64 23400087a684b6e87f66332e0a836a2674c24c7c482361766777149499c08e50 https://download.valkey.io/releases/valkey-8.1.10-jammy-x86_64.tar.gz
+valkey-jammy aarch64 44abd1a738fdda3831bb3d84f19e4bcd45bdb537d0cee24dace364f511193eaf https://download.valkey.io/releases/valkey-8.1.10-jammy-arm64.tar.gz
+
+# MySQL 8.4.11 LTS, Oracle's generic glibc 2.28 build for Debian on arm64 (repo.mysql.com has amd64 packages only).
+# Oracle publishes an MD5 sum and a GnuPG signature, no SHA-256: the archive matched the MD5 on
+# https://dev.mysql.com/downloads/mysql/8.4.html (b22fb0240514099ff95251b1c8ed2127) and its signature by the MySQL
+# Release Engineering key BCA43417C3B485DD128EC6D4B7B3B788A8D3785C (data/keys/mysql.asc); the SHA-256 below was taken
+# from that verified file on 2026-10-13.
+mysql-generic aarch64 04b2f9791d314167a9eb83abcb476f45a7cd9e4aa88fa7a638cba40d1bc2a109 https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-linux-glibc2.28-aarch64.tar.xz
+
+# modsecurity: OWASP Core Rule Set, digests of the GitHub release files (the releases are also PGP-signed by
+# security@coreruleset.org, 3600 6F0E 0BA1 6783 2158 8211 38EE ACA1 AB8A 6E72). 4.25 is the long-term-support line;
+# 3.3 serves the ModSecurity v2 of Ubuntu 22.04 (Apache).
+coreruleset-4.25.2 any a2d4b2a5bb4f397f7e40d4e22d0346350706a5f17c1cfefc09e8b9740e00d87e https://github.com/coreruleset/coreruleset/releases/download/v4.25.2/coreruleset-4.25.2-minimal.tar.gz
+# modsecurity: libmodsecurity and the nginx connector (every system with nginx), from the .sha256 files the OWASP
+# ModSecurity project publishes with each release.
+libmodsecurity-3.0.17 any f283b33d5c21130fd3a15c84a93a1abe12bd1949edaf44288b12af571b671a50 https://github.com/owasp-modsecurity/ModSecurity/releases/download/v3.0.17/modsecurity-v3.0.17.tar.gz
+# mod_security2 for Apache on Ubuntu 22.04, signed by OWASP ModSecurity <modsecurity@owasp.org>
+# (0B2B A192 4065 B446 9120 2A2A D286 E022 149F 0F6E), checked 2026-10-14.
+modsecurity-apache-2.9.15 any 4fae2d684672a24541607cb0b563d88b88eb4543b88cd090345149bb47309477 https://github.com/owasp-modsecurity/ModSecurity/releases/download/v2.9.15/modsecurity-v2.9.15.tar.gz
+modsecurity-nginx-1.0.4 any 6bdc7570911be884c1e43aaf85046137f9fde0cfa0dd4a55b853c81c45a13313 https://github.com/owasp-modsecurity/ModSecurity-nginx/releases/download/v1.0.4/ModSecurity-nginx-v1.0.4.tar.gz
+# modsecurity: nginx sources of the versions the distributions ship (Ubuntu 22.04 1.18.0, Debian 12 1.22.1, Ubuntu
+# 24.04 1.24.0, Debian 13 1.26.3, Ubuntu 26.04 1.28.3), for the connector build. nginx.org publishes PGP signatures
+# only; each digest is of the file whose signature verified: 1.18.0 Maxim Dounin (B0F4 2533 73F8 F6F5 10D4 2178 520A
+# 9993 A1C0 52F8), 1.22.1 and 1.24.0 Konstantin Pavlov (13C8 2A63 B603 5761 56E3 0A4E A0EA 981B 66B0 D967), 1.26.3
+# Sergey Kandaurov (D678 6CE3 03D9 A902 2998 DC6C C846 4D54 9AF7 5C0A), 1.28.3 Roman Arutyunyan (4338 7825 DDB1 BB97
+# EC36 BA5D 007C 8D7C 15D8 7369); keys from https://nginx.org/en/pgp_keys.html, checked 2026-10-14.
+nginx-1.18.0 any 4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99 https://nginx.org/download/nginx-1.18.0.tar.gz
+nginx-1.22.1 any 9ebb333a9e82b952acd3e2b4aeb1d4ff6406f72491bab6cd9fe69f0dea737f31 https://nginx.org/download/nginx-1.22.1.tar.gz
+nginx-1.24.0 any 77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d https://nginx.org/download/nginx-1.24.0.tar.gz
+nginx-1.26.3 any 69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa https://nginx.org/download/nginx-1.26.3.tar.gz
+nginx-1.28.3 any 2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918 https://nginx.org/download/nginx-1.28.3.tar.gz
+# modsecurity: CRS 4 application exclusion plugins. Their repositories publish no release files; the files are pinned
+# by the commit of the release tag (cpanel, dokuwiki, drupal, phpbb, xenforo v1.0.0, nextcloud v1.7.1, phpmyadmin
+# v1.1.0, wordpress v1.2.0).
+crs-plugin-cpanel-config any f4c93c6b8c404237b4ac7a01332476827982216f3e39dbb1f9735045e0cc6ce4 https://raw.githubusercontent.com/coreruleset/cpanel-rule-exclusions-plugin/2fd1cab8706c760fe9cdccf55afe75b94a66f89f/plugins/cpanel-rule-exclusions-config.conf
+crs-plugin-cpanel-before any 8433fce90b44fd6adfdda9b68f2cb9d1c8f81c4c26af586eeaf1d0648d510726 https://raw.githubusercontent.com/coreruleset/cpanel-rule-exclusions-plugin/2fd1cab8706c760fe9cdccf55afe75b94a66f89f/plugins/cpanel-rule-exclusions-before.conf
+crs-plugin-dokuwiki-config any 921dc270f6709e8c27db23b2d845bb8702bf8862584497f4c6a6ee99dab5c762 https://raw.githubusercontent.com/coreruleset/dokuwiki-rule-exclusions-plugin/00996762a746ecfe85d6ccc022f2a3efb44377a7/plugins/dokuwiki-rule-exclusions-config.conf
+crs-plugin-dokuwiki-before any ba93cc37f8c6a101b13fa8681eff740fd0c4235a9dcf6a0a1fb63be98dc5aa74 https://raw.githubusercontent.com/coreruleset/dokuwiki-rule-exclusions-plugin/00996762a746ecfe85d6ccc022f2a3efb44377a7/plugins/dokuwiki-rule-exclusions-before.conf
+crs-plugin-drupal-config any 01ee7ff94b101c42dbb7117a73af6d3bc3327fc24a92cd774be3623f45d8df9f https://raw.githubusercontent.com/coreruleset/drupal-rule-exclusions-plugin/6771319cf184690d33d3251e3dac76e39c54c7f6/plugins/drupal-rule-exclusions-config.conf
+crs-plugin-drupal-before any 1c529d96f4df82bf57edc64ce7541b25923b608d020ebf42fd635d0717d5dcac https://raw.githubusercontent.com/coreruleset/drupal-rule-exclusions-plugin/6771319cf184690d33d3251e3dac76e39c54c7f6/plugins/drupal-rule-exclusions-before.conf
+crs-plugin-nextcloud-config any 17ed8c7826c3351d8f86683a9898b88aca89311fc140f8e319d10c797d5be11a https://raw.githubusercontent.com/coreruleset/nextcloud-rule-exclusions-plugin/d907a20c7ca9c27d5666185c8ffab58f859d4832/plugins/nextcloud-rule-exclusions-config.conf
+crs-plugin-nextcloud-before any 5f398812bfec2c9d21dcad3b7898065cdfa4721cdf980bfe487e988cc4729aab https://raw.githubusercontent.com/coreruleset/nextcloud-rule-exclusions-plugin/d907a20c7ca9c27d5666185c8ffab58f859d4832/plugins/nextcloud-rule-exclusions-before.conf
+crs-plugin-phpbb-config any 22923096d7705354d29619f62f7dbc93a8e7ea59d2fe98f1b986665fb588c3f4 https://raw.githubusercontent.com/coreruleset/phpbb-rule-exclusions-plugin/5f1e03417cd73f1a5f22040bf06680e86e49d71e/plugins/phpbb-rule-exclusions-config.conf
+crs-plugin-phpbb-before any 60ab969d01444d1e3dd634057d8a823a34bf53ec46290d383d740784e34c887a https://raw.githubusercontent.com/coreruleset/phpbb-rule-exclusions-plugin/5f1e03417cd73f1a5f22040bf06680e86e49d71e/plugins/phpbb-rule-exclusions-before.conf
+crs-plugin-phpmyadmin-config any 3e96eacb813a6fd9b70c8854c59c5a57b05044a8edbac172fb3fe0880c40c001 https://raw.githubusercontent.com/coreruleset/phpmyadmin-rule-exclusions-plugin/6629e888b9f9fee9ae8288a335233e2f37a5c0a5/plugins/phpmyadmin-rule-exclusions-config.conf
+crs-plugin-phpmyadmin-before any 955b2804d353990b1a855c07335a14cc20cf837a5f1176c7196ee12dbad644e2 https://raw.githubusercontent.com/coreruleset/phpmyadmin-rule-exclusions-plugin/6629e888b9f9fee9ae8288a335233e2f37a5c0a5/plugins/phpmyadmin-rule-exclusions-before.conf
+crs-plugin-phpmyadmin-after any 278bc3558d66289510aff703a7fc9d42e1c032baf09eebe767c89aeec373454c https://raw.githubusercontent.com/coreruleset/phpmyadmin-rule-exclusions-plugin/6629e888b9f9fee9ae8288a335233e2f37a5c0a5/plugins/phpmyadmin-rule-exclusions-after.conf
+crs-plugin-wordpress-config any cdffad1a5410057a06cc2ce0489c470f77c69af876d79536f5f34e88c00bced2 https://raw.githubusercontent.com/coreruleset/wordpress-rule-exclusions-plugin/161bb90bb0d543f805fc6cd966a7c53a2e5b08de/plugins/wordpress-rule-exclusions-config.conf
+crs-plugin-wordpress-before any d6bb0e6a2848e6d39e73818537b21058c61a2b80a7b9e0de79fe2b3238eb9076 https://raw.githubusercontent.com/coreruleset/wordpress-rule-exclusions-plugin/161bb90bb0d543f805fc6cd966a7c53a2e5b08de/plugins/wordpress-rule-exclusions-before.conf
+crs-plugin-xenforo-config any dcd4091a4b611931715f9b6a4c10a02210d617a810f044ef8e7d16fc9a6b6253 https://raw.githubusercontent.com/coreruleset/xenforo-rule-exclusions-plugin/193288ac2faa8ccbc4d86cdf829047f477812f28/plugins/xenforo-rule-exclusions-config.conf
+crs-plugin-xenforo-before any f65f5600d9cb2004291013461fd206dd7cf2743398e8e40e5285f0588c0d6df3 https://raw.githubusercontent.com/coreruleset/xenforo-rule-exclusions-plugin/193288ac2faa8ccbc4d86cdf829047f477812f28/plugins/xenforo-rule-exclusions-before.conf

@@ -17,14 +17,12 @@ lss_test_setup() {
 	export LSS_COLOR=never
 	export LSS_VERSION=0.0.0-test
 	export STUB_LOG=${BATS_TEST_TMPDIR}/stub.log
-	# Systems without SELinux unless a test switches it on.
-	export STUB_EXIT_selinuxenabled=1
 	export PATH="${REPO_ROOT}/tests/fixtures/bin:${PATH}"
 	OWNER="$(id -un):$(id -gn)"
 	export OWNER
 	: >"${STUB_LOG}"
 	local library
-	for library in log os config files template secrets state pkg repo fetch service firewall module ui; do
+	for library in log os config files template secrets state pkg repo fetch service firewall web module ui; do
 		# shellcheck source=/dev/null
 		source "${REPO_ROOT}/lib/${library}.sh"
 	done

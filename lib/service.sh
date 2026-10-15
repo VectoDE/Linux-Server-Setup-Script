@@ -4,6 +4,10 @@
 
 # systemd helpers.
 
+# Seconds lss waits for a unit to start. Some units (MySQL) wait for their service without a limit; a service that
+# never reports ready would stop the run for good.
+SVC_START_TIMEOUT=${SVC_START_TIMEOUT:-300}
+
 svc_exists() {
 	systemctl list-unit-files --no-legend "$1" "$1.service" 2>/dev/null | grep -q .
 	return
@@ -25,7 +29,7 @@ svc_enable() {
 	if svc_is_enabled "${unit}" && svc_is_active "${unit}"; then
 		return 0
 	fi
-	systemctl enable --now "${unit}" >/dev/null 2>&1 || {
+	timeout "${SVC_START_TIMEOUT}" systemctl enable --now "${unit}" >/dev/null 2>&1 || {
 		systemctl status --no-pager "${unit}" >&2 || true
 		journalctl -u "${unit}" -n 30 --no-pager >&2 || true
 		die "Could not start ${unit}."
@@ -55,7 +59,7 @@ svc_disable() {
 }
 
 svc_restart() {
-	systemctl restart "$1" || {
+	timeout "${SVC_START_TIMEOUT}" systemctl restart "$1" || {
 		systemctl status --no-pager "$1" >&2 || true
 		journalctl -u "$1" -n 30 --no-pager >&2 || true
 		return 1
@@ -63,7 +67,7 @@ svc_restart() {
 }
 
 svc_reload() {
-	systemctl reload-or-restart "$1" || {
+	timeout "${SVC_START_TIMEOUT}" systemctl reload-or-restart "$1" || {
 		systemctl status --no-pager "$1" >&2 || true
 		return 1
 	}
@@ -105,6 +109,41 @@ svc_wait_port() {
 	return 1
 }
 
+_svc_selinux_on() {
+	command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled
+}
+
+# _svc_selinux_nnp UNIT: under SELinux a confined service enters its own domain on exec (httpd_t, postgresql_t).
+# NoNewPrivileges blocks that change wherever the policy does not allow it (avc: nnp_transition); systemd also implies
+# NoNewPrivileges for a service with User= and the sandbox's system call settings. The service then stays in init_t,
+# which may not read its own files and is less confined than its domain. For a UNIT whose program carries an
+# entrypoint label (TYPE_exec_t), a policy module of lss (lss_nnp_TYPE) lets systemd start TYPE_t with
+# NoNewPrivileges, so the sandbox stays whole.
+_svc_selinux_nnp() {
+	local unit=$1 program type domain module dir
+	_svc_selinux_on || return 0
+	program=$(systemctl show -P ExecStart "${unit}" 2>/dev/null | sed -n 's/^{ path=\([^ ;]*\) .*/\1/p' | head -n 1) || true
+	# A module may sandbox its unit before the package brings the program; it calls svc_sandbox again after the
+	# installation, and the module follows then.
+	[[ -n ${program} && -e ${program} ]] || return 0
+	type=$(stat -c %C "${program}" 2>/dev/null | cut -d : -f 3) || true
+	[[ ${type} == ?*_exec_t ]] || return 0
+	domain=${type%_exec_t}_t
+	module=lss_nnp_${type%_exec_t}
+	if semodule -l 2>/dev/null | awk '{ print $1 }' | grep -qxF "${module}"; then
+		return 0
+	fi
+	dir=$(mktemp -d)
+	printf '(allow init_t %s (process2 (nnp_transition nosuid_transition)))\n' "${domain}" >"${dir}/${module}.cil"
+	if ! log_command semodule -i "${dir}/${module}.cil"; then
+		rm -rf -- "${dir}"
+		die "${unit}: SELinux does not take the policy module ${module} that lets systemd start ${domain}; see the log."
+	fi
+	rm -rf -- "${dir}"
+	files_note_change "SELinux module ${module}: systemd starts ${domain} with NoNewPrivileges"
+	return
+}
+
 # svc_scanner_sandbox full|strict [PATH...]: [Service] lines that confine lss's own scanner units. They read the whole
 # system but write only to the PATHs (with strict) or below /var (with full). The real /tmp, /proc/kallsyms, the
 # kernel modules and the kernel log stay visible: a private /tmp would hide it from ClamAV and rkhunter, and rkhunter,
@@ -112,9 +151,9 @@ svc_wait_port() {
 svc_scanner_sandbox() {
 	local level=$1 path nnp=yes
 	shift
-	# Under SELinux a scanner enters its own domain (aide_t, antivirus_t) on exec. NoNewPrivileges blocks that change;
-	# the scanner then stays in init_t, which may not write its reports.
-	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+	# Under SELinux a scanner enters its own domain (aide_t, antivirus_t) when lss's wrapper runs it. NoNewPrivileges
+	# blocks that change; the scanner then stays in init_t, which may not write its reports.
+	if _svc_selinux_on; then
 		nnp=no
 	fi
 	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=${nnp}" ProtectControlGroups=yes \
@@ -124,6 +163,54 @@ svc_scanner_sandbox() {
 		printf 'ReadWritePaths=-%s\n' "${path}"
 	done
 	return
+}
+
+# svc_sandbox UNIT [DIRECTIVE...]: confines a service with a drop-in (lss-sandbox.conf): read-only system, no home
+# directories, a private /tmp and /dev, no kernel tunables, modules or logs, no new privileges (see _svc_selinux_nnp for
+# SELinux). DIRECTIVEs follow the baseline, so a service adds the paths it writes (ReadWritePaths=/var/lib/NAME) or
+# relaxes a setting it cannot live with (PrivateDevices=no); for single-value settings the last assignment wins.
+svc_sandbox() {
+	local unit=$1 directive
+	shift
+	_svc_selinux_nnp "${unit}"
+	{
+		printf '# Managed by lss (module %s). Sandbox of %s.\n[Service]\n' "${LSS_MODULE:-lss}" "${unit}"
+		printf '%s\n' NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
+			ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes ProtectControlGroups=yes \
+			ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
+			LockPersonality=yes SystemCallArchitectures=native \
+			'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' ReadWritePaths=-/var/log ReadWritePaths=-/run
+		for directive in "$@"; do
+			printf '%s\n' "${directive}"
+		done
+	} | svc_dropin "${unit}" lss-sandbox
+	return
+}
+
+# Settings that turn off every part of the svc_sandbox baseline that needs a mount namespace (the empty ReadWritePaths=
+# clears the list). An AppArmor profile without attach_disconnected cannot name paths seen from such a namespace and
+# refuses the service its systemd notification socket; that profile confines the files of the service instead.
+# shellcheck disable=SC2034 # read by modules
+SVC_SANDBOX_NO_MOUNTS=(ProtectSystem=no ProtectHome=no PrivateTmp=no PrivateDevices=no ProtectKernelTunables=no
+	ProtectKernelModules=no ProtectKernelLogs=no ProtectControlGroups=no ProtectHostname=no ReadWritePaths=)
+
+# svc_apparmor_confined PROGRAM: whether an enforcing AppArmor profile confines PROGRAM. Without a readable profile
+# list (in a container, whose processes the host's profiles still confine) the label of a running PROGRAM tells;
+# anything else counts as unconfined, so the full sandbox stays.
+svc_apparmor_confined() {
+	local enabled=${SVC_APPARMOR_ENABLED:-/sys/module/apparmor/parameters/enabled}
+	local profiles=${SVC_APPARMOR_PROFILES:-/sys/kernel/security/apparmor/profiles}
+	local proc=${SVC_PROC:-/proc} pid label
+	[[ $(cat "${enabled}" 2>/dev/null) == Y ]] || return 1
+	if [[ -r ${profiles} ]]; then
+		grep -qxF "$1 (enforce)" "${profiles}"
+		return
+	fi
+	for pid in $(pidof "$1" 2>/dev/null); do
+		label=$(cat "${proc}/${pid}/attr/apparmor/current" 2>/dev/null || cat "${proc}/${pid}/attr/current" 2>/dev/null) || continue
+		[[ ${label} == "$1 (enforce)" ]] && return 0
+	done
+	return 1
 }
 
 # svc_unit UNIT: writes /etc/systemd/system/UNIT (a unit of lss's own) from stdin and reloads systemd when it

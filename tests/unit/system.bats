@@ -33,6 +33,15 @@ calls() {
 	[ "$(files_changes_of core)" = 0 ]
 }
 
+@test "apt output drops the notices that report nothing to do and keeps the exit status" {
+	use_os ubuntu-24.04
+	export STUB_OUT_apt_get=$'No services need to be restarted.\nSetting up nginx (1.24.0)\nNo containers need to be restarted.\nNo user sessions are running outdated binaries.\nNo VM guests are running outdated hypervisor (qemu) binaries on this host.\nNot building database; man-db/auto-update is not \'true\'.'
+	export STUB_EXIT_apt_get=100
+	run _pkg_apt install nginx
+	[ "${status}" -eq 100 ]
+	[ "${output}" = 'Setting up nginx (1.24.0)' ]
+}
+
 @test "dnf is used on the RHEL family and family lists pick the right names" {
 	use_os rocky-9
 	export STUB_EXIT_rpm=1
@@ -443,6 +452,23 @@ EOF
 	grep -qxF 'gpgkey=file:///etc/pki/rpm-gpg/lss-demo.asc' "${writes}"
 }
 
+@test "repo_add uses the RPM key of vendors that sign packages with another key" {
+	repo_root
+	printf 'RPMKEYDATA\n' >"${LSS_ROOT}/data/keys/demo-rpm.asc"
+	printf 'KEY=demo.asc\nFINGERPRINTS=BBBB2222\nRPM_KEY=demo-rpm.asc\nRPM_FINGERPRINTS=AAAA1111\n' >"${LSS_ROOT}/data/repos/split.conf"
+	printf 'DEB_URL=https://repo.example.invalid\nDEB_SUITE=stable\nDEB_COMPONENTS=main\n' >>"${LSS_ROOT}/data/repos/split.conf"
+	printf 'RPM_BASEURL=https://repo.example.invalid/el\n' >>"${LSS_ROOT}/data/repos/split.conf"
+	use_os rocky-9
+	repo_add split
+	grep -qxF 'RPMKEYDATA' "${BATS_TEST_TMPDIR}/writes"
+	run ! grep -qxF 'KEYDATA' "${BATS_TEST_TMPDIR}/writes"
+	# The apt key is pinned to BBBB2222, which the key stub does not contain.
+	use_os debian-12
+	run repo_add split
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Refusing repository split"* ]]
+}
+
 @test "repo_add refuses unknown repositories, foreign keys and missing packages" {
 	repo_root
 	use_os debian-12
@@ -571,6 +597,87 @@ EOF
 	[ "${status}" -eq 0 ]
 	grep -qxF 'NoNewPrivileges=no' <<<"${output}"
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+}
+
+@test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {
+	# shellcheck disable=SC2329 # called by the function under test
+	svc_dropin() {
+		printf '== %s %s\n' "$1" "$2"
+		cat
+	}
+	run svc_sandbox demo.service ReadWritePaths=-/var/lib/demo PrivateDevices=no
+	[ "${status}" -eq 0 ]
+	[ "${lines[0]}" = '== demo.service lss-sandbox' ]
+	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	grep -qxF 'ProtectSystem=strict' <<<"${output}"
+	[ "${lines[-2]}" = 'ReadWritePaths=-/var/lib/demo' ]
+	[ "${lines[-1]}" = 'PrivateDevices=no' ]
+	# Under SELinux a program with an entrypoint label of its own enters its domain (postgresql_t), which NoNewPrivileges
+	# would block: a policy module lets systemd start that domain, once, and NoNewPrivileges stays.
+	export STUB_EXIT_selinuxenabled=0
+	local label=system_u:object_r:postgresql_exec_t:s0 modules='' postgres=${BATS_TEST_TMPDIR}/postgres
+	# shellcheck disable=SC2329 # called by the function under test
+	systemctl() {
+		printf '{ path=%s ; argv[]=%s -D /var/lib/pgsql/data ; ignore_errors=no }\n' "${postgres}" "${postgres}"
+	}
+	# shellcheck disable=SC2329
+	stat() {
+		[[ ${*: -1} == "${postgres}" ]] && printf '%s\n' "${label}"
+	}
+	# Before the package brings the program there is nothing to label; the module calls svc_sandbox again later.
+	svc_sandbox postgresql.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+	touch "${postgres}"
+	# shellcheck disable=SC2329
+	semodule() {
+		if [[ $1 == -l ]]; then
+			printf '%s\n' "${modules}"
+		else
+			printf 'semodule %s %s\n' "$1" "${2##*/}" >>"${STUB_LOG}"
+			cat "$2" >>"${STUB_LOG}"
+		fi
+	}
+	svc_sandbox postgresql.service >"${BATS_TEST_TMPDIR}/dropin"
+	grep -qxF 'NoNewPrivileges=yes' "${BATS_TEST_TMPDIR}/dropin"
+	grep -qxF 'semodule -i lss_nnp_postgresql.cil' "${STUB_LOG}"
+	grep -qxF '(allow init_t postgresql_t (process2 (nnp_transition nosuid_transition)))' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	modules='lss_nnp_postgresql'
+	svc_sandbox postgresql.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+	# A program without a domain of its own (bin_t) stays in init_t; there is nothing to allow.
+	label=system_u:object_r:bin_t:s0
+	modules=''
+	svc_sandbox pgadmin.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+}
+
+@test "svc_apparmor_confined needs an enforcing profile, from the list or the label of a running process" {
+	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/enabled SVC_APPARMOR_PROFILES=${BATS_TEST_TMPDIR}/profiles
+	export SVC_PROC=${BATS_TEST_TMPDIR}/proc
+	# shellcheck disable=SC2329 # called by svc_apparmor_confined
+	pidof() {
+		printf '%s\n' "${TEST_PIDS:-}"
+		return
+	}
+	run svc_apparmor_confined /usr/sbin/mysqld
+	[ "${status}" -eq 1 ]
+	echo Y >"${SVC_APPARMOR_ENABLED}"
+	# No profile list and no running process: unconfined, the full sandbox stays.
+	run svc_apparmor_confined /usr/sbin/mysqld
+	[ "${status}" -eq 1 ]
+	mkdir -p "${SVC_PROC}/42/attr"
+	echo '/usr/sbin/mysqld (complain)' >"${SVC_PROC}/42/attr/current"
+	TEST_PIDS=42 run svc_apparmor_confined /usr/sbin/mysqld
+	[ "${status}" -eq 1 ]
+	echo '/usr/sbin/mysqld (enforce)' >"${SVC_PROC}/42/attr/current"
+	TEST_PIDS=42 svc_apparmor_confined /usr/sbin/mysqld
+	printf '/usr/sbin/chronyd (enforce)\n/usr/sbin/mysqld (complain)\n' >"${SVC_APPARMOR_PROFILES}"
+	run svc_apparmor_confined /usr/sbin/mysqld
+	[ "${status}" -eq 1 ]
+	printf '/usr/sbin/mysqld (enforce)\n' >>"${SVC_APPARMOR_PROFILES}"
+	svc_apparmor_confined /usr/sbin/mysqld
+	[[ " ${SVC_SANDBOX_NO_MOUNTS[*]} " == *' ProtectSystem=no '*' ReadWritePaths= '* ]]
 }
 
 @test "fw_ssh_port falls back to 22 when sshd fails" {

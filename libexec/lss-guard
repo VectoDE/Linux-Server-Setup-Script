@@ -9,7 +9,7 @@
 # Checks: lss verify of every installed module (failed modules and files changed outside lss are configured again
 # when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, vulnerable packages (debsecan
 # on Debian, dnf updateinfo on the RHEL family), failed SSH logins and active bans, the results of the daily AIDE,
-# rkhunter and ClamAV runs, the Lynis hardening index.
+# rkhunter and ClamAV runs, the Lynis hardening index, certificates that expire soon.
 # Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
 # Notes (logins, bans) are part of the summary but do not make the run fail.
 set -Eeuo pipefail
@@ -19,6 +19,7 @@ CONF=${LSS_GUARD_CONF:-/etc/lss/guard.conf}
 LSS=${LSS_GUARD_LSS:-/usr/local/sbin/lss}
 STATE_DIR=${LSS_STATE_DIR:-/var/lib/lss}
 OS_RELEASE=${LSS_OS_RELEASE:-/etc/os-release}
+TLS_DIR=${LSS_TLS_DIR:-/etc/lss/tls}
 # Global also when the script is sourced inside a function (the unit tests).
 declare -ga FINDINGS=() FIXED=() NOTES=()
 
@@ -246,6 +247,22 @@ check_lynis() {
 	fi
 }
 
+# Certificates below the TLS directory that expire within 14 days: certbot renews 30 days ahead, so this means the
+# renewal fails (DNS, port 80, rate limit).
+check_certificates() {
+	local cert name end
+	for cert in "${TLS_DIR}"/*/fullchain.pem; do
+		[[ -f ${cert} ]] || continue
+		if ! openssl x509 -checkend $((14 * 86400)) -noout -in "${cert}" >/dev/null 2>&1; then
+			name=${cert%/fullchain.pem}
+			name=${name##*/}
+			end=$(openssl x509 -enddate -noout -in "${cert}" 2>/dev/null | cut -d '=' -f 2-)
+			finding "Certificate ${name} expires ${end:-soon}; renewal does not work (journalctl -u certbot*)."
+		fi
+	done
+	return
+}
+
 json_escape() {
 	local text=$1
 	text=${text//\\/\\\\}
@@ -293,6 +310,7 @@ main() {
 	check_bans
 	check_scanners
 	check_lynis
+	check_certificates
 	local summary host
 	host=$(hostname -f 2>/dev/null || hostname)
 	if [[ ${#FINDINGS[@]} -eq 0 && ${#FIXED[@]} -eq 0 ]]; then

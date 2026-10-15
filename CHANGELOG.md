@@ -24,6 +24,20 @@ now or later.
   `rkhunter`, `clamav`, `lynis`, `usbguard` and `guard`, which checks the server on a timer, repairs drift and
   sends notifications.
 - Profile `minimal-secure`.
+- Web modules: `nginx`, `apache` and `caddy` (one of them owns ports 80 and 443), `tls` (certbot with a deploy hook
+  that installs every certificate for the web server and reloads it), `vhost` (static, PHP and reverse-proxy sites,
+  each with its own certificate) and `haproxy` (load balancing of TCP services with health checks).
+- Runtime modules: `php` (PHP-FPM with a hardened, sandboxed pool on the web servers' socket), `composer`, `node`
+  (NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK, Temurin where missing), `go` (official
+  archive) and `dotnet` (.NET SDK, telemetry off), all from repositories with pinned keys or checksum-verified
+  downloads.
+- `modsecurity`: the ModSecurity web application firewall with the OWASP Core Rule Set for nginx and Apache on every
+  supported system, with a module built from verified sources where the distribution has none.
+- Database modules: `mariadb`, `mysql`, `postgresql`, `redis`, `valkey` and `mongodb`, on localhost with hardened
+  authentication, optional databases and least-privilege users; root or admin accounts never exist without a password.
+- Profiles `webhosting` and `all`.
+- Database tools: `phpmyadmin`, `adminer` and `pgadmin` on the admin port of the web server, from checksum-verified
+  downloads, limited to the local database servers; pgAdmin runs as its own sandboxed service.
 - A warning for every setting that no module reads, so a misspelt key does not silently fall back to the default.
 - Quiet output: the output of apt, dnf and long-running tools such as the AIDE database build goes to the run log,
   and appears on the terminal only with `--verbose` or, with its last 40 lines, when the command fails.

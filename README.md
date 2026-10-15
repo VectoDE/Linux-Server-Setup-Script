@@ -69,6 +69,38 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
 | `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
 
+Web, runtime and database modules, measured the same way. Modules that only work together are tested together; their
+row is the cost of the whole set, including the web server or PHP it needs.
+
+| Modules tested together            | Install and verify | Peak RAM                    | Disk    | While running                         |
+| ---------------------------------- | ------------------ | --------------------------- | ------- | ------------------------------------- |
+| `nginx` `tls` `vhost`              | 50 s               | 640 MiB (dnf), else 270 MiB | 235 MiB | nginx, renewal timer                  |
+| `apache` `tls` `vhost`             | 60 s               | 370 MiB                     | 170 MiB | Apache, renewal timer                 |
+| `caddy` `tls` `vhost`              | 30 s               | 210 MiB                     | 110 MiB | Caddy, renewal timer                  |
+| `haproxy`                          | 10 s               | 215 MiB                     | 10 MiB  | haproxy                               |
+| `nginx` `modsecurity`              | 155 s (build)      | 1.5 GiB                     | 55 MiB  | nginx with the Core Rule Set          |
+| `apache` `modsecurity`             | 45 s               | 310 MiB                     | 110 MiB | Apache with the Core Rule Set         |
+| `nginx` `php`                      | 30 s               | 275 MiB                     | 125 MiB | nginx, PHP-FPM                        |
+| `php` `composer`                   | 40 s               | 305 MiB                     | 285 MiB | PHP-FPM                               |
+| `node`                             | 15 s               | 435 MiB                     | 285 MiB | –                                     |
+| `python`                           | 30 s               | 755 MiB (dnf), else 145 MiB | 90 MiB  | –                                     |
+| `java`                             | 30 s               | 485 MiB                     | 735 MiB | –                                     |
+| `go`                               | 10 s               | 255 MiB                     | 285 MiB | –                                     |
+| `dotnet`                           | 25 s               | 480 MiB                     | 690 MiB | –                                     |
+| `ruby`                             | 15 s               | 265 MiB                     | 265 MiB | –                                     |
+| `mariadb`                          | 25 s               | 470 MiB                     | 455 MiB | mariadbd                              |
+| `mysql`                            | 40 s               | 900 MiB                     | 1.2 GiB | mysqld                                |
+| `postgresql`                       | 25 s               | 300 MiB                     | 305 MiB | postgres                              |
+| `redis`                            | 15 s               | 165 MiB                     | 95 MiB  | redis-server                          |
+| `valkey`                           | 10 s               | 165 MiB                     | 85 MiB  | valkey-server                         |
+| `mongodb`                          | 25 s               | 820 MiB                     | 780 MiB | mongod                                |
+| `nginx` `php` `mariadb` `phpmyadmin` | 45 s               | 385 MiB                     | 170 MiB | nginx, PHP-FPM, mariadbd              |
+| `caddy` `php` `adminer`            | 35 s               | 240 MiB                     | 135 MiB | Caddy, PHP-FPM                        |
+| `apache` `postgresql` `pgadmin`    | 70 s               | 500 MiB                     | 705 MiB | Apache, pgAdmin (gunicorn), postgres  |
+
+`nginx` `modsecurity` builds libmodsecurity and the nginx module from source on the first install; that is where the
+time and the peak memory go. Later runs reuse the build.
+
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
 
 ## Quick start
@@ -118,6 +150,8 @@ LSS_SSH_HARDENING_PORT=2222
 LSS_TIME_TIMEZONE=Europe/Berlin
 LSS_FIREWALL_ALLOW=8443/tcp 51820/udp
 LSS_GUARD_WEBHOOK=https://ntfy.sh/your-topic
+LSS_TLS_DOMAINS=server.example.com
+LSS_VHOST_SITES=shop:php:shop.example.com,www.shop.example.com api:proxy:api.example.com:http://127.0.0.1:3000
 ```
 
 `--set` wins over the environment, which wins over the file, which wins over the profile, which wins over the
@@ -133,9 +167,37 @@ change, run `lss configure MODULE`.
 (AppArmor or SELinux), `auditd`, `auto-updates`, `password-policy`, `aide`, `rkhunter`, `clamav`, `lynis`,
 `usbguard`, `guard`.
 
+**Web:** `nginx`, `apache` or `caddy`, `tls` (certificates from Let's Encrypt), `vhost` (sites), `haproxy`,
+`modsecurity` (web application firewall with the OWASP Core Rule Set for nginx or Apache).
+
+**Runtimes:** `php` (PHP-FPM with a hardened pool for the web server), `composer`, `node` (Node.js 22, 24 or 26 from
+NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK 21, Temurin where the distribution has
+none), `go` (official archive), `dotnet` (.NET SDK 10, telemetry off). `LSS_PHP_VERSION`, `LSS_NODE_VERSION`,
+`LSS_JAVA_VERSION` and `LSS_DOTNET_VERSION` pick another version.
+
+**Databases:** `mariadb` or `mysql`, `postgresql`, `redis` or `valkey`, `mongodb`. Each listens on localhost only,
+with hardened authentication and optional databases and users (`LSS_<ENGINE>_USERS=user:database`, the password with
+`lss secrets show <engine>-user-<user>`). `access=vpn` or `public` opens the port.
+
+**Database tools:** `phpmyadmin`, `adminer` (only the local database servers) and `pgadmin` (its own service; the
+first password with `lss secrets show pgadmin-admin-password`), all on the admin port.
+
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
-and where lss deliberately deviates. Web servers, runtimes, databases, containers, backup, monitoring and mail follow
-as further module groups.
+and where lss deliberately deviates. Containers, backup, monitoring and mail follow as further module groups.
+
+### Web sites
+
+One web server owns ports 80 and 443. It answers only for the sites you set up; requests for any other host name get
+no answer, and port 80 serves nothing but ACME challenges and redirects to HTTPS. A site is one entry in
+`LSS_VHOST_SITES`: a name, `static`, `php` or `proxy`, its host names and, if needed, a document root or backend URL.
+With the `tls` module each site gets its own certificate from Let's Encrypt; until it arrives, and without `tls`, the
+site uses a self-signed certificate. The names must point to the server and port 80 must be reachable from the
+internet for Let's Encrypt to issue one.
+
+Admin interfaces such as phpMyAdmin listen on `127.0.0.1:8090`. Reach them through an SSH tunnel
+(`ssh -L 8090:127.0.0.1:8090 server`, then `http://localhost:8090/phpmyadmin/`) or set
+`LSS_<SERVER>_ADMIN_PUBLIC=true` to publish port 8090 with TLS and the password from
+`lss secrets show web-admin-password`.
 
 ## Guard
 

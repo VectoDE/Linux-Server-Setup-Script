@@ -9,17 +9,34 @@ LSS_PKG_UPDATED=${LSS_PKG_UPDATED:-0}
 
 # DPkg::Lock::Timeout waits for unattended-upgrades or apt-daily instead of failing on their lock; they start on
 # their own on a fresh server and as soon as the auto-updates module enables them.
+# The filter drops the notices that report nothing to do: the needrestart summaries and the man-db trigger on images
+# that switched off man-db/auto-update. Errors and everything else stay in the log.
 _pkg_apt() {
 	DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q -o DPkg::Lock::Timeout=600 \
-		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
-	return
+		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@" 2>&1 |
+		sed -E '/^(No (services|containers) need to be restarted\.|No user sessions are running outdated binaries\.|No VM guests are running outdated hypervisor|Not building database; man-db\/auto-update is not)/d'
+	return "${PIPESTATUS[0]}"
+}
+
+# Mirrors of the RHEL family drop out for minutes at a time; dnf gives up on the first broken mirror list, so a
+# failed transaction is tried again with fresh metadata. dnf changes nothing when a transaction fails.
+_pkg_dnf() {
+	local attempt
+	for attempt in 1 2 3; do
+		dnf -y -q "$@" && return 0
+		((attempt < 3)) || break
+		printf 'dnf %s failed (attempt %s of 3); trying again in 20 seconds with fresh metadata.\n' "$1" "${attempt}"
+		dnf -q clean metadata || true
+		sleep 20
+	done
+	return 1
 }
 
 pkg_update() {
 	if os_is_debian; then
 		log_command _pkg_apt update
 	else
-		log_command dnf -y -q makecache
+		log_command _pkg_dnf makecache
 	fi
 	LSS_PKG_UPDATED=1
 	if [[ -n ${LSS_RUN_ID:-} ]]; then
@@ -63,7 +80,7 @@ pkg_install() {
 		pkg_update_once
 		log_command _pkg_apt install --no-install-recommends "${missing[@]}"
 	else
-		log_command dnf -y -q install "${missing[@]}"
+		log_command _pkg_dnf install "${missing[@]}"
 	fi
 	files_note_change "installed ${missing[*]}"
 }
@@ -92,7 +109,7 @@ pkg_remove() {
 		log_command _pkg_apt purge "${present[@]}"
 		log_command _pkg_apt autoremove --purge
 	else
-		log_command dnf -y -q remove "${present[@]}"
+		log_command _pkg_dnf remove "${present[@]}"
 	fi
 	files_note_change "removed ${present[*]}"
 }
@@ -115,7 +132,7 @@ pkg_upgrade() {
 		pkg_update
 		log_command _pkg_apt full-upgrade
 	else
-		log_command dnf -y -q upgrade --refresh
+		log_command _pkg_dnf upgrade --refresh
 	fi
 	return
 }
@@ -126,10 +143,10 @@ pkg_enable_epel() {
 	pkg_is_installed epel-release && return 0
 	if [[ ${OS_ID} == rhel ]]; then
 		subscription-manager repos --enable "codeready-builder-for-rhel-${OS_MAJOR}-$(uname -m)-rpms" >/dev/null 2>&1 || true
-		log_command dnf -y -q install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${OS_MAJOR}.noarch.rpm"
+		log_command _pkg_dnf install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${OS_MAJOR}.noarch.rpm"
 	else
 		dnf config-manager --set-enabled crb >/dev/null 2>&1 || true
-		log_command dnf -y -q install epel-release
+		log_command _pkg_dnf install epel-release
 	fi
 	files_note_change "enabled EPEL"
 }

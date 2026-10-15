@@ -73,6 +73,9 @@ mod_configure() {
 		files_note_change "swap file ${path} (${size} MiB)"
 	fi
 	chmod 600 "${path}"
+	# XFS refuses swapon ("Invalid argument", "is not committed") while the file's blocks or its inode, which chmod
+	# touches as well, are not yet in the journal; the flush comes last.
+	sync -- "${path}"
 	svc_unit "${unit}" <<UNIT
 # Managed by lss (module swap).
 [Unit]

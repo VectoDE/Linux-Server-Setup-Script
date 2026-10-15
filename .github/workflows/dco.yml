@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # Every commit in a pull request must be signed off (Developer Certificate of Origin): the author certifies the right
-# to submit it under the project's license. Commits by bots such as Dependabot are exempt.
+# to submit it under the project's license. Commits by bots such as Dependabot and merge commits are exempt.
 name: DCO
 
 on: pull_request
@@ -33,8 +33,13 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           missing=0
-          while IFS=$'\t' read -r sha login email; do
+          while IFS=$'\t' read -r sha login email parents; do
             case "$login" in *'[bot]') continue ;; esac
+            # Merge commits bring in work that was signed off on its own branch, as with the DCO GitHub App.
+            if ((parents > 1)); then
+              echo "${sha:0:7} is a merge commit"
+              continue
+            fi
             message="$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq .commit.message)"
             if printf '%s\n' "$message" | grep -i '^Signed-off-by:' | grep -qiF "<$email>"; then
               echo "${sha:0:7} signed off by $email"
@@ -43,5 +48,5 @@ jobs:
               missing=1
             fi
           done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
-            --jq '.[] | [.sha, (.author.login // ""), .commit.author.email] | @tsv')
+            --jq '.[] | [.sha, (.author.login // ""), .commit.author.email, (.parents | length)] | @tsv')
           exit "$missing"

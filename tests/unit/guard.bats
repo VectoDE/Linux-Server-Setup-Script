@@ -122,3 +122,17 @@ journalctl() {
 	grep -q -- '_COMM=sshd _COMM=sshd-session _UID=0' "${STUB_LOG}"
 	run ! grep -q -- '-t sshd' "${STUB_LOG}"
 }
+
+@test "a certificate close to its end is a finding, a fresh one is not" {
+	command -v openssl >/dev/null || skip 'openssl is not installed'
+	export LSS_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	TLS_DIR=${LSS_TLS_DIR}
+	mkdir -p "${TLS_DIR}/old" "${TLS_DIR}/fresh"
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3 -subj /CN=old.test \
+		-keyout "${TLS_DIR}/old/privkey.pem" -out "${TLS_DIR}/old/fullchain.pem" 2>/dev/null
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 90 -subj /CN=fresh.test \
+		-keyout "${TLS_DIR}/fresh/privkey.pem" -out "${TLS_DIR}/fresh/fullchain.pem" 2>/dev/null
+	check_certificates
+	[ "${#FINDINGS[@]}" -eq 1 ]
+	[[ ${FINDINGS[0]} == "Certificate old expires "* ]]
+}

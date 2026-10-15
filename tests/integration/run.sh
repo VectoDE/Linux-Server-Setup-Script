@@ -7,7 +7,8 @@
 #                   tests/integration/run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]
 #
 # For every module: install (with its requirements), verify, install again (every module in the run must report
-# "unchanged"), and remove. With --profile: install the whole profile, verify, install again, then run the Lynis
+# "unchanged"), and remove. A comma joins modules that are tested together (nginx,tls,vhost: installed at once,
+# removed in reverse order). With --profile: install the whole profile, verify, install again, then run the Lynis
 # audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container),
 # vm-NAME for a KVM virtual machine from tests/integration/vm-images.conf, or "host" for the machine itself (modules
 # that need a real kernel; used on throwaway CI virtual machines only).
@@ -22,8 +23,12 @@ shift
 }
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
+# A run that hangs ends after 40 minutes, so the diagnostics below still show what it waited for.
+LSS_RUN="timeout --kill-after=60 2400 lss"
 # shellcheck source=tests/integration/vm.sh
 source tests/integration/vm.sh
+# shellcheck source=tests/integration/pebble.sh
+source tests/integration/pebble.sh
 
 # Collapsible sections in the GitHub Actions log.
 group_start() {
@@ -79,7 +84,7 @@ start_target() {
 # Fails when a second install changed anything: every step must be idempotent.
 install_again() {
 	local second
-	second=$(in_target "lss --yes --no-color install $* 2>&1") || {
+	second=$(in_target "${LSS_RUN} --yes --no-color install $* 2>&1") || {
 		printf '%s\n' "${second}"
 		exit 1
 	}
@@ -100,11 +105,27 @@ install_again() {
 }
 
 stop_target() {
-	local status=$?
+	local status=$? diagnostics=0
+	# Diagnostics must never end the cleanup early.
+	set +e
 	if [[ ${status} -ne 0 ]]; then
-		group_start "Diagnostics"
-		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null; systemctl --failed --no-pager; journalctl -p warning -n 80 --no-pager' || true
-		group_end
+		echo "Diagnostics (exit status ${status}):"
+		in_target 'tail -n 200 /var/log/lss/*.log 2>/dev/null
+			systemctl --failed --no-pager
+			for unit in $(systemctl list-units --failed --plain --no-legend | cut -d " " -f 1); do
+				echo "--- ${unit}"
+				journalctl -u "${unit}" -n 40 --no-pager
+			done
+			ps -eo pid,ppid,etime,args --forest | tail -n 60
+			tail -n 30 /var/log/mysql/error.log /var/log/mariadb/mariadb.log 2>/dev/null
+			# With auditd running, AppArmor and SELinux denials go to its log instead of the journal.
+			grep -hE "apparmor=\"DENIED\"|avc: +denied" /var/log/audit/audit.log 2>/dev/null | tail -n 30
+			journalctl -p warning -n 80 --no-pager' </dev/null 2>&1 || diagnostics=$?
+		# Containers share the kernel of the runner, whose AppArmor profiles still apply to them.
+		if [[ ${system} != vm-* && ${system} != host ]]; then
+			sudo dmesg 2>/dev/null | grep -F 'apparmor=' | tail -n 30
+		fi
+		echo "Diagnostics finished (status ${diagnostics})."
 	fi
 	if [[ ${system} == vm-* ]]; then
 		vm_stop
@@ -153,17 +174,25 @@ start_target
 
 if [[ $1 == --profile ]]; then
 	profile=${2:?usage: run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]}
+	if grep -qE '^LSS_MODULES=(.* )?tls( |$)' "profiles/${profile}.conf"; then
+		group_start "${system}: Pebble (ACME test server)"
+		pebble_start
+		group_end
+	fi
 	group_start "${system}: profile ${profile}"
+	# A profile runs as on a real server, with the pending updates installed (the module tests skip them for time);
+	# Lynis counts every missing security update.
+	in_target "sed -i 's/^LSS_SYSTEM_UPGRADE=false$/LSS_SYSTEM_UPGRADE=true/' /etc/lss/lss.conf"
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
-	in_target "lss --yes --no-color install --profile ${profile}"
-	in_target "lss --yes --no-color verify"
+	in_target "${LSS_RUN} --yes --no-color install --profile ${profile}"
+	in_target "${LSS_RUN} --yes --no-color verify"
 	resources_report "${system} profile ${profile}" "${before}" "${started}"
 	install_again --profile "${profile}"
 	group_end
 	group_start "${system}: Lynis audit"
-	in_target "lss --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
+	in_target "${LSS_RUN} --yes --no-color --set LSS_LYNIS_MIN_INDEX=${3:-0} audit"
 	group_end
 	# The daily and weekly scans run once inside their systemd sandbox; a path the sandbox blocks fails the unit.
 	group_start "${system}: scheduled scans"
@@ -180,23 +209,38 @@ if [[ $1 == --profile ]]; then
 	# What Lynis would still change, as the starting point for raising the hardening index.
 	group_start "${system}: Lynis details"
 	in_target "grep -iE 'different value than expected|weak configuration state|incorrect file permissions|permissions .* (not|too)|Result: .*(unsafe|not hardened|exposed)' /var/log/lynis.log | sed -E 's/^[0-9: -]+//' | sort -u | head -n 150" || true
+	# The tests that cost hardening points, which is what the index is made of.
+	in_target "awk '/Performing test ID/ { test = \$0; sub(/.*Performing test ID /, \"\", test) }
+		/Hardening: assigned partial number/ { match(\$0, /[(][0-9]+ of [0-9]+[)]/)
+			split(substr(\$0, RSTART + 1, RLENGTH - 2), points, \" \")
+			print \"  -\" (points[3] - points[1]) \" \" test }' /var/log/lynis.log | sort | uniq -c" || true
 	group_end
 	echo "${system}: profile ${profile} passed"
 	exit 0
 fi
 
-for module in "$@"; do
-	group_start "${system}: ${module}"
+# The tls module gets its certificates from Pebble.
+if [[ " $* " == *[\ ,]tls[\ ,]* ]]; then
+	group_start "${system}: Pebble (ACME test server)"
+	pebble_start
+	group_end
+fi
+
+for item in "$@"; do
+	IFS=',' read -ra set <<<"${item}"
+	group_start "${system}: ${set[*]}"
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
-	in_target "lss --yes --no-color install ${module}"
-	in_target "lss --yes --no-color verify"
-	resources_report "${system} ${module}" "${before}" "${started}"
-	install_again "${module}"
+	in_target "${LSS_RUN} --yes --no-color install ${set[*]}"
+	in_target "${LSS_RUN} --yes --no-color verify"
+	resources_report "${system} ${set[*]}" "${before}" "${started}"
+	install_again "${set[@]}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
-		in_target "lss --yes --no-color remove ${module}"
-		in_target "! lss status | grep -q '^${module} '"
+		for ((i = ${#set[@]} - 1; i >= 0; i--)); do
+			in_target "${LSS_RUN} --yes --no-color remove ${set[i]}"
+			in_target "! lss status | grep -q '^${set[i]} '"
+		done
 	fi
 	group_end
 done

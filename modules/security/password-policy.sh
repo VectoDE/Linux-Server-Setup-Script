@@ -48,6 +48,15 @@ _pp_login_defs() {
 	return
 }
 
+# _pp_login_defs_drop KEY: removes KEY from /etc/login.defs.
+_pp_login_defs_drop() {
+	local key=$1 content
+	grep -qE "^[[:space:]]*${key}[[:space:]]" /etc/login.defs || return 0
+	content=$(grep -vE "^[[:space:]]*${key}[[:space:]]" /etc/login.defs)
+	file_write 0644 root:root /etc/login.defs <<<"${content}"
+	return
+}
+
 _pp_faillock_debian() {
 	file_write 0644 root:root /usr/share/pam-configs/lss-faillock <<'EOF'
 Name: Lock accounts after repeated failed logins (lss)
@@ -118,8 +127,17 @@ EOF
 	else
 		_pp_faillock_rhel
 	fi
+	local hash
+	hash=$(_pp_hash)
 	_pp_login_defs PASS_MAX_DAYS "$(opt_int max_days)" PASS_MIN_DAYS 1 PASS_WARN_AGE 14 UMASK 027 \
-		ENCRYPT_METHOD "$(_pp_hash)" SHA_CRYPT_MIN_ROUNDS 100000 SHA_CRYPT_MAX_ROUNDS 100000 YESCRYPT_COST_FACTOR 7
+		ENCRYPT_METHOD "${hash}" SHA_CRYPT_MIN_ROUNDS 100000 SHA_CRYPT_MAX_ROUNDS 100000
+	# YESCRYPT_COST_FACTOR only where yescrypt is the method: the shadow tools of RHEL 9 know neither and complain
+	# about the unknown item on every call (useradd, passwd).
+	if [[ ${hash} == YESCRYPT ]]; then
+		_pp_login_defs YESCRYPT_COST_FACTOR 7
+	else
+		_pp_login_defs_drop YESCRYPT_COST_FACTOR
+	fi
 	local timeout
 	timeout=$(opt_int shell_timeout)
 	file_write 0644 root:root "${PP_PROFILE}" < <(
