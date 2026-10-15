@@ -207,7 +207,7 @@ EOF
 		printf '%s\n' "${TEST_GROUPS}"
 		return
 	}
-	TEST_GROUPS=www-data
+	TEST_GROUPS='www-data'
 	web_group_ensure www-data ghost
 	grep -qxF "groupadd --system ${WEB_GROUP}" "${STUB_LOG}"
 	grep -qxF "usermod --append --groups ${WEB_GROUP} www-data" "${STUB_LOG}"

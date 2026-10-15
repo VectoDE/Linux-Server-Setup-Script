@@ -631,7 +631,7 @@ EOF
 	# shellcheck disable=SC2329
 	semodule() {
 		if [[ $1 == -l ]]; then
-			printf '%s\n' ${modules}
+			printf '%s\n' "${modules}"
 		else
 			printf 'semodule %s %s\n' "$1" "${2##*/}" >>"${STUB_LOG}"
 			cat "$2" >>"${STUB_LOG}"

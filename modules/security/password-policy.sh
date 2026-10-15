@@ -50,9 +50,9 @@ _pp_login_defs() {
 
 # _pp_login_defs_drop KEY: removes KEY from /etc/login.defs.
 _pp_login_defs_drop() {
-	local content
-	grep -qE "^[[:space:]]*$1[[:space:]]" /etc/login.defs || return 0
-	content=$(grep -vE "^[[:space:]]*$1[[:space:]]" /etc/login.defs)
+	local key=$1 content
+	grep -qE "^[[:space:]]*${key}[[:space:]]" /etc/login.defs || return 0
+	content=$(grep -vE "^[[:space:]]*${key}[[:space:]]" /etc/login.defs)
 	file_write 0644 root:root /etc/login.defs <<<"${content}"
 	return
 }
