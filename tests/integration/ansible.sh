@@ -61,6 +61,25 @@ ${address} ansible_user=root ansible_ssh_private_key_file=${work}/id_ed25519 ans
 EOF
 export ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_NOCOLOR=1 ANSIBLE_FORCE_COLOR=0
 
+ssh_works() {
+	ssh -q -i "${work}/id_ed25519" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+		-o ConnectTimeout=10 "root@${address}" true
+	return
+}
+
+# The PAM account stack of the minimal rocky-9 image denies root ("Access denied for user root by PAM account
+# configuration"), which is a property of the container image, not of lss. Where that happens, show the stack and let
+# sshd skip PAM for the test, with the password of root set to "*" (no password, but the account is not locked).
+if ! ssh_works; then
+	in_target "ls -l /etc/pam.d/sshd /etc/pam.d/password-auth; grep -v '^#' /etc/pam.d/sshd
+		grep '^account' /etc/pam.d/password-auth; getent shadow root | cut -d: -f1,3-"
+	in_target "set -e
+		printf 'UsePAM no\n' >/etc/ssh/sshd_config.d/00-lss-test.conf
+		usermod -p '*' root
+		systemctl restart sshd"
+	ssh_works
+fi
+
 play "install lss ${A} and tools" any -e "lss_version=${A}"
 in_target "[[ \$(lss version) == 'lss ${A}' ]] && lss status | grep -E '^tools +installed'"
 play "the same again changes nothing" 0 -e "lss_version=${A}"
