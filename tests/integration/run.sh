@@ -118,6 +118,8 @@ stop_target() {
 			done
 			ps -eo pid,ppid,etime,args --forest | tail -n 60
 			tail -n 30 /var/log/mysql/error.log /var/log/mariadb/mariadb.log 2>/dev/null
+			# With auditd running, AppArmor and SELinux denials go to its log instead of the journal.
+			grep -hE "apparmor=\"DENIED\"|avc: +denied" /var/log/audit/audit.log 2>/dev/null | tail -n 30
 			journalctl -p warning -n 80 --no-pager' </dev/null 2>&1 || diagnostics=$?
 		# Containers share the kernel of the runner, whose AppArmor profiles still apply to them.
 		if [[ ${system} != vm-* && ${system} != host ]]; then
