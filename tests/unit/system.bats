@@ -599,6 +599,26 @@ EOF
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
+@test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {
+	# shellcheck disable=SC2329 # called by the function under test
+	svc_dropin() {
+		printf '== %s %s\n' "$1" "$2"
+		cat
+	}
+	run svc_sandbox demo.service ReadWritePaths=-/var/lib/demo PrivateDevices=no
+	[ "${status}" -eq 0 ]
+	[ "${lines[0]}" = '== demo.service lss-sandbox' ]
+	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	grep -qxF 'ProtectSystem=strict' <<<"${output}"
+	[ "${lines[-2]}" = 'ReadWritePaths=-/var/lib/demo' ]
+	[ "${lines[-1]}" = 'PrivateDevices=no' ]
+	# Under SELinux the service enters its own domain (postgresql_t, haproxy_t), which NoNewPrivileges would block.
+	export STUB_EXIT_selinuxenabled=0
+	run svc_sandbox demo.service
+	grep -qxF 'NoNewPrivileges=no' <<<"${output}"
+	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+}
+
 @test "svc_apparmor_confined needs an enforcing profile, from the list or the label of a running process" {
 	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/enabled SVC_APPARMOR_PROFILES=${BATS_TEST_TMPDIR}/profiles
 	export SVC_PROC=${BATS_TEST_TMPDIR}/proc

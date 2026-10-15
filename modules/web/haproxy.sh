@@ -151,17 +151,11 @@ _haproxy_firewall() {
 
 mod_configure() {
 	local changed=0
-	local -a selinux=()
 	_haproxy_conf | file_write 0644 root:root "${HAPROXY_CONF}"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	_haproxy_selinux
 	_haproxy_firewall
-	# Under SELinux haproxy runs in its own domain (haproxy_t). NoNewPrivileges blocks the change from init_t, unlike for
-	# nginx and Apache, whose domains the policy allows it; in init_t haproxy may not create its admin socket.
-	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
-		selinux=(NoNewPrivileges=no)
-	fi
-	svc_sandbox haproxy.service ReadWritePaths=-/var/lib/haproxy "${selinux[@]}"
+	svc_sandbox haproxy.service ReadWritePaths=-/var/lib/haproxy
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	haproxy -c -q -f "${HAPROXY_CONF}" || die "haproxy: the configuration does not load; see above."
 	svc_enable haproxy

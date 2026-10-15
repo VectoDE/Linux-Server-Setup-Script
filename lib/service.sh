@@ -109,19 +109,26 @@ svc_wait_port() {
 	return 1
 }
 
+# _svc_nnp: yes, or no under SELinux. A confined service enters its own domain on exec (httpd_t, postgresql_t,
+# aide_t); NoNewPrivileges blocks that change wherever the policy does not allow it (avc: nnp_transition), and the
+# service then runs in init_t, which may not touch its own files and is less confined than its domain.
+_svc_nnp() {
+	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+		printf 'no'
+	else
+		printf 'yes'
+	fi
+	return
+}
+
 # svc_scanner_sandbox full|strict [PATH...]: [Service] lines that confine lss's own scanner units. They read the whole
 # system but write only to the PATHs (with strict) or below /var (with full). The real /tmp, /proc/kallsyms, the
 # kernel modules and the kernel log stay visible: a private /tmp would hide it from ClamAV and rkhunter, and rkhunter,
 # AIDE and Lynis check the others.
 svc_scanner_sandbox() {
-	local level=$1 path nnp=yes
+	local level=$1 path
 	shift
-	# Under SELinux a scanner enters its own domain (aide_t, antivirus_t) on exec. NoNewPrivileges blocks that change;
-	# the scanner then stays in init_t, which may not write its reports.
-	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
-		nnp=no
-	fi
-	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=${nnp}" ProtectControlGroups=yes \
+	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=$(_svc_nnp)" ProtectControlGroups=yes \
 		ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
 		LockPersonality=yes SystemCallArchitectures=native
 	for path in "$@"; do
@@ -131,15 +138,15 @@ svc_scanner_sandbox() {
 }
 
 # svc_sandbox UNIT [DIRECTIVE...]: confines a service with a drop-in (lss-sandbox.conf): read-only system, no home
-# directories, a private /tmp and /dev, no kernel tunables, modules or logs, no new privileges. DIRECTIVEs follow the
-# baseline, so a service adds the paths it writes (ReadWritePaths=/var/lib/NAME) or relaxes a setting it cannot live
-# with (PrivateDevices=no); for single-value settings the last assignment wins.
+# directories, a private /tmp and /dev, no kernel tunables, modules or logs, no new privileges (see _svc_nnp for
+# SELinux). DIRECTIVEs follow the baseline, so a service adds the paths it writes (ReadWritePaths=/var/lib/NAME) or
+# relaxes a setting it cannot live with (PrivateDevices=no); for single-value settings the last assignment wins.
 svc_sandbox() {
 	local unit=$1 directive
 	shift
 	{
 		printf '# Managed by lss (module %s). Sandbox of %s.\n[Service]\n' "${LSS_MODULE:-lss}" "${unit}"
-		printf '%s\n' NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
+		printf '%s\n' "NoNewPrivileges=$(_svc_nnp)" ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
 			ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes ProtectControlGroups=yes \
 			ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
 			LockPersonality=yes SystemCallArchitectures=native \
