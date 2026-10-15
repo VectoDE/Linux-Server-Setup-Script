@@ -85,8 +85,27 @@ EOF
 	return
 }
 
+# The netfilter modules dockerd needs (bridge hooks for icc=false and the missing userland proxy, the addrtype match
+# of its NAT rules). On the RHEL family 10 they are in kernel-modules-extra, which cloud images leave out and which
+# iptables no longer pulls in (docker/docker-ce-packaging#1340); the package must match the running kernel.
+_docker_kernel_modules() {
+	local module missing=0
+	[[ -d /lib/modules/$(uname -r) ]] || return 0
+	for module in br_netfilter xt_addrtype; do
+		modprobe -q "${module}" || missing=1
+	done
+	[[ ${missing} == 1 ]] && os_is_rhel || return 0
+	pkg_install "kernel-modules-extra-$(uname -r)"
+	for module in br_netfilter xt_addrtype; do
+		modprobe -q "${module}" ||
+			die "docker: the kernel module ${module} is missing although kernel-modules-extra-$(uname -r) is installed."
+	done
+	return
+}
+
 mod_install() {
 	local -a packages=()
+	_docker_kernel_modules
 	# The settings are in place before the package starts the daemon for the first time.
 	install -d -m 0755 "$(dirname "${DOCKER_CONFIG}")"
 	file_write 0644 root:root "${DOCKER_CONFIG}" < <(_docker_config)
