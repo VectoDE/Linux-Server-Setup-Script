@@ -237,6 +237,7 @@ load_module() {
 	[[ ${output} == *'ssl_server_key_file = /etc/lss/tls/mail/privkey.pem'* ]]
 	[[ ${output} == *'passwd_file_path = /etc/dovecot/lss-users'* ]]
 	[[ ${output} != *mail_location* ]]
+	[[ ${output} == *$'inet_listener imap {\n    listen = 127.0.0.1\n    port = 143'* ]]
 	# shellcheck disable=SC2329 # called by _ms_dovecot_24
 	dovecot() { printf '2.3.21 (47349e2482)\n'; }
 	run _ms_dovecot_conf /etc/lss/tls/mail

@@ -249,8 +249,10 @@ _ms_users_file() {
 
 # _ms_dovecot_conf CERTDIR: the whole dovecot.conf (the distribution's conf.d is not included).
 _ms_dovecot_conf() {
-	local cert=$1 listen='*'
+	local cert=$1 listen='*' address=address
 	[[ $(mail_inet_protocols) == ipv4 ]] || listen='*, ::'
+	# Dovecot 2.4 names the address of a listener "listen".
+	! _ms_dovecot_24 || address=listen
 	printf '# Managed by lss (module mailserver). Change LSS_MAILSERVER_* in /etc/lss/lss.conf and run lss configure mailserver.\n'
 	if _ms_dovecot_24; then
 		cat <<EOF
@@ -332,7 +334,7 @@ namespace inbox {
 # without TLS because the connection does not leave the server.
 service imap-login {
   inet_listener imap {
-    address = 127.0.0.1
+    ${address} = 127.0.0.1
     port = ${MS_LOCAL_IMAP}
   }
   inet_listener imaps {
