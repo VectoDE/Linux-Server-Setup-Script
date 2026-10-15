@@ -191,7 +191,8 @@ _modsecurity_nginx_headers() {
 _modsecurity_json() {
 	local server=$1 engine
 	if [[ ${server} == nginx ]]; then
-		engine=$(_modsecurity_nginx_so)
+		# The connector links libmodsecurity, which links YAJL.
+		engine=${MODSEC_PREFIX}/lib/libmodsecurity.so
 	elif _modsecurity_apache_built; then
 		engine=$(_modsecurity_apache_so)
 	elif os_is_debian; then
@@ -199,7 +200,9 @@ _modsecurity_json() {
 	else
 		engine=/usr/lib64/httpd/modules/mod_security2.so
 	fi
-	ldd "${engine}" 2>/dev/null | grep -q 'libyajl'
+	# The library names the engine needs are strings in the file itself. ldd depends on the dynamic linker finding them;
+	# on Ubuntu 26.04 the first and the second install of profile all came to different answers.
+	grep -qaF 'libyajl.so' "${engine}" 2>/dev/null
 	return
 }
 
