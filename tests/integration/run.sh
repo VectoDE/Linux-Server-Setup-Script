@@ -188,6 +188,9 @@ if [[ $1 == --profile ]]; then
 		group_end
 	fi
 	group_start "${system}: profile ${profile}"
+	# A profile runs as on a real server, with the pending updates installed (the module tests skip them for time);
+	# Lynis counts every missing security update.
+	in_target "sed -i 's/^LSS_SYSTEM_UPGRADE=false$/LSS_SYSTEM_UPGRADE=true/' /etc/lss/lss.conf"
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
