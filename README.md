@@ -318,7 +318,8 @@ resolvers, over TLS with `LSS_DNS_RESOLVER_FORWARD_TLS=true`.
 `mail-relay` is for servers that only send: mail from root, cron, the guard and applications goes out through
 `LSS_MAIL_RELAY_RELAYHOST` (STARTTLS on 587 or TLS on 465, the certificate checked, `LSS_MAIL_RELAY_USER` and the
 password in the lss secrets) or, without a smarthost, straight to the recipients' servers with opportunistic TLS
-(DANE when `dns-resolver` is installed). Postfix listens on 127.0.0.1 and ::1 only. Mail for root stays in
+(DANE when `dns-resolver` is installed; `mailserver` does the same, and `lss configure` picks up a
+resolver added later). Postfix listens on 127.0.0.1 and ::1 only. Mail for root stays in
 `/var/mail/root` unless `LSS_MAIL_RELAY_FORWARD` names an address. Most smarthosts accept only their own sender
 addresses; set `LSS_MAIL_RELAY_FROM`.
 

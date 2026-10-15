@@ -47,6 +47,123 @@ load_module() {
 	run ! mail_valid_domain 'example.com;reboot'
 }
 
+@test "Postfix installs without the questions of the Debian package" {
+	# shellcheck disable=SC2329 # called by mail_postfix_install
+	pkg_is_installed() { return 1; }
+	# shellcheck disable=SC2329 # called by mail_postfix_install
+	pkg_install() { printf 'install %s\n' "$*" >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mail_postfix_install
+	debconf-set-selections() { cat >>"${STUB_LOG}"; }
+	mail_postfix_install
+	grep -qxF 'postfix postfix/main_mailer_type select No configuration' "${STUB_LOG}"
+	grep -qxF 'install postfix' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	use_os rocky-9
+	mail_postfix_install
+	[ "$(cat "${STUB_LOG}")" = 'install postfix' ]
+	[[ $(mail_inet_protocols) == @(all|ipv4) ]]
+}
+
+@test "the Postfix sandbox keeps /dev and opens only the queue, the state and what the module adds" {
+	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
+	svc_sandbox() { printf '%s\n' "$@"; }
+	run mail_postfix_sandbox ReadWritePaths=/var/mail
+	[ "${lines[0]}" = 'postfix@.service' ]
+	[[ ${output} == *$'PrivateDevices=no\nReadWritePaths=/var/spool/postfix\nReadWritePaths=/var/lib/postfix\nReadWritePaths=/var/mail'* ]]
+}
+
+@test "Postfix starts once, restarts only after a change and stops the run on a configuration it rejects" {
+	export LSS_MODULE=mail-relay SVC_START_TIMEOUT=5
+	local changes=0
+	# shellcheck disable=SC2329 # called by mail_postfix_apply
+	postfix() { printf 'postfix %s\n' "$*" >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mail_postfix_apply
+	files_changes_of() { printf '%s' "${changes}"; }
+	# shellcheck disable=SC2329 # called by mail_postfix_apply
+	svc_restart() { printf 'restart %s\n' "$1" >>"${STUB_LOG}"; }
+	mail_postfix_apply 'myhostname = a.example' 'smtp inet n - n - - smtpd' 0
+	grep -qxF '== 0644 root:root /etc/postfix/main.cf' "${WRITES}"
+	grep -qxF 'postfix check' "${STUB_LOG}"
+	grep -qxF 'systemctl start postfix@-' "${STUB_LOG}"
+	run ! grep -q '^restart' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	export STUB_ACTIVE_UNITS=postfix@-
+	changes=2
+	mail_postfix_apply 'myhostname = b.example' 'smtp inet n - n - - smtpd' 1
+	run ! grep -qxF 'systemctl start postfix@-' "${STUB_LOG}"
+	grep -qxF 'restart postfix@-' "${STUB_LOG}"
+	# shellcheck disable=SC2329 # called by mail_postfix_apply
+	postfix() {
+		printf 'postfix: fatal: bad main.cf\n' >&2
+		return 1
+	}
+	run mail_postfix_apply 'bad' 'bad' 0
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'bad main.cf'* && ${output} == *'postfix check rejects the configuration'* ]]
+}
+
+@test "the self-signed mail certificate is made once and again when it names another host" {
+	export LSS_MODULE=mailserver
+	MAIL_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	# A stand-in for openssl (the test image has none): req writes both files, x509 -checkend passes.
+	# shellcheck disable=SC2329 # called by mail_tls_cert
+	openssl() {
+		printf 'openssl %s\n' "$1" >>"${STUB_LOG}"
+		[[ $1 == req ]] || return 0
+		local arg previous=''
+		for arg in "$@"; do
+			[[ ${previous} != -keyout && ${previous} != -out ]] || printf 'PEM\n' >"${arg}"
+			previous=${arg}
+		done
+	}
+	# shellcheck disable=SC2329 # called by mail_tls_cert
+	install() {
+		local -a args=()
+		while (($#)); do
+			case $1 in -o | -g | -m) shift 2 ;; *) args+=("$1") && shift ;; esac
+		done
+		command install "${args[@]}"
+	}
+	# shellcheck disable=SC2329 # called by mail_tls_cert
+	web_cert_domains() { printf '%s' "${CERT_NAME}"; }
+	mail_tls_cert mail.example.com
+	[ -s "${MAIL_TLS_DIR}/privkey.pem" ] && [ -s "${MAIL_TLS_DIR}/fullchain.pem" ]
+	[ "$(grep -c 'openssl req' "${STUB_LOG}")" -eq 1 ]
+	CERT_NAME=mail.example.com mail_tls_cert mail.example.com
+	[ "$(grep -c 'openssl req' "${STUB_LOG}")" -eq 1 ]
+	CERT_NAME=old.example.com mail_tls_cert mail.example.com
+	[ "$(grep -c 'openssl req' "${STUB_LOG}")" -eq 2 ]
+}
+
+@test "the delivery test waits until the message left the queue and fails when it stays" {
+	export LSS_MODULE=mail-relay
+	# shellcheck disable=SC2329 # called by mail_send_check
+	sendmail() { cat >"${BATS_TEST_TMPDIR}/sent"; }
+	# shellcheck disable=SC2329 # called by mail_send_check
+	sleep() { :; }
+	printf '0\n' >"${BATS_TEST_TMPDIR}/polls"
+	# shellcheck disable=SC2329 # called by mail_queue_has
+	postqueue() {
+		local polls
+		polls=$(($(<"${BATS_TEST_TMPDIR}/polls") + 1))
+		printf '%s\n' "${polls}" >"${BATS_TEST_TMPDIR}/polls"
+		((polls > ${QUEUE_POLLS:-2})) || printf '{"recipients":[{"address":"lss-verify@a.example"}]}\n'
+	}
+	run mail_send_check root@a.example lss-verify@a.example 10
+	[ "${status}" -eq 0 ]
+	[[ ${output} =~ ^\<lss-verify\.[0-9]+\.[0-9]+@a\.example\>$ ]]
+	grep -qxF 'To: lss-verify@a.example' "${BATS_TEST_TMPDIR}/sent"
+	[ "$(<"${BATS_TEST_TMPDIR}/polls")" -eq 3 ]
+	printf '0\n' >"${BATS_TEST_TMPDIR}/polls"
+	QUEUE_POLLS=100 run mail_send_check root@a.example lss-verify@a.example 3
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'still in the Postfix queue after 3 s'* ]]
+	# shellcheck disable=SC2329 # called by mail_send_check
+	sendmail() { return 75; }
+	run mail_send_check root@a.example lss-verify@a.example 3
+	[[ ${output} == *'sendmail does not accept a message'* ]]
+}
+
 @test "master.cf runs nothing chrooted and carries every service Postfix needs" {
 	run mail_master_cf
 	[[ ${output} == *pickup*cleanup*qmgr*smtp*local*virtual*lmtp*postlogd* ]]
