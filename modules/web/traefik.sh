@@ -692,26 +692,37 @@ _traefik_verify_docker() {
 	return
 }
 
+# _traefik_die MESSAGE: stops verify with MESSAGE and the last lines Traefik wrote to the journal, which hold the reason
+# (a configuration it refuses, a port it cannot bind).
+_traefik_die() {
+	local line
+	while IFS= read -r line; do
+		log_warn "traefik: journal: ${line}"
+	done < <(journalctl -u "${TRAEFIK_UNIT}" -n 25 --no-pager -o cat 2>/dev/null || true)
+	die "traefik: $1"
+	return 1
+}
+
 mod_verify() {
 	local port i answer='' server status
 	port=$(opt_int dashboard_port)
-	svc_is_active "${TRAEFIK_UNIT}" || die "traefik: ${TRAEFIK_UNIT} is not running; see journalctl -u ${TRAEFIK_UNIT}."
+	svc_is_active "${TRAEFIK_UNIT}" || _traefik_die "${TRAEFIK_UNIT} is not running."
 	for ((i = 0; i < 30; i++)); do
 		answer=$(curl -s --max-time 5 "http://127.0.0.1:${port}/ping" 2>/dev/null || true)
 		[[ ${answer} != OK ]] || break
 		sleep 1
 	done
-	[[ ${answer} == OK ]] || die "traefik: the ping on 127.0.0.1:${port} does not answer."
+	[[ ${answer} == OK ]] || _traefik_die "the ping on 127.0.0.1:${port} does not answer."
 	_traefik_listen_local "${port}" || die "traefik: the dashboard port ${port} listens beyond 127.0.0.1."
 	curl -fsS --max-time 10 -o /dev/null "http://127.0.0.1:${port}/api/version" ||
-		die "traefik: the API on 127.0.0.1:${port} does not answer."
+		_traefik_die "the API on 127.0.0.1:${port} does not answer."
 	# The probe route goes through the middlewares of the HTTPS entry point; a new file takes a moment to load.
 	for ((i = 0; i < 30; i++)); do
 		answer=$(_traefik_https "${TRAEFIK_PROBE_HOST}" '')
 		[[ $(_traefik_status "${answer}") != 200 ]] || break
 		sleep 1
 	done
-	[[ $(_traefik_status "${answer}") == 200 ]] || die "traefik: port 443 does not answer for the probe route."
+	[[ $(_traefik_status "${answer}") == 200 ]] || _traefik_die "port 443 does not answer for the probe route."
 	grep -qi '^strict-transport-security: max-age=63072000' <<<"${answer}" ||
 		die "traefik: HTTPS answers have no Strict-Transport-Security header."
 	grep -qi '^x-content-type-options: nosniff' <<<"${answer}" || die "traefik: HTTPS answers have no X-Content-Type-Options header."
@@ -730,7 +741,7 @@ mod_verify() {
 			die "traefik: ACME challenges on port 80 do not reach ${server}."
 		status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' --resolve "lss-check.invalid:443:127.0.0.1" \
 			https://lss-check.invalid/ || true)
-		[[ ${status} =~ ^[1-5][0-9][0-9]$ ]] || die "traefik: requests for other host names do not reach ${server}."
+		[[ ${status} =~ ^[1-5][0-9][0-9]$ ]] || _traefik_die "requests for other host names do not reach ${server} (status ${status})."
 	fi
 	_traefik_verify_sites
 	_traefik_verify_routes
