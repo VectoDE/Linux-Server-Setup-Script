@@ -584,6 +584,34 @@ EOF
 	run ! grep -q getsebool "${STUB_LOG}"
 }
 
+@test "under SELinux the admin port is labelled for web servers once" {
+	use_os rocky-9
+	local labelled=''
+	# shellcheck disable=SC2329 # called by the functions under test
+	pkg_install() {
+		printf 'pkg_install %s\n' "$*" >>"${STUB_LOG}"
+	}
+	# shellcheck disable=SC2329
+	semanage() {
+		printf 'semanage %s\n' "$*" >>"${STUB_LOG}"
+		[[ $2 != -l ]] || printf '%s\n' "${labelled}"
+	}
+	web_selinux_admin_port
+	run ! grep -q semanage "${STUB_LOG}"
+	export STUB_EXIT_selinuxenabled=0
+	web_selinux_admin_port
+	grep -qxF 'pkg_install policycoreutils-python-utils' "${STUB_LOG}"
+	grep -qxF 'semanage port -a -t http_port_t -p tcp 8090' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	labelled='http_port_t                    tcp      8443, 8090'
+	web_selinux_admin_port
+	run ! grep -q 'semanage port -a' "${STUB_LOG}"
+	use_os debian-13
+	: >"${STUB_LOG}"
+	web_selinux_admin_port
+	[ ! -s "${STUB_LOG}" ]
+}
+
 @test "site names that could leave the configuration directory are refused" {
 	run _web_name_check '../etc'
 	[ "${status}" -ne 0 ]
@@ -927,8 +955,7 @@ EOF
 	}
 	# shellcheck disable=SC2329
 	pkg_install() {
-		printf 'pkg_install %s
-' "$*" >>"${STUB_LOG}"
+		printf 'pkg_install %s\n' "$*" >>"${STUB_LOG}"
 	}
 	_modsecurity_nginx_headers "${tree}"
 	[ "$(<"${tree}/src/http/ngx_http_request.h")" = patched ]
