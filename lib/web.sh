@@ -658,6 +658,23 @@ web_selinux_proxy() {
 	return
 }
 
+# web_selinux_admin_port: under SELinux a web server may only listen on ports labelled http_port_t; the admin port
+# WEB_ADMIN_PORT is none by default, so nginx and Apache could not bind it (Permission denied).
+web_selinux_admin_port() {
+	local custom
+	os_is_rhel || return 0
+	if ! command -v selinuxenabled >/dev/null 2>&1 || ! selinuxenabled; then
+		return 0
+	fi
+	pkg_install policycoreutils-python-utils
+	custom=$(semanage port -l -C 2>/dev/null | awk '$1 == "http_port_t" && $2 == "tcp" { $1 = ""; $2 = ""; print }')
+	grep -qE "(^|[ ,])${WEB_ADMIN_PORT}(,|$)" <<<"${custom}" && return 0
+	semanage port -a -t http_port_t -p tcp "${WEB_ADMIN_PORT}" 2>/dev/null ||
+		semanage port -m -t http_port_t -p tcp "${WEB_ADMIN_PORT}"
+	files_note_change "SELinux port ${WEB_ADMIN_PORT}/tcp for the admin interfaces"
+	return
+}
+
 # web_site_write NAME static|php|proxy TARGET DOMAIN...: an HTTPS site for the installed web server, with HTTP
 # redirected to HTTPS and the ACME challenge path served. TARGET is a document root or an upstream URL. Sets
 # LSS_FILE_CHANGED; call web_reload afterwards.

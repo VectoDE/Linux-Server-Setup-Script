@@ -119,10 +119,11 @@ mod_configure() {
 		files_note_change "added ${name} to ${group}"
 	fi
 	# A password exists for sudo and the console; it is generated once and readable with "lss secrets show".
-	status=$(passwd --status "${name}" 2>/dev/null | awk '{ print $2 }')
+	# The lock of the lss run (descriptor 9) stays with lss: SELinux denies passwd_t the inherited file (avc).
+	status=$(passwd --status "${name}" 2>/dev/null 9>&- | awk '{ print $2 }')
 	if [[ ! ${status} =~ ^PS?$ ]]; then
 		secret_load admin-user-password password 24
-		chpasswd <<<"${name}:${password}"
+		chpasswd <<<"${name}:${password}" 9>&-
 		files_note_change "set password of ${name}"
 		log_info "Password of ${name}: lss secrets show admin-user-password"
 	fi

@@ -186,6 +186,7 @@ mod_configure() {
 	fw_allow 80/tcp 443/tcp
 	svc_sandbox nginx.service ReadWritePaths=-/var/lib/nginx ReadWritePaths=-/var/cache/nginx
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	web_selinux_admin_port
 	web_test nginx || die "nginx: the configuration does not load; see above."
 	svc_enable nginx
 	if [[ ${changed} == 1 ]]; then

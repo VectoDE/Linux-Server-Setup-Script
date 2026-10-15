@@ -158,9 +158,46 @@ _php_install() {
 	return
 }
 
+# The AppArmor profile php-fpm of the apparmor package (Ubuntu 24.04 and later) confines PHP-FPM to its own files.
+# The lss pool reads the applications lss installs and the web roots, writes its sessions and LSS_PHP_WRITABLE_PATHS
+# and reaches the databases over their sockets; Ubuntu 24.04's version also lacks the systemd notification socket, so
+# PHP-FPM timed out on its first start. The additions go to the profile's local include, before the package starts
+# PHP-FPM, and the profile is loaded again.
+PHP_APPARMOR_PROFILE=/etc/apparmor.d/php-fpm
+PHP_APPARMOR_LOCAL=/etc/apparmor.d/local/php-fpm
+
+_php_apparmor_rules() {
+	local path
+	printf '# Managed by lss (module php). Change LSS_PHP_WRITABLE_PATHS in /etc/lss/lss.conf and run lss configure php.\n'
+	printf 'owner @{run}/systemd/notify w,\n/systemd/notify w,\n'
+	# The socket of the lss pool (WEB_PHP_SOCKET); Ubuntu 24.04's profile knows only the sockets below /run/php.
+	printf '%s/ r,\n%s/* rwlk,\n' "$(dirname "${WEB_PHP_SOCKET}")" "$(dirname "${WEB_PHP_SOCKET}")"
+	printf 'include <abstractions/mysql>\n@{run}/postgresql/.s.PGSQL.* rw,\n@{run}/redis/*.sock rw,\n@{run}/valkey/*.sock rw,\n'
+	printf '/usr/share/lss/ r,\n/usr/share/lss/** r,\n'
+	printf '%s/ r,\n%s/** rwk,\n' "${PHP_SESSIONS}" "${PHP_SESSIONS}"
+	printf 'owner /tmp/** rwk,\n'
+	for path in $(opt writable_paths); do
+		printf '%s/ r,\n%s/** rwk,\n' "${path%/}" "${path%/}"
+	done
+	return
+}
+
+_php_apparmor() {
+	[[ -f ${PHP_APPARMOR_PROFILE} ]] || return 0
+	file_write 0644 root:root "${PHP_APPARMOR_LOCAL}" < <(_php_apparmor_rules)
+	[[ ${LSS_FILE_CHANGED} == 1 ]] || return 0
+	if [[ $(cat "${SVC_APPARMOR_ENABLED:-/sys/module/apparmor/parameters/enabled}" 2>/dev/null) == Y ]]; then
+		log_command apparmor_parser -r "${PHP_APPARMOR_PROFILE}" ||
+			die "php: AppArmor rejects ${PHP_APPARMOR_PROFILE} with the lss additions; see the log."
+	fi
+	LSS_FILE_CHANGED=1
+	return
+}
+
 mod_install() {
 	local extension
 	local -a packages=()
+	_php_apparmor
 	if os_is_debian; then
 		_php_resolve_debian
 		for extension in fpm cli curl gd intl mbstring xml zip mysql pgsql bcmath; do
@@ -295,6 +332,8 @@ mod_configure() {
 	done
 	svc_sandbox "${PHP_UNIT}.service" "${writable[@]}"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	_php_apparmor
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 
 	if ! "${PHP_FPM}" -t >/dev/null 2>&1; then
 		"${PHP_FPM}" -t >&2 || true
@@ -352,6 +391,13 @@ mod_remove() {
 		fi
 	fi
 	file_remove "${PHP_TMPFILES}"
+	if [[ -f ${PHP_APPARMOR_LOCAL} ]]; then
+		file_remove "${PHP_APPARMOR_LOCAL}"
+		if [[ -f ${PHP_APPARMOR_PROFILE} && $(cat "${SVC_APPARMOR_ENABLED:-/sys/module/apparmor/parameters/enabled}" 2>/dev/null) == Y ]]; then
+			log_command apparmor_parser -r "${PHP_APPARMOR_PROFILE}" ||
+				log_warn "php: AppArmor did not reload ${PHP_APPARMOR_PROFILE}; see the log."
+		fi
+	fi
 	read -ra installed <<<"$(state_get "${LSS_MODULE}" packages)"
 	if [[ ${#installed[@]} -gt 0 ]]; then
 		pkg_remove "${installed[@]}"

@@ -250,6 +250,7 @@ mod_configure() {
 		svc_sandbox "${unit}.service" ReadWritePaths=-/var/lib/httpd ReadWritePaths=-/var/cache/httpd
 	fi
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	web_selinux_admin_port
 	web_test apache || die "apache: the configuration does not load; see above."
 	svc_enable "${unit}"
 	if [[ ${changed} == 1 ]]; then
