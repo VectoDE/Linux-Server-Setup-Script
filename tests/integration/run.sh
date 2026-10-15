@@ -3,15 +3,17 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Integration test: tests/integration/run.sh SYSTEM|host MODULE...
+# Integration test: tests/integration/run.sh SYSTEM|host [--base MODULE,...] MODULE...
 #                   tests/integration/run.sh SYSTEM|host --profile NAME [LYNIS_MIN_INDEX]
 #
 # For every module: install (with its requirements), verify, install again (every module in the run must report
 # "unchanged"), and remove. A comma joins modules that are tested together (nginx,tls,vhost: installed at once,
-# removed in reverse order). With --profile: install the whole profile, verify, install again, then run the Lynis
-# audit and fail below LYNIS_MIN_INDEX. SYSTEM is a directory in tests/integration/images (a systemd container),
-# vm-NAME for a KVM virtual machine from tests/integration/vm-images.conf, or "host" for the machine itself (modules
-# that need a real kernel; used on throwaway CI virtual machines only).
+# removed in reverse order). --base installs modules the others need first (docker and a web server for the apps),
+# verifies them and removes them after the last one, so the figures of each module leave them out. With --profile:
+# install the whole profile, verify, install again, then run the Lynis audit and fail below LYNIS_MIN_INDEX. SYSTEM
+# is a directory in tests/integration/images (a systemd container), vm-NAME for a KVM virtual machine from
+# tests/integration/vm-images.conf, or "host" for the machine itself (modules that need a real kernel; used on
+# throwaway CI virtual machines only).
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
@@ -76,6 +78,10 @@ start_target() {
 	fi
 	in_target 'ln -sf /opt/lss-src/lss /usr/local/sbin/lss && mkdir -p /etc/lss'
 	in_target "cat > /etc/lss/lss.conf" <"${settings}"
+	# Settings of one job only (one per line), such as the docker mode of a module that runs natively elsewhere.
+	if [[ -n ${LSS_TEST_SETTINGS:-} ]]; then
+		in_target "cat >> /etc/lss/lss.conf" <<<"${LSS_TEST_SETTINGS}"
+	fi
 	# A setting that no module reads is a typo in the test settings.
 	if in_target 'lss --no-color list 2>&1' | grep 'is not a setting'; then
 		exit 1
@@ -248,6 +254,20 @@ if [[ " $* " == *[\ ,]tls[\ ,]* ]]; then
 	group_end
 fi
 
+base=()
+if [[ $1 == --base ]]; then
+	IFS=',' read -ra base <<<"${2:?usage: run.sh SYSTEM|host --base MODULE,... MODULE...}"
+	shift 2
+	group_start "${system}: base ${base[*]}"
+	before=$(resources_snapshot)
+	started=${SECONDS}
+	memory_watch_start
+	in_target "${LSS_RUN} --yes --no-color install ${base[*]}"
+	in_target "${LSS_RUN} --yes --no-color verify"
+	resources_report "${system} ${base[*]}" "${before}" "${started}"
+	group_end
+fi
+
 for item in "$@"; do
 	IFS=',' read -ra set <<<"${item}"
 	group_start "${system}: ${set[*]}"
@@ -267,4 +287,12 @@ for item in "$@"; do
 	fi
 	group_end
 done
-echo "${system}: ${*} passed"
+if [[ ${#base[@]} -gt 0 && ${LSS_TEST_KEEP:-0} != 1 ]]; then
+	group_start "${system}: remove base ${base[*]}"
+	install_again "${base[@]}"
+	for ((i = ${#base[@]} - 1; i >= 0; i--)); do
+		in_target "${LSS_RUN} --yes --no-color remove ${base[i]}"
+	done
+	group_end
+fi
+echo "${system}: ${base[*]} ${*} passed"

@@ -31,6 +31,8 @@ every module on each tested system.
 | Profile `minimal-secure`                | 1 GB; 2 GB on the RHEL family             | 4 GB      | 3 to 5 min plus AIDE    |
 | `minimal-secure` with `crowdsec`        | 1.5 GB; 2 GB on the RHEL family           | 4.5 GB    | about 30 s more         |
 | `minimal-secure` with `clamav`          | 2.5 GB                                    | 4.5 GB    | about 1 min more        |
+| Profile `office`                        | not measured yet                          | not measured yet | not measured yet |
+| Profile `devops`                        | not measured yet                          | not measured yet | not measured yet |
 
 One CPU core is enough; more cores mainly shorten the first AIDE database build. The disk figure includes the swap
 file (`LSS_SWAP_SIZE`, 1 GB in the measurement), the journal (up to `LSS_LOGGING_MAX_USE`, 1 GB) and the audit logs
@@ -88,6 +90,17 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `mail-relay`       | 35 s               | 250 MiB                   | 180 MiB (dnf), else 135 MiB | Postfix (master, queue manager, pickup)  |
 | `mailserver`       | 90 s               | 800 MiB (dnf), else 225 MiB | 235 MiB (dnf), else 120 MiB | Postfix, Dovecot and Rspamd, up to 180 MiB |
 | `webmail`          | 135 s with nginx, php and mailserver | 390 MiB together | 265 MiB together | Roundcube in PHP-FPM; with nginx and the mail server up to 290 MiB |
+| `nextcloud`        | not measured yet   | not measured yet          | not measured yet | Nextcloud (Apache) and PostgreSQL, up to 1.5 GiB |
+| `collabora`        | not measured yet   | not measured yet          | not measured yet | Collabora Online, up to 2 GiB |
+| `forgejo`          | not measured yet   | not measured yet          | not measured yet | Forgejo, up to 1 GiB |
+| `uptime-kuma`      | not measured yet   | not measured yet          | not measured yet | Uptime Kuma, up to 512 MiB |
+| `vaultwarden`      | not measured yet   | not measured yet          | not measured yet | Vaultwarden, up to 512 MiB |
+| `keycloak`         | not measured yet   | not measured yet          | not measured yet | Keycloak and PostgreSQL, up to 2 GiB |
+| `matomo`           | not measured yet   | not measured yet          | not measured yet | Matomo (Apache) and MariaDB, up to 1.5 GiB |
+| `wordpress`        | not measured yet   | not measured yet          | not measured yet | WordPress (Apache) and MariaDB, up to 1.3 GiB |
+| `n8n`              | not measured yet   | not measured yet          | not measured yet | n8n and PostgreSQL, up to 1.5 GiB |
+| `minio`            | not measured yet   | not measured yet          | not measured yet | Silo, up to 1 GiB in a container |
+| `self-updater`     | not measured yet   | not measured yet          | not measured yet | Self-Updater, about 60 MiB |
 
 Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
 for `wireguard`); those outliers are left out, like one Rocky 9 container run of `mail-relay` that took six minutes.
@@ -198,6 +211,11 @@ See [WireGuard, DNS and NTP](#wireguard-dns-and-ntp).
 **Mail:** `mail-relay` (the server sends its own mail, through a smarthost or directly) or `mailserver` (Postfix,
 Dovecot and Rspamd for your domains), `webmail` (Roundcube on the web server). See [Mail](#mail).
 
+**Apps:** `nextcloud`, `collabora` (Collabora Online for Nextcloud Office), `forgejo` (Git hosting), `uptime-kuma`,
+`vaultwarden` (password manager), `keycloak` (single sign-on), `matomo` (web analytics), `wordpress`, `n8n` (workflow
+automation), `minio` (S3 object storage) and `self-updater` (deploys a Git repository when it changes). See
+[Apps](#apps).
+
 ### Web sites
 
 One web server owns ports 80 and 443. It answers only for the sites you set up; requests for any other host name get
@@ -248,6 +266,47 @@ sudo lss install --profile k8s-node --set LSS_ADMIN_USER_NAME=alice --set LSS_AD
 With `docker` or `podman` installed, the guard scans every image daily with Trivy and reports HIGH and CRITICAL
 vulnerabilities per image.
 
+### Apps
+
+The apps run as Docker Compose stacks behind the web server (nginx, Apache or Caddy), each on host names of its own:
+`LSS_<APP>_DOMAINS`, by default the module name in front of the server's name (`nextcloud.example.com`). Those names
+must point to the server; with the `tls` module every app gets its own certificate. `minio` and `self-updater` also
+run without Docker: Silo from its package, Self-Updater from its npm release.
+
+Every stack follows the container rules above: images pinned by digest, no capabilities, no new privileges, a
+read-only root file system where the image allows it (Collabora Online and Keycloak write below their program
+directory and are marked as exceptions), memory and process limits. The containers run as unprivileged users, mapped
+to unused IDs on the host by Docker's user namespace. Ports bind to 127.0.0.1 only (`LSS_<APP>_PORT`, 8081 to 8093);
+the web server publishes them with TLS and the security headers of every lss site. Databases run in the same stack on
+an internal network without a route out.
+
+Passwords never appear in a Compose file, an environment variable or a command line. lss creates them in
+`/etc/lss/secrets` and hands each container a read-only copy as a file under `/run/secrets`. The first administrator
+gets a generated password that lss does not print: `lss secrets show nextcloud-admin-password` and so on (for
+Vaultwarden, `vaultwarden-admin-token` opens `/admin`, where you invite users; open registration is off everywhere).
+Matomo stores its database password in its own `config.ini.php`, which lss cannot avoid.
+
+`lss verify` uses every app, not just its start page: it stores and reads a file in Nextcloud over WebDAV, converts a
+document with Collabora Online, creates and deletes a repository in Forgejo, a monitor in Uptime Kuma, a user in
+Keycloak and Vaultwarden and a workflow in n8n, tracks a page view in Matomo and reads it back, logs in to WordPress
+and writes a bucket and an object to MinIO. Nextcloud and Collabora Online link themselves when both are installed,
+in either order.
+
+Data lives in Docker volumes named after the stack (`lss-nextcloud_html`, `lss-nextcloud_db`, ...). `lss remove`
+keeps them; `--purge` deletes them with the secrets. Back them up with `docker run` or a restic path of your own;
+the `restic` module does not include them yet.
+
+`minio` is the MinIO server code, maintained as [PGSTY Silo](https://github.com/pgsty/silo) since MinIO archived its
+community edition in 2026. The S3 API answers on `LSS_MINIO_DOMAINS`, the web console on
+`LSS_MINIO_CONSOLE_DOMAINS`. `LSS_MINIO_MODE=docker` runs it as a container instead of the package.
+
+`self-updater` installs [Self-Updater](https://github.com/VectoDE/Self-Updater), which keeps a checkout of
+`LSS_SELF_UPDATER_REPO` in `LSS_SELF_UPDATER_PATH` up to date (every new commit of a branch, or every release tag with
+`LSS_SELF_UPDATER_TRACK=tag`), restarts `LSS_SELF_UPDATER_SERVICE` and rolls back when the health check fails.
+
+The profile `office` installs `minimal-secure`, mail with webmail, Nextcloud with Collabora Online, Vaultwarden and
+restic; `devops` adds Forgejo to Docker and the monitoring stack.
+
 ### Backup
 
 `restic` backs up `LSS_RESTIC_PATHS` (configuration, home directories, web roots, the database dumps) every night at
@@ -293,7 +352,8 @@ node exporter from the distribution, the RHEL family the checksum-verified upstr
 come from Grafana's repository and Netdata from Netdata's, both with pinned keys. `smartd` watches the drives, also in
 virtual machines, where it usually finds none.
 
-The profile `devops` installs `minimal-secure`, `docker` and the monitoring stack without Netdata:
+The profile `devops` installs `minimal-secure`, `docker`, nginx with Forgejo and the monitoring stack without
+Netdata:
 
 ```bash
 sudo lss install --profile devops --set LSS_ADMIN_USER_NAME=alice --set LSS_ADMIN_USER_GITHUB_USER=alice-on-github
@@ -357,7 +417,8 @@ Many providers block outgoing port 25; ask for it to be opened or relay through 
 
 `webmail` runs Roundcube as a site of the web server (`LSS_WEBMAIL_DOMAINS`, by default the mail host), with the
 certificate of the `tls` module when it is installed. It talks to Dovecot and Postfix on 127.0.0.1 only. The profile
-`office` installs `minimal-secure`, nginx with `tls` and `php`, `mailserver`, `webmail` and `restic`:
+`office` installs `minimal-secure`, nginx with `tls` and `php`, `mailserver`, `webmail`, Docker with `nextcloud`,
+`collabora` and `vaultwarden` (see [Apps](#apps)) and `restic`:
 
 ```bash
 sudo lss install --profile office --set LSS_ADMIN_USER_NAME=alice --set LSS_ADMIN_USER_GITHUB_USER=alice-on-github   --set LSS_MAILSERVER_DOMAINS=example.com --set LSS_MAILSERVER_USERS=alice --set LSS_TLS_DOMAINS=mail.example.com
