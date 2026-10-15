@@ -612,6 +612,39 @@ EOF
 	[ ! -s "${STUB_LOG}" ]
 }
 
+@test "PHP-FPM's AppArmor profile gets the lss paths before the package starts it, and is reloaded only on a change" {
+	as_test_user
+	# shellcheck source=modules/runtime/php.sh
+	source "${REPO_ROOT}/modules/runtime/php.sh"
+	LSS_MODULE=php
+	export LSS_PHP_WRITABLE_PATHS='/var/www /srv/app/'
+	PHP_APPARMOR_PROFILE=${BATS_TEST_TMPDIR}/apparmor.d/php-fpm
+	PHP_APPARMOR_LOCAL=${BATS_TEST_TMPDIR}/apparmor.d/local/php-fpm
+	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/apparmor-enabled
+	echo Y >"${SVC_APPARMOR_ENABLED}"
+	# shellcheck disable=SC2329 # called by the functions under test
+	apparmor_parser() {
+		printf 'apparmor_parser %s\n' "$*" >>"${STUB_LOG}"
+	}
+	# Without the profile (Debian, Ubuntu 22.04, the RHEL family) nothing is written.
+	_php_apparmor
+	[ ! -e "${PHP_APPARMOR_LOCAL}" ]
+	mkdir -p "$(dirname "${PHP_APPARMOR_LOCAL}")"
+	: >"${PHP_APPARMOR_PROFILE}"
+	_php_apparmor
+	grep -qxF 'owner @{run}/systemd/notify w,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/usr/share/lss/** r,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/var/lib/php/lss-sessions/** rwk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/var/www/** rwk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/srv/app/** rwk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF "apparmor_parser -r ${PHP_APPARMOR_PROFILE}" "${STUB_LOG}"
+	[ "${LSS_FILE_CHANGED}" = 1 ]
+	: >"${STUB_LOG}"
+	_php_apparmor
+	[ "${LSS_FILE_CHANGED}" = 0 ]
+	[ ! -s "${STUB_LOG}" ]
+}
+
 @test "site names that could leave the configuration directory are refused" {
 	run _web_name_check '../etc'
 	[ "${status}" -ne 0 ]
