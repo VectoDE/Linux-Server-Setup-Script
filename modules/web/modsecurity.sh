@@ -35,6 +35,8 @@ MODSEC_PLUGINS="cpanel dokuwiki drupal nextcloud phpbb phpmyadmin wordpress xenf
 # The web server modules serve this file on port 80 for every host name; verify sends its probes there.
 MODSEC_PROBE=/.well-known/acme-challenge/lss-probe
 MODSEC_BUILD_DEPS=()
+# Where nginx-dev puts the patched nginx sources of Debian and Ubuntu.
+MODSEC_NGINX_DEV_SRC=/usr/share/nginx/src
 MODSEC_WORK=''
 
 # The web server ModSecurity is added to.
@@ -139,10 +141,48 @@ _modsecurity_nginx_version() {
 	return
 }
 
-# What the self-built nginx connector was built for; a different value means building it again.
+# _modsecurity_nginx_package: the package and its version that hold the nginx binary ("nginx 1.24.0-2ubuntu7").
+_modsecurity_nginx_package() {
+	local binary package
+	binary=$(readlink -f "$(command -v nginx)") || return 0
+	if os_is_debian; then
+		package=$(dpkg-query -S "${binary}" 2>/dev/null | head -n 1 | cut -d : -f 1)
+		[[ -z ${package} ]] || printf '%s %s' "${package}" "$(dpkg-query -W -f '${Version}' "${package}" 2>/dev/null)"
+	else
+		rpm -qf --qf '%{NAME} %{VERSION}-%{RELEASE}' "${binary}" 2>/dev/null || true
+	fi
+	return
+}
+
+# What the self-built nginx connector was built for; a different value means building it again. The package version
+# counts as well: a distribution update of the same nginx release can change the structures the module uses.
 _modsecurity_connector_id() {
-	printf 'nginx %s, connector %s, libmodsecurity %s' "$(_modsecurity_nginx_version)" "${MODSEC_CONNECTOR_VERSION}" \
-		"${MODSEC_LIB_VERSION}"
+	printf 'nginx %s (%s), connector %s, libmodsecurity %s' "$(_modsecurity_nginx_version)" \
+		"$(_modsecurity_nginx_package)" "${MODSEC_CONNECTOR_VERSION}" "${MODSEC_LIB_VERSION}"
+	return
+}
+
+# _modsecurity_nginx_headers TREE: Debian and Ubuntu patch nginx, and a patch can change the layout of its structures
+# (Ubuntu 26.04 adds a port field to ngx_http_request_t), which --with-compat does not detect. A module built from the
+# plain nginx.org sources then writes beside the fields it means; on Ubuntu 26.04 requests were never freed, so the log
+# phase and with it the audit log never ran. nginx-dev holds the patched sources of exactly the installed package;
+# they replace those of the nginx.org TREE. Releases without nginx-dev build from the nginx.org sources alone.
+_modsecurity_nginx_headers() {
+	local tree=$1 package version
+	read -r package version <<<"$(_modsecurity_nginx_package)"
+	[[ -n ${version} ]] || return 0
+	pkg_update_once
+	if ! apt-cache show "nginx-dev=${version}" >/dev/null 2>&1; then
+		log_info "modsecurity: nginx-dev ${version} is unavailable for ${package}; the module builds from the nginx.org sources."
+		return 0
+	fi
+	if ! pkg_is_installed nginx-dev; then
+		MODSEC_BUILD_DEPS+=(nginx-dev)
+	fi
+	pkg_install "nginx-dev=${version}"
+	[[ -d ${MODSEC_NGINX_DEV_SRC}/src ]] ||
+		die "modsecurity: nginx-dev ${version} has no nginx sources in ${MODSEC_NGINX_DEV_SRC}."
+	cp -a "${MODSEC_NGINX_DEV_SRC}/src/." "${tree}/src/"
 	return
 }
 
@@ -305,6 +345,7 @@ _modsecurity_build_connector() {
 		fetch_verified "nginx-${version}" "${MODSEC_WORK}/nginx.tar.gz"
 		tar -xzf "${MODSEC_WORK}/nginx.tar.gz" -C "${MODSEC_WORK}" --no-same-owner
 		src="${MODSEC_WORK}/nginx-${version}"
+		_modsecurity_nginx_headers "${src}"
 	else
 		tree=$(rpm -E '%{_nginx_srcdir}')
 		[[ -f ${tree}/configure ]] || die "modsecurity: nginx-mod-devel has no nginx sources in ${tree}."

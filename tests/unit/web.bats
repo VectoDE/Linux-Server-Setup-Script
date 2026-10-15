@@ -900,3 +900,54 @@ EOF
 	new_cert "${WEB_TLS_DIR}/shop" 90 www.shop.example.com shop.example.com
 	[ "$(web_cert_domains "${WEB_TLS_DIR}/shop/fullchain.pem")" = $'shop.example.com\nwww.shop.example.com' ]
 }
+
+@test "the nginx module builds against the patched sources of the installed Debian package" {
+	# shellcheck source=modules/web/modsecurity.sh
+	source "${REPO_ROOT}/modules/web/modsecurity.sh"
+	local tree=${BATS_TEST_TMPDIR}/nginx-1.28.3 available=1.28.3-2ubuntu1.11 installed=''
+	MODSEC_NGINX_DEV_SRC=${BATS_TEST_TMPDIR}/nginx-dev
+	mkdir -p "${tree}/src/http" "${MODSEC_NGINX_DEV_SRC}/src/http"
+	echo upstream >"${tree}/src/http/ngx_http_request.h"
+	echo patched >"${MODSEC_NGINX_DEV_SRC}/src/http/ngx_http_request.h"
+	# shellcheck disable=SC2329 # called by the functions under test
+	_modsecurity_nginx_package() {
+		printf 'nginx 1.28.3-2ubuntu1.11'
+	}
+	# shellcheck disable=SC2329
+	pkg_update_once() {
+		return 0
+	}
+	# shellcheck disable=SC2329
+	apt-cache() {
+		[[ $2 == "nginx-dev=${available}" ]]
+	}
+	# shellcheck disable=SC2329
+	pkg_is_installed() {
+		[[ -n ${installed} ]]
+	}
+	# shellcheck disable=SC2329
+	pkg_install() {
+		printf 'pkg_install %s
+' "$*" >>"${STUB_LOG}"
+	}
+	_modsecurity_nginx_headers "${tree}"
+	[ "$(<"${tree}/src/http/ngx_http_request.h")" = patched ]
+	grep -qxF 'pkg_install nginx-dev=1.28.3-2ubuntu1.11' "${STUB_LOG}"
+	[ "${MODSEC_BUILD_DEPS[*]}" = nginx-dev ]
+	# An nginx-dev installed before stays; a release without nginx-dev of that version keeps the nginx.org sources.
+	MODSEC_BUILD_DEPS=()
+	installed=1
+	_modsecurity_nginx_headers "${tree}"
+	[ "${#MODSEC_BUILD_DEPS[@]}" -eq 0 ]
+	echo upstream >"${tree}/src/http/ngx_http_request.h"
+	available=1.28.3-2ubuntu1.12
+	: >"${STUB_LOG}"
+	_modsecurity_nginx_headers "${tree}"
+	[ "$(<"${tree}/src/http/ngx_http_request.h")" = upstream ]
+	run ! grep -q pkg_install "${STUB_LOG}"
+	rm -r "${MODSEC_NGINX_DEV_SRC}/src"
+	available=1.28.3-2ubuntu1.11
+	run _modsecurity_nginx_headers "${tree}"
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"nginx-dev 1.28.3-2ubuntu1.11 has no nginx sources in ${MODSEC_NGINX_DEV_SRC}."* ]]
+}
