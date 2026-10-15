@@ -170,6 +170,8 @@ _php_apparmor_rules() {
 	local path
 	printf '# Managed by lss (module php). Change LSS_PHP_WRITABLE_PATHS in /etc/lss/lss.conf and run lss configure php.\n'
 	printf 'owner @{run}/systemd/notify w,\n/systemd/notify w,\n'
+	# The socket of the lss pool (WEB_PHP_SOCKET); Ubuntu 24.04's profile knows only the sockets below /run/php.
+	printf '%s/ r,\n%s/* rwlk,\n' "$(dirname "${WEB_PHP_SOCKET}")" "$(dirname "${WEB_PHP_SOCKET}")"
 	printf 'include <abstractions/mysql>\n@{run}/postgresql/.s.PGSQL.* rw,\n@{run}/redis/*.sock rw,\n@{run}/valkey/*.sock rw,\n'
 	printf '/usr/share/lss/ r,\n/usr/share/lss/** r,\n'
 	printf '%s/ r,\n%s/** rwk,\n' "${PHP_SESSIONS}" "${PHP_SESSIONS}"

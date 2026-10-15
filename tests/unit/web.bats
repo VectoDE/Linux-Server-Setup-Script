@@ -634,6 +634,7 @@ EOF
 	_php_apparmor
 	grep -qxF 'owner @{run}/systemd/notify w,' "${PHP_APPARMOR_LOCAL}"
 	grep -qxF '/usr/share/lss/** r,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/run/php-fpm/* rwlk,' "${PHP_APPARMOR_LOCAL}"
 	grep -qxF '/var/lib/php/lss-sessions/** rwk,' "${PHP_APPARMOR_LOCAL}"
 	grep -qxF '/var/www/** rwk,' "${PHP_APPARMOR_LOCAL}"
 	grep -qxF '/srv/app/** rwk,' "${PHP_APPARMOR_LOCAL}"
