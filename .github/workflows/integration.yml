@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web, runtime, database, database-alt, container, backup, backup-alt, monitoring, network]
+        group: [base, security, scanners, web, runtime, database, database-alt, container, backup, backup-alt, monitoring, network, mail]
         arch: [x64, arm64]
         include:
           - group: base
@@ -66,6 +66,11 @@ jobs:
             modules: node-exporter prometheus,alertmanager,grafana nginx,prometheus,grafana loki,alloy wireguard,netdata smartd
           - group: network
             modules: wireguard dns-resolver ntp-server
+          # mail-relay alone, then with the guard, whose daily summary it delivers to root; the mail server, then with
+          # webmail behind nginx. tests/integration/mail-flow.sh sends, receives and checks DKIM, SPF, DMARC and the spam
+          # filter without public DNS.
+          - group: mail
+            modules: mail-relay guard,mail-relay mailserver nginx,php,mailserver,webmail
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:

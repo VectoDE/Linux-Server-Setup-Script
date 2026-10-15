@@ -7,7 +7,7 @@ MOD_GROUP="backup"
 MOD_DESCRIPTION="Encrypted, deduplicated daily backups with restic to a local path, SFTP or S3, with retention, repository checks and a weekly restore test (guard)"
 MOD_REQUIRES="system"
 MOD_OPTIONS="repository|/var/backups/lss-restic|Where the backups go: a local path (better another disk), sftp:USER@HOST:/PATH or s3:https://HOST/BUCKET/PATH
-paths|/etc /root /home /srv /opt /usr/local /var/www /var/spool/cron /var/lib/lss /var/backups/lss-db|What to back up, separated by spaces; paths that do not exist are skipped
+paths|/etc /root /home /srv /opt /usr/local /var/www /var/spool/cron /var/lib/lss /var/backups/lss-db /var/vmail /var/lib/rspamd/dkim /var/lib/php/lss-roundcube|What to back up, separated by spaces; paths that do not exist are skipped
 exclude|/var/lib/lss/runs|Paths or patterns restic leaves out, separated by spaces (restic --exclude)
 time|03:00|Time of the daily backup (HH:MM)
 keep_daily|7|Daily snapshots to keep

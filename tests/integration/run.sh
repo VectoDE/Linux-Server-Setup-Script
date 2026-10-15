@@ -177,6 +177,20 @@ resources_report() {
 	return
 }
 
+# The mail modules are used, not only installed: mail between two mailboxes, a webmail login, the guard's summary
+# through mail-relay (tests/integration/mail-flow.sh, without public DNS).
+mail_flow() {
+	local mode
+	local -a modes=()
+	[[ " $* " != *" mailserver "* ]] || modes+=(server)
+	[[ " $* " != *" webmail "* ]] || modes+=(webmail)
+	[[ " $* " != *" mail-relay "* || " $* " != *" guard "* ]] || modes+=(relay)
+	for mode in "${modes[@]}"; do
+		in_target "bash /opt/lss-src/tests/integration/mail-flow.sh ${mode}"
+	done
+	return
+}
+
 trap stop_target EXIT
 start_target
 
@@ -243,6 +257,7 @@ for item in "$@"; do
 	in_target "${LSS_RUN} --yes --no-color install ${set[*]}"
 	in_target "${LSS_RUN} --yes --no-color verify"
 	resources_report "${system} ${set[*]}" "${before}" "${started}"
+	mail_flow "${set[@]}"
 	install_again "${set[@]}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
 		for ((i = ${#set[@]} - 1; i >= 0; i--)); do

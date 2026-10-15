@@ -18,6 +18,9 @@ phpmyadmin-5.2.3 any 57881348297c4412f86c410547cf76b4d8a236574dd2c6b7d6a2beebe7f
 # Adminer 6.1.2: SHA-256 digest of the release asset on GitHub (gh api repos/vrana/adminer/releases/tags/v6.1.2,
 # checked 2026-10-13).
 adminer-6.1.2 any b32316156bd18ffa99c1a27617142c2e5ad72260e37f15da4e9937a3dbb15f57 https://github.com/vrana/adminer/releases/download/v6.1.2/adminer-6.1.2.php
+# Roundcube 1.7.4 (complete package with its PHP libraries): SHA-256 digest of the release asset on GitHub (gh api
+# repos/roundcube/roundcubemail/releases/tags/1.7.4, checked 2026-10-15; the download matched it).
+roundcube-1.7.4 any 2c6c878f0093f1bf7fb6086781d2dd9269d652c016b86939c157c5f1729139a2 https://github.com/roundcube/roundcubemail/releases/download/1.7.4/roundcubemail-1.7.4-complete.tar.gz
 # pgAdmin 4 9.18 and gunicorn 26.2.0: SHA-256 of the wheels as published by PyPI (https://pypi.org/pypi/pgadmin4/9.18/json,
 # https://pypi.org/pypi/gunicorn/26.2.0/json, checked 2026-10-13).
 pgadmin4-9.18 any 9ea084fc416265e4fc95c9fb6e6ae0f6668d34da8670c9b65c79cea054124356 https://files.pythonhosted.org/packages/0e/80/86d7e7123e2b6de41890bd1edc3e27348e2572acea337088faa0ec41c7f5/pgadmin4-9.18-py3-none-any.whl

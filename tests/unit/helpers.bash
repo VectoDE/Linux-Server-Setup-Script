@@ -22,7 +22,7 @@ lss_test_setup() {
 	export OWNER
 	: >"${STUB_LOG}"
 	local library
-	for library in log os config files template secrets state pkg repo fetch service firewall container web monitoring module ui; do
+	for library in log os config files template secrets state pkg repo fetch service firewall container web mail monitoring module ui; do
 		# shellcheck source=/dev/null
 		source "${REPO_ROOT}/lib/${library}.sh"
 	done

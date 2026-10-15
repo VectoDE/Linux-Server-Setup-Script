@@ -67,7 +67,7 @@ mod_configure() {
 	local secret group port timeout allow_root=false unit
 	_phpmyadmin_private_tmp
 	secret_load phpmyadmin-blowfish secret 32
-	group=$(_phpmyadmin_fpm_group)
+	group=$(web_php_pool_group)
 	port=$(opt_int port)
 	timeout=$(opt_int login_timeout)
 	opt_bool allow_root && allow_root=true
@@ -115,14 +115,8 @@ EOF
 			if [[ -n ${unit} ]] && svc_is_active "${unit}"; then
 				svc_reload "${unit}" || die "phpmyadmin: ${unit} does not reload."
 			fi
-		done < <(_phpmyadmin_fpm_units)
+		done < <(web_php_fpm_units)
 	fi
-	return
-}
-
-# The PHP-FPM units of the php module (php8.x-fpm on Debian and Ubuntu, php-fpm on the RHEL family).
-_phpmyadmin_fpm_units() {
-	systemctl list-units --type=service --all --no-legend --plain '*php*fpm*' 2>/dev/null | awk '{ print $1 }'
 	return
 }
 
@@ -137,31 +131,10 @@ _phpmyadmin_private_tmp() {
 		yes | disconnected) ;;
 		*) die "phpmyadmin: ${unit} shares /tmp with other services; phpMyAdmin needs the private /tmp of the php module's sandbox (lss install php)." ;;
 		esac
-	done < <(_phpmyadmin_fpm_units)
+	done < <(web_php_fpm_units)
 	if [[ ${found} == 0 ]]; then
 		log_warn "phpmyadmin: no PHP-FPM service found; phpMyAdmin needs the php module."
 	fi
-	return
-}
-
-# _phpmyadmin_fpm_group: the group of the PHP-FPM pool on WEB_PHP_SOCKET, which has to read config.inc.php; WEB_GROUP
-# when the pool configuration does not name one.
-_phpmyadmin_fpm_group() {
-	local file pool_user='' pool_group=''
-	for file in /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf; do
-		[[ -f ${file} ]] || continue
-		grep -qE "^[[:space:]]*listen[[:space:]]*=[[:space:]]*${WEB_PHP_SOCKET}[[:space:]]*\$" "${file}" || continue
-		pool_user=$(sed -nE 's/^[[:space:]]*user[[:space:]]*=[[:space:]]*([A-Za-z0-9_.-]+).*/\1/p' "${file}" | head -n 1)
-		pool_group=$(sed -nE 's/^[[:space:]]*group[[:space:]]*=[[:space:]]*([A-Za-z0-9_.-]+).*/\1/p' "${file}" | head -n 1)
-		break
-	done
-	if [[ -z ${pool_group} && -n ${pool_user} ]]; then
-		pool_group=$(id -gn "${pool_user}" 2>/dev/null || true)
-	fi
-	if [[ -z ${pool_group} ]] || ! getent group "${pool_group}" >/dev/null; then
-		pool_group=${WEB_GROUP}
-	fi
-	printf '%s' "${pool_group}"
 	return
 }
 
