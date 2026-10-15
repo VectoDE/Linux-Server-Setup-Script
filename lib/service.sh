@@ -109,29 +109,35 @@ svc_wait_port() {
 	return 1
 }
 
-# _svc_nnp [UNIT]: the NoNewPrivileges value of a sandbox. Under SELinux a confined service enters its own domain on
-# exec (httpd_t, postgresql_t, aide_t); NoNewPrivileges blocks that change wherever the policy does not allow it (avc:
-# nnp_transition), and the service then runs in init_t, which may not touch its own files and is less confined than
-# its domain. So it is "no" for a UNIT whose program carries an entrypoint label of its own (TYPE_exec_t), and "yes"
-# for every other unit, whose program would stay in init_t anyway. Without UNIT (the scanner units, whose wrappers run
-# the scanners) it is "no" under SELinux.
-_svc_nnp() {
-	local unit=${1:-} program type
-	if ! command -v selinuxenabled >/dev/null 2>&1 || ! selinuxenabled; then
-		printf 'yes'
-		return
-	fi
-	if [[ -z ${unit} ]]; then
-		printf 'no'
-		return
-	fi
+_svc_selinux_on() {
+	command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled
+}
+
+# _svc_selinux_nnp UNIT: under SELinux a confined service enters its own domain on exec (httpd_t, postgresql_t).
+# NoNewPrivileges blocks that change wherever the policy does not allow it (avc: nnp_transition); systemd also implies
+# NoNewPrivileges for a service with User= and the sandbox's system call settings. The service then stays in init_t,
+# which may not read its own files and is less confined than its domain. For a UNIT whose program carries an
+# entrypoint label (TYPE_exec_t), a policy module of lss (lss_nnp_TYPE) lets systemd start TYPE_t with
+# NoNewPrivileges, so the sandbox stays whole.
+_svc_selinux_nnp() {
+	local unit=$1 program type domain module dir
+	_svc_selinux_on || return 0
 	program=$(systemctl show -P ExecStart "${unit}" 2>/dev/null | sed -n 's/^{ path=\([^ ;]*\) .*/\1/p' | head -n 1)
 	type=$(stat -c %C "${program:-/nonexistent}" 2>/dev/null | cut -d : -f 3)
-	if [[ ${type} == ?*_exec_t ]]; then
-		printf 'no'
-	else
-		printf 'yes'
+	[[ ${type} == ?*_exec_t ]] || return 0
+	domain=${type%_exec_t}_t
+	module=lss_nnp_${type%_exec_t}
+	if semodule -l 2>/dev/null | awk '{ print $1 }' | grep -qxF "${module}"; then
+		return 0
 	fi
+	dir=$(mktemp -d)
+	printf '(allow init_t %s (process2 (nnp_transition nosuid_transition)))\n' "${domain}" >"${dir}/${module}.cil"
+	if ! log_command semodule -i "${dir}/${module}.cil"; then
+		rm -rf -- "${dir}"
+		die "${unit}: SELinux does not take the policy module ${module} that lets systemd start ${domain}; see the log."
+	fi
+	rm -rf -- "${dir}"
+	files_note_change "SELinux module ${module}: systemd starts ${domain} with NoNewPrivileges"
 	return
 }
 
@@ -140,9 +146,14 @@ _svc_nnp() {
 # kernel modules and the kernel log stay visible: a private /tmp would hide it from ClamAV and rkhunter, and rkhunter,
 # AIDE and Lynis check the others.
 svc_scanner_sandbox() {
-	local level=$1 path
+	local level=$1 path nnp=yes
 	shift
-	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=$(_svc_nnp)" ProtectControlGroups=yes \
+	# Under SELinux a scanner enters its own domain (aide_t, antivirus_t) when lss's wrapper runs it. NoNewPrivileges
+	# blocks that change; the scanner then stays in init_t, which may not write its reports.
+	if _svc_selinux_on; then
+		nnp=no
+	fi
+	printf '%s\n' "ProtectSystem=${level}" ProtectHome=read-only "NoNewPrivileges=${nnp}" ProtectControlGroups=yes \
 		ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
 		LockPersonality=yes SystemCallArchitectures=native
 	for path in "$@"; do
@@ -152,15 +163,16 @@ svc_scanner_sandbox() {
 }
 
 # svc_sandbox UNIT [DIRECTIVE...]: confines a service with a drop-in (lss-sandbox.conf): read-only system, no home
-# directories, a private /tmp and /dev, no kernel tunables, modules or logs, no new privileges (see _svc_nnp for
+# directories, a private /tmp and /dev, no kernel tunables, modules or logs, no new privileges (see _svc_selinux_nnp for
 # SELinux). DIRECTIVEs follow the baseline, so a service adds the paths it writes (ReadWritePaths=/var/lib/NAME) or
 # relaxes a setting it cannot live with (PrivateDevices=no); for single-value settings the last assignment wins.
 svc_sandbox() {
 	local unit=$1 directive
 	shift
+	_svc_selinux_nnp "${unit}"
 	{
 		printf '# Managed by lss (module %s). Sandbox of %s.\n[Service]\n' "${LSS_MODULE:-lss}" "${unit}"
-		printf '%s\n' "NoNewPrivileges=$(_svc_nnp "${unit}")" ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
+		printf '%s\n' NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
 			ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes ProtectControlGroups=yes \
 			ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
 			LockPersonality=yes SystemCallArchitectures=native \

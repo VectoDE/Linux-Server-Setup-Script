@@ -612,10 +612,10 @@ EOF
 	grep -qxF 'ProtectSystem=strict' <<<"${output}"
 	[ "${lines[-2]}" = 'ReadWritePaths=-/var/lib/demo' ]
 	[ "${lines[-1]}" = 'PrivateDevices=no' ]
-	# Under SELinux a program with an entrypoint label of its own enters its domain (postgresql_t, haproxy_t), which
-	# NoNewPrivileges would block; any other program keeps NoNewPrivileges.
+	# Under SELinux a program with an entrypoint label of its own enters its domain (postgresql_t), which NoNewPrivileges
+	# would block: a policy module lets systemd start that domain, once, and NoNewPrivileges stays.
 	export STUB_EXIT_selinuxenabled=0
-	local label=system_u:object_r:postgresql_exec_t:s0
+	local label=system_u:object_r:postgresql_exec_t:s0 modules=''
 	# shellcheck disable=SC2329 # called by the function under test
 	systemctl() {
 		printf '{ path=/usr/bin/postgres ; argv[]=/usr/bin/postgres -D /var/lib/pgsql/data ; ignore_errors=no }\n'
@@ -624,16 +624,28 @@ EOF
 	stat() {
 		[[ ${*: -1} == /usr/bin/postgres ]] && printf '%s\n' "${label}"
 	}
-	run svc_sandbox postgresql.service
-	grep -qxF 'NoNewPrivileges=no' <<<"${output}"
-	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	# shellcheck disable=SC2329
+	semodule() {
+		if [[ $1 == -l ]]; then
+			printf '%s\n' ${modules}
+		else
+			printf 'semodule %s %s\n' "$1" "${2##*/}" >>"${STUB_LOG}"
+			cat "$2" >>"${STUB_LOG}"
+		fi
+	}
+	svc_sandbox postgresql.service >"${BATS_TEST_TMPDIR}/dropin"
+	grep -qxF 'NoNewPrivileges=yes' "${BATS_TEST_TMPDIR}/dropin"
+	grep -qxF 'semodule -i lss_nnp_postgresql.cil' "${STUB_LOG}"
+	grep -qxF '(allow init_t postgresql_t (process2 (nnp_transition nosuid_transition)))' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	modules='lss_nnp_postgresql'
+	svc_sandbox postgresql.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+	# A program without a domain of its own (bin_t) stays in init_t; there is nothing to allow.
 	label=system_u:object_r:bin_t:s0
-	run svc_sandbox pgadmin.service
-	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
-	export STUB_EXIT_selinuxenabled=1
-	label=system_u:object_r:postgresql_exec_t:s0
-	run svc_sandbox postgresql.service
-	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	modules=''
+	svc_sandbox pgadmin.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
 }
 
 @test "svc_apparmor_confined needs an enforcing profile, from the list or the label of a running process" {
