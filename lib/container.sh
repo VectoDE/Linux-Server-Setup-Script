@@ -16,8 +16,9 @@
 #   - the socket of a container engine is never mounted, except into the management tool (CTR_SOCKET_CONTAINERS)
 
 # Containers that may mount the socket of the engine. Whoever controls that socket controls the host; Portainer is a
-# management tool and needs it, nothing else does.
-CTR_SOCKET_CONTAINERS="lss-portainer"
+# management tool and needs it, and the socket proxy of the traefik module passes only read-only container calls
+# on to Traefik (its Docker provider). Nothing else gets it.
+CTR_SOCKET_CONTAINERS="lss-portainer lss-traefik-docker"
 # Capabilities no container of lss gets, whatever a module asks for: each one hands over the kernel or other processes.
 CTR_DENIED_CAPS="SYS_ADMIN SYS_MODULE SYS_RAWIO SYS_PTRACE SYS_BOOT SYS_TIME DAC_READ_SEARCH MAC_ADMIN MAC_OVERRIDE BPF PERFMON NET_ADMIN"
 CTR_DEFAULT_MEMORY=512m

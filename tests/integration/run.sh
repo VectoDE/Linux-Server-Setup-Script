@@ -241,22 +241,36 @@ if [[ $1 == --profile ]]; then
 	exit 0
 fi
 
-# The tls module gets its certificates from Pebble.
-if [[ " $* " == *[\ ,]tls[\ ,]* ]]; then
+# The tls module and Traefik's own ACME client get their certificates from Pebble.
+if [[ " $* " == *[\ ,]tls[\ ,]* || " $* " == *[\ ,]traefik[\ ,]* ]]; then
 	group_start "${system}: Pebble (ACME test server)"
 	pebble_start
 	group_end
 fi
 
 for item in "$@"; do
-	IFS=',' read -ra set <<<"${item}"
-	group_start "${system}: ${set[*]}"
+	# LSS_KEY=VALUE in a set is a setting for this set only (nginx,traefik,LSS_TRAEFIK_WAF=off), added to the test
+	# settings for its install, verify and removal.
+	IFS=',' read -ra parts <<<"${item}"
+	set=()
+	extra=()
+	for part in "${parts[@]}"; do
+		if [[ ${part} =~ ^LSS_[A-Z0-9_]+=[A-Za-z0-9_.:/@-]*$ ]]; then
+			extra+=("${part}")
+		else
+			set+=("${part}")
+		fi
+	done
+	group_start "${system}: ${set[*]}${extra[*]:+ (${extra[*]})}"
+	if ((${#extra[@]} > 0)); then
+		printf '%s\n' "${extra[@]}" | in_target "cat >> /etc/lss/lss.conf"
+	fi
 	before=$(resources_snapshot)
 	started=${SECONDS}
 	memory_watch_start
 	in_target "${LSS_RUN} --yes --no-color install ${set[*]}"
 	in_target "${LSS_RUN} --yes --no-color verify"
-	resources_report "${system} ${set[*]}" "${before}" "${started}"
+	resources_report "${system} ${set[*]}${extra[*]:+ (${extra[*]})}" "${before}" "${started}"
 	mail_flow "${set[@]}"
 	install_again "${set[@]}"
 	if [[ ${LSS_TEST_KEEP:-0} != 1 ]]; then
@@ -264,6 +278,7 @@ for item in "$@"; do
 			in_target "${LSS_RUN} --yes --no-color remove ${set[i]}"
 			in_target "! lss status | grep -q '^${set[i]} '"
 		done
+		in_target "cat > /etc/lss/lss.conf" <"${settings}"
 	fi
 	group_end
 done

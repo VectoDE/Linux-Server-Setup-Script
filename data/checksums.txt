@@ -106,3 +106,11 @@ alertmanager-0.34.1 x86_64 265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464
 alertmanager-0.34.1 aarch64 d98d6cbaf52151c7e76e24355fec88b11cebcb9875d4cdd8b76ddce7a7e5535c https://github.com/prometheus/alertmanager/releases/download/v0.34.1/alertmanager-0.34.1.linux-arm64.tar.gz
 node_exporter-1.12.1 x86_64 b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63 https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-amd64.tar.gz
 node_exporter-1.12.1 aarch64 ad35b605f9954b9f1ffddf5ba054bdc5a98d790b9eae5291e1eeb83f1ecbd0e7 https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-arm64.tar.gz
+
+# Traefik 3.7.15: SHA-256 from traefik_v3.7.15_checksums.txt of the release, which matches the digests GitHub
+# publishes for the assets (gh api repos/traefik/traefik/releases/tags/v3.7.15, checked 2026-10-15).
+traefik-3.7.15 x86_64 5b9f51199fcb7a3b5f7ae0f9dae8dcf01efadafd92c5fca96ea2822eca81f8e6 https://github.com/traefik/traefik/releases/download/v3.7.15/traefik_v3.7.15_linux_amd64.tar.gz
+traefik-3.7.15 aarch64 1866d8e831b95d14b599bb59eb20d2033b979c0cb1e347b48a0866a9b810454e https://github.com/traefik/traefik/releases/download/v3.7.15/traefik_v3.7.15_linux_arm64.tar.gz
+# Coraza http-wasm plugin for Traefik 0.3.0 (Coraza with the OWASP Core Rule Set 4.0.0 compiled in). The release of
+# 2024 has no published digest; the SHA-256 is that of the asset downloaded on 2026-10-15, which pins it from then on.
+coraza-http-wasm-0.3.0 any b96680b46e61287faae243e360db5de34e4f315e2a8ee105fedddc176e79b1e7 https://github.com/jcchavezs/coraza-http-wasm-traefik/releases/download/v0.3.0/coraza-http-wasm-v0.3.0.zip

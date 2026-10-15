@@ -15,7 +15,7 @@ set -Eeuo pipefail
 # change notes it sets reach the caller.
 shopt -s inherit_errexit lastpipe
 
-for library in log os config files template secrets state pkg repo fetch service firewall container web mail monitoring module; do
+for library in log os config files template secrets state pkg repo fetch service firewall container web traefik mail monitoring module; do
 	# shellcheck source=/dev/null
 	source "${LSS_ROOT}/lib/${library}.sh"
 done

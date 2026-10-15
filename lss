@@ -14,7 +14,7 @@ LSS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
 LSS_VERSION=$(<"${LSS_ROOT}/VERSION")
 export LSS_ROOT LSS_VERSION
 
-for library in log os config files template secrets state pkg repo fetch service firewall container web monitoring module ui; do
+for library in log os config files template secrets state pkg repo fetch service firewall container web traefik monitoring module ui; do
 	# shellcheck source=/dev/null
 	source "${LSS_ROOT}/lib/${library}.sh"
 done

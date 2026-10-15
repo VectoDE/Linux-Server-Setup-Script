@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web, runtime, database, database-alt, container, backup, backup-alt, monitoring, network, mail]
+        group: [base, security, scanners, web, edge, runtime, database, database-alt, container, backup, backup-alt, monitoring, network, mail]
         arch: [x64, arm64]
         include:
           - group: base
@@ -43,6 +43,15 @@ jobs:
           # Each web server alone, then with certificates (Pebble) and sites; then HAProxy.
           - group: web
             modules: nginx,tls,vhost apache,tls,vhost caddy,tls,vhost haproxy nginx,modsecurity apache,modsecurity
+          # Traefik in front: alone with its own ACME client (Pebble), then before each web server in backend mode with
+          # sites, an admin tool, fail2ban or CrowdSec, and every WAF mode. LSS_KEY=VALUE applies to its set only.
+          - group: edge
+            modules: >-
+              traefik,LSS_TRAEFIK_ACME=true
+              nginx,tls,vhost,php,adminer,fail2ban,traefik,LSS_TRAEFIK_ADMIN_HOST=admin.example.com
+              apache,tls,vhost,modsecurity,traefik,LSS_TRAEFIK_WAF=both
+              traefik,caddy,php,adminer,crowdsec,LSS_TRAEFIK_WAF=off
+              apache,modsecurity,traefik,LSS_TRAEFIK_WAF=modsecurity
           - group: runtime
             modules: php,composer nginx,php node python ruby java go dotnet
           # Conflicting engines (mariadb/mysql, redis/valkey) run in separate jobs: a removal keeps their data.
@@ -196,7 +205,7 @@ jobs:
           if [[ $RUN == kernel ]]; then
             tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard wireguard
           elif [[ $RUN == containers ]]; then
-            tests/integration/run.sh "$SYSTEM" firewall,docker,portainer firewall,k3s
+            tests/integration/run.sh "$SYSTEM" firewall,docker,portainer firewall,docker,traefik,LSS_TRAEFIK_DOCKER=true firewall,k3s
           else
             case $SYSTEM:$RUN in
             vm-debian-*:"profile minimal-secure") minimum=82 ;;

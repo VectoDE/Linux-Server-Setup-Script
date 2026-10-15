@@ -31,6 +31,11 @@ now or later.
   (NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK, Temurin where missing), `go` (official
   archive) and `dotnet` (.NET SDK, telemetry off), all from repositories with pinned keys or checksum-verified
   downloads.
+- `traefik`: Traefik as an edge proxy on ports 80, 443 and 443/udp (HTTP/3) with security headers, HSTS, a JSON
+  access log, fail2ban or CrowdSec, and the OWASP Coraza WAF (or ModSecurity behind it). nginx, Apache or Caddy move
+  to 127.0.0.1 behind it and keep their sites, PHP and admin tools. Applications get routes through
+  `web_proxy_route`, which falls back to a reverse-proxy site without Traefik; the Docker provider is opt-in and goes
+  through a read-only socket proxy.
 - `modsecurity`: the ModSecurity web application firewall with the OWASP Core Rule Set for nginx and Apache on every
   supported system, with a module built from verified sources where the distribution has none.
 - Database modules: `mariadb`, `mysql`, `postgresql`, `redis`, `valkey` and `mongodb`, on localhost with hardened

@@ -4,14 +4,14 @@
 
 MOD_NAME="apache"
 MOD_GROUP="web"
-MOD_DESCRIPTION="Apache httpd web server: HTTPS only (TLS 1.2 and 1.3), HTTP/2, security headers, admin port on localhost"
+MOD_DESCRIPTION="Apache httpd web server: HTTPS only (TLS 1.2 and 1.3), HTTP/2, security headers, admin port on localhost; behind Traefik on 127.0.0.1 only"
 MOD_REQUIRES="system"
 MOD_CONFLICTS="nginx caddy"
 MOD_OPTIONS="max_body|64m|Largest request body (uploads), for example 64m or 1g
 admin_public|false|Serve the admin interfaces (phpMyAdmin, Adminer, pgAdmin) on port 8090 to everyone, with TLS and a password (user admin, lss secrets show web-admin-password); otherwise only on 127.0.0.1 (use an SSH tunnel)"
 MOD_SECRETS="web-admin-password"
 
-APACHE_MODULES_DEB="ssl headers rewrite proxy proxy_http proxy_fcgi proxy_wstunnel setenvif http2 socache_shmcb auth_basic authn_file"
+APACHE_MODULES_DEB="ssl headers rewrite proxy proxy_http proxy_fcgi proxy_wstunnel setenvif http2 socache_shmcb auth_basic authn_file remoteip"
 
 _apache_root() {
 	if os_is_debian; then printf '/etc/apache2'; else printf '/etc/httpd'; fi
@@ -60,9 +60,28 @@ _apache_stapling_cache() {
 	return
 }
 
+# The listeners: ports 80 and 443 on every address, or the backend ports on 127.0.0.1 behind Traefik. The sites name
+# their port through ${LSS_HTTP_PORT} and ${LSS_HTTPS_PORT}, so a switch of the mode leaves them alone. The stock
+# Listen lines (ports.conf, httpd.conf, ssl.conf) are switched off.
+_apache_listen_conf() {
+	local address=''
+	web_backend && address=127.0.0.1:
+	printf 'Define LSS_HTTP_PORT %s\nDefine LSS_HTTPS_PORT %s\n' "$(web_http_port)" "$(web_https_port)"
+	printf 'Listen %s%s\nListen %s%s https\n' "${address}" "$(web_http_port)" "${address}" "$(web_https_port)"
+	# %a is the client: behind Traefik mod_remoteip takes it from X-Forwarded-For, which only Traefik on the loopback
+	# interface may set; logs, fail2ban and ModSecurity then see the client instead of Traefik.
+	# shellcheck disable=SC2016 # Apache format strings
+	printf 'LogFormat "%%a %%l %%u %%t \\"%%r\\" %%>s %%b \\"%%{Referer}i\\" \\"%%{User-Agent}i\\"" lss_combined\n'
+	if web_backend; then
+		printf 'RemoteIPHeader X-Forwarded-For\nRemoteIPInternalProxy 127.0.0.1 ::1\n'
+	fi
+	return
+}
+
 _apache_global_conf() {
 	cat <<EOF
 # Managed by lss (module apache). Sites: $(web_conf_dir apache)/sites, admin paths: $(web_conf_dir apache)/admin.
+$(_apache_listen_conf)
 ServerTokens Prod
 ServerSignature Off
 TraceEnable Off
@@ -103,7 +122,7 @@ EOF
 _apache_default_conf() {
 	cat <<EOF
 # Managed by lss (module apache). Requests for host names without a site.
-<VirtualHost *:80>
+<VirtualHost *:\${LSS_HTTP_PORT}>
 	ServerName lss-default.invalid
 	DocumentRoot ${WEB_DEFAULT_ROOT}
 	Alias /.well-known/acme-challenge/ ${WEB_ACME_ROOT}/.well-known/acme-challenge/
@@ -112,7 +131,7 @@ _apache_default_conf() {
 	</Directory>
 </VirtualHost>
 
-<VirtualHost *:443>
+<VirtualHost *:\${LSS_HTTPS_PORT}>
 	ServerName lss-default.invalid
 	SSLEngine on
 	SSLCertificateFile ${WEB_TLS_DIR}/default/fullchain.pem
@@ -150,7 +169,7 @@ _apache_admin_conf() {
 EOF
 	fi
 	web_headers apache | grep -v Strict-Transport-Security
-	printf '\tErrorLog %s\n\tCustomLog %s combined\n' "$(web_log_file apache error)" "$(web_log_file apache access)"
+	printf '\tErrorLog %s\n\tCustomLog %s lss_combined\n' "$(web_log_file apache error)" "$(web_log_file apache access)"
 	printf '\tIncludeOptional lss/admin/*.conf\n</VirtualHost>\n'
 	return
 }
@@ -178,19 +197,30 @@ _apache_debian_enable() {
 # RHEL family: mod_ssl's ssl.conf carries a test virtual host and welcome.conf the test page; lss replaces both.
 _apache_rhel_files() {
 	file_write 0644 root:root /etc/httpd/conf.d/ssl.conf <<'EOF'
-# Managed by lss (module apache). The TLS settings and virtual hosts are in conf.d/lss.conf and lss/.
-Listen 443 https
+# Managed by lss (module apache). The TLS settings, the Listen lines and the virtual hosts are in conf.d/lss.conf
+# and lss/.
 SSLPassPhraseDialog exec:/usr/libexec/httpd-ssl-pass-dialog
 SSLSessionCache shmcb:/run/httpd/sslcache(512000)
 SSLSessionCacheTimeout 300
 SSLCryptoDevice builtin
 EOF
 	file_write 0644 root:root /etc/httpd/conf.d/welcome.conf <<<'# Managed by lss (module apache). No test page.'
+	# httpd.conf listens on port 80 itself; conf.d/lss.conf has the Listen lines of both modes instead.
+	if grep -qx 'Listen 80' /etc/httpd/conf/httpd.conf; then
+		sed 's|^Listen 80$|# Listen 80: lss sets the Listen lines in conf.d/lss.conf.|' /etc/httpd/conf/httpd.conf |
+			file_write 0644 root:root /etc/httpd/conf/httpd.conf
+	fi
+	return
+}
+
+# Debian: ports.conf carries the stock Listen lines; conf-available/zz-lss.conf has those of both modes instead.
+_apache_debian_ports() {
+	file_write 0644 root:root /etc/apache2/ports.conf <<<'# Managed by lss (module apache). The Listen lines are in conf-available/zz-lss.conf.'
 	return
 }
 
 mod_configure() {
-	local dir unit changed=0
+	local dir unit before changed=0
 	dir=$(web_conf_dir apache)
 	unit=$(web_unit apache)
 	web_prepare apache
@@ -201,15 +231,14 @@ mod_configure() {
 	_apache_admin_conf | file_write 0644 root:root "${dir}/admin.conf"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	file_write 0644 root:root "${WEB_ACME_ROOT}/.well-known/acme-challenge/lss-probe" <<<"lss"
+	before=$(files_changes_of apache)
 	if os_is_debian; then
-		local before
-		before=$(files_changes_of apache)
+		_apache_debian_ports
 		_apache_debian_enable
-		[[ $(files_changes_of apache) == "${before}" ]] || changed=1
 	else
 		_apache_rhel_files
-		[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	fi
+	[[ $(files_changes_of apache) == "${before}" ]] || changed=1
 	if opt_bool admin_public; then
 		web_admin_htpasswd apache
 		fw_allow "${WEB_ADMIN_PORT}/tcp"
@@ -227,16 +256,20 @@ mod_configure() {
 		svc_restart "${unit}"
 	fi
 	web_ids_configure
+	traefik_backend_sync apache
 	return
 }
 
 mod_verify() {
+	local http https
+	http=$(web_http_port)
+	https=$(web_https_port)
 	svc_is_active "$(web_unit apache)" || die "apache: the service is not running."
 	web_test apache || die "apache: the configuration does not load."
-	[[ $(curl -fsS --max-time 10 http://127.0.0.1/.well-known/acme-challenge/lss-probe 2>/dev/null) == lss ]] ||
-		die "apache: port 80 does not serve the ACME challenge path."
-	openssl s_client -connect 127.0.0.1:443 -servername lss-probe </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ||
-		die "apache: port 443 does not answer with TLS."
+	[[ $(curl -fsS --max-time 10 "http://127.0.0.1:${http}/.well-known/acme-challenge/lss-probe" 2>/dev/null) == lss ]] ||
+		die "apache: port ${http} does not serve the ACME challenge path."
+	openssl s_client -connect "127.0.0.1:${https}" -servername lss-probe </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ||
+		die "apache: port ${https} does not answer with TLS."
 	curl -s --max-time 10 -o /dev/null "http://127.0.0.1:${WEB_ADMIN_PORT}/" || opt_bool admin_public ||
 		die "apache: the admin port ${WEB_ADMIN_PORT} does not answer on 127.0.0.1."
 	return
@@ -245,6 +278,7 @@ mod_verify() {
 mod_remove() {
 	local unit
 	unit=$(web_unit apache)
+	traefik_backend_sync ''
 	svc_disable "${unit}"
 	svc_dropin_remove "${unit}.service" lss-sandbox
 	web_ids_remove

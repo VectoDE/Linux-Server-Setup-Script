@@ -4,7 +4,7 @@
 
 MOD_NAME="caddy"
 MOD_GROUP="web"
-MOD_DESCRIPTION="Caddy web server from its official repository: HTTPS only, security headers, JSON access log, admin port on localhost"
+MOD_DESCRIPTION="Caddy web server from its official repository: HTTPS only, security headers, JSON access log, admin port on localhost; behind Traefik on 127.0.0.1 only"
 MOD_REQUIRES="system"
 MOD_CONFLICTS="nginx apache"
 MOD_OPTIONS="max_body|64m|Largest request body (uploads), for example 64m or 1g
@@ -47,14 +47,41 @@ _caddy_headers() {
 	return
 }
 
+# Behind Traefik: the backend ports for every http:// and https:// address, the listeners on 127.0.0.1 (lss_bind,
+# which every site imports) and the client address from Traefik's X-Forwarded-For (client_ip in the access log).
+_caddy_backend_options() {
+	if web_backend; then
+		printf '\thttp_port %s\n\thttps_port %s\n' "${WEB_BACKEND_HTTP_PORT}" "${WEB_BACKEND_HTTPS_PORT}"
+	fi
+	return
+}
+
+_caddy_backend_proxies() {
+	if web_backend; then
+		printf '\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n'
+	fi
+	return
+}
+
+_caddy_bind_snippet() {
+	printf '(lss_bind) {\n'
+	if web_backend; then
+		printf '\tbind 127.0.0.1\n'
+	fi
+	printf '}\n'
+	return
+}
+
 _caddy_file() {
 	cat <<EOF
 # Managed by lss (module caddy). Sites: ${CADDY_DIR}/sites, admin paths: ${CADDY_DIR}/admin.
 {
 	auto_https off
 	admin unix/${CADDY_ADMIN_SOCKET}|0600
+$(_caddy_backend_options)
 	servers {
 		protocols h1 h2
+$(_caddy_backend_proxies)
 	}
 	log default {
 		exclude http.log.access
@@ -68,6 +95,8 @@ _caddy_file() {
 		include http.log.access
 	}
 }
+
+$(_caddy_bind_snippet)
 
 (lss_tls_headers) {
 	header {
@@ -98,6 +127,7 @@ $(_caddy_headers | grep -v Strict-Transport-Security)
 
 # Host names without a site: ACME challenges on port 80, nothing else.
 http:// {
+	import lss_bind
 	handle /.well-known/acme-challenge/* {
 		root * ${WEB_ACME_ROOT}
 		file_server
@@ -108,6 +138,7 @@ http:// {
 }
 
 https:// {
+	import lss_bind
 	tls ${WEB_TLS_DIR}/default/fullchain.pem ${WEB_TLS_DIR}/default/privkey.pem
 	abort
 }
@@ -164,27 +195,31 @@ mod_configure() {
 		svc_restart caddy
 	fi
 	web_ids_configure
+	traefik_backend_sync caddy
 	return
 }
 
 mod_verify() {
-	local i
+	local i http https
+	http=$(web_http_port)
+	https=$(web_https_port)
 	svc_is_active caddy || die "caddy: the service is not running."
 	web_test caddy || die "caddy: the configuration does not load."
 	for ((i = 0; i < 10; i++)); do
-		[[ $(curl -fsS --max-time 5 http://127.0.0.1/.well-known/acme-challenge/lss-probe 2>/dev/null) == lss ]] && break
+		[[ $(curl -fsS --max-time 5 "http://127.0.0.1:${http}/.well-known/acme-challenge/lss-probe" 2>/dev/null) == lss ]] && break
 		sleep 1
 	done
-	[[ $(curl -fsS --max-time 10 http://127.0.0.1/.well-known/acme-challenge/lss-probe 2>/dev/null) == lss ]] ||
-		die "caddy: port 80 does not serve the ACME challenge path."
-	openssl s_client -connect 127.0.0.1:443 -servername lss-probe </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ||
-		die "caddy: port 443 does not answer with TLS."
+	[[ $(curl -fsS --max-time 10 "http://127.0.0.1:${http}/.well-known/acme-challenge/lss-probe" 2>/dev/null) == lss ]] ||
+		die "caddy: port ${http} does not serve the ACME challenge path."
+	openssl s_client -connect "127.0.0.1:${https}" -servername lss-probe </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ||
+		die "caddy: port ${https} does not answer with TLS."
 	curl -s --max-time 10 -o /dev/null "http://127.0.0.1:${WEB_ADMIN_PORT}/" || opt_bool admin_public ||
 		die "caddy: the admin port ${WEB_ADMIN_PORT} does not answer on 127.0.0.1."
 	return
 }
 
 mod_remove() {
+	traefik_backend_sync ''
 	svc_disable caddy
 	svc_dropin_remove caddy.service lss-sandbox
 	web_ids_remove
