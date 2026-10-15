@@ -40,12 +40,15 @@ target_start() {
 	return
 }
 
+# target_stop [STATUS]: removes the container, with diagnostics first when STATUS (default: $?) is not 0; exits with
+# STATUS. Pass the status from an EXIT trap: under set -e, "(exit N)" there would end the trap before this runs.
 target_stop() {
-	local status=$?
+	local status=${1:-$?}
 	set +e
 	if [[ ${status} -ne 0 ]]; then
 		echo "Diagnostics (exit status ${status}):"
-		in_target 'ls -la /opt/lss /usr/local/sbin 2>&1; tail -n 80 /var/log/lss/*.log 2>/dev/null; journalctl -t lss -n 60 --no-pager' </dev/null
+		in_target 'ls -la /opt/lss /usr/local/sbin 2>&1; tail -n 80 /var/log/lss/*.log 2>/dev/null
+			journalctl -t lss -n 60 --no-pager; journalctl -u ssh -u sshd -n 40 --no-pager' </dev/null
 	fi
 	docker rm -f "${TARGET_CONTAINER}" >/dev/null 2>&1
 	exit "${status}"

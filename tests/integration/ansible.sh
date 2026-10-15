@@ -39,7 +39,7 @@ play() {
 	return
 }
 
-trap 'status=$?; rm -rf -- "${work}"; (exit "${status}"); target_stop' EXIT
+trap 'status=$?; rm -rf -- "${work}"; target_stop "${status}"' EXIT
 target_start
 
 # Python for Ansible and an SSH login for root with a key of this run, as on a fresh cloud server.

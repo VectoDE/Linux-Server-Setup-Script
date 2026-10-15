@@ -69,7 +69,7 @@ expect_refused() {
 }
 
 # target_stop reads the exit status of the test, so the cleanup before it passes the status on.
-trap 'status=$?; rm -rf -- "${RELEASE_DIR}"; (exit "${status}"); target_stop' EXIT
+trap 'status=$?; rm -rf -- "${RELEASE_DIR}"; target_stop "${status}"' EXIT
 target_start
 
 group_start "${SYSTEM}: bootstrap.sh installs ${A}"
