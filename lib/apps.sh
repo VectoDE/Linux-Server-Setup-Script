@@ -92,7 +92,9 @@ app_compose_ready() {
 # when the daemon runs without user namespace remapping.
 _app_userns_base() {
 	local file=$1 user base
-	user=$(jq -r '."userns-remap" // empty' "${APP_DOCKER_CONFIG:-/etc/docker/daemon.json}" 2>/dev/null) || user=''
+	# The daemon.json of the docker module has the setting on a line of its own; read without jq.
+	user=$(sed -n 's/.*"userns-remap"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${APP_DOCKER_CONFIG:-/etc/docker/daemon.json}" 2>/dev/null |
+		head -n 1) || user=''
 	if [[ -z ${user} ]]; then
 		printf '0'
 		return 0

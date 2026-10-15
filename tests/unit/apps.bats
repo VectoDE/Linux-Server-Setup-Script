@@ -339,7 +339,6 @@ docker() {
 }
 
 @test "Nextcloud Office is linked once both apps are there, trusting the certificate of the web server" {
-	command -v jq >/dev/null || skip "jq is not installed"
 	config_set LSS_COLLABORA_DOMAINS office.example.com
 	LSS_MODULE=collabora
 	app_nextcloud_office
