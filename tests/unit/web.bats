@@ -207,7 +207,7 @@ EOF
 		printf '%s\n' "${TEST_GROUPS}"
 		return
 	}
-	TEST_GROUPS=www-data
+	TEST_GROUPS='www-data'
 	web_group_ensure www-data ghost
 	grep -qxF "groupadd --system ${WEB_GROUP}" "${STUB_LOG}"
 	grep -qxF "usermod --append --groups ${WEB_GROUP} www-data" "${STUB_LOG}"
@@ -587,6 +587,68 @@ EOF
 	run ! grep -q getsebool "${STUB_LOG}"
 }
 
+@test "under SELinux the admin port is labelled for web servers once" {
+	use_os rocky-9
+	local labelled=''
+	# shellcheck disable=SC2329 # called by the functions under test
+	pkg_install() {
+		printf 'pkg_install %s\n' "$*" >>"${STUB_LOG}"
+	}
+	# shellcheck disable=SC2329
+	semanage() {
+		printf 'semanage %s\n' "$*" >>"${STUB_LOG}"
+		[[ $2 != -l ]] || printf '%s\n' "${labelled}"
+	}
+	web_selinux_admin_port
+	run ! grep -q semanage "${STUB_LOG}"
+	export STUB_EXIT_selinuxenabled=0
+	web_selinux_admin_port
+	grep -qxF 'pkg_install policycoreutils-python-utils' "${STUB_LOG}"
+	grep -qxF 'semanage port -a -t http_port_t -p tcp 8090' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	labelled='http_port_t                    tcp      8443, 8090'
+	web_selinux_admin_port
+	run ! grep -q 'semanage port -a' "${STUB_LOG}"
+	use_os debian-13
+	: >"${STUB_LOG}"
+	web_selinux_admin_port
+	[ ! -s "${STUB_LOG}" ]
+}
+
+@test "PHP-FPM's AppArmor profile gets the lss paths before the package starts it, and is reloaded only on a change" {
+	as_test_user
+	# shellcheck source=modules/runtime/php.sh
+	source "${REPO_ROOT}/modules/runtime/php.sh"
+	LSS_MODULE=php
+	export LSS_PHP_WRITABLE_PATHS='/var/www /srv/app/'
+	PHP_APPARMOR_PROFILE=${BATS_TEST_TMPDIR}/apparmor.d/php-fpm
+	PHP_APPARMOR_LOCAL=${BATS_TEST_TMPDIR}/apparmor.d/local/php-fpm
+	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/apparmor-enabled
+	echo Y >"${SVC_APPARMOR_ENABLED}"
+	# shellcheck disable=SC2329 # called by the functions under test
+	apparmor_parser() {
+		printf 'apparmor_parser %s\n' "$*" >>"${STUB_LOG}"
+	}
+	# Without the profile (Debian, Ubuntu 22.04, the RHEL family) nothing is written.
+	_php_apparmor
+	[ ! -e "${PHP_APPARMOR_LOCAL}" ]
+	mkdir -p "$(dirname "${PHP_APPARMOR_LOCAL}")"
+	: >"${PHP_APPARMOR_PROFILE}"
+	_php_apparmor
+	grep -qxF 'owner @{run}/systemd/notify w,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/usr/share/lss/** r,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/run/php-fpm/* rwlk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/var/lib/php/lss-sessions/** rwk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/var/www/** rwk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF '/srv/app/** rwk,' "${PHP_APPARMOR_LOCAL}"
+	grep -qxF "apparmor_parser -r ${PHP_APPARMOR_PROFILE}" "${STUB_LOG}"
+	[ "${LSS_FILE_CHANGED}" = 1 ]
+	: >"${STUB_LOG}"
+	_php_apparmor
+	[ "${LSS_FILE_CHANGED}" = 0 ]
+	[ ! -s "${STUB_LOG}" ]
+}
+
 @test "site names that could leave the configuration directory are refused" {
 	run _web_name_check '../etc'
 	[ "${status}" -ne 0 ]
@@ -952,8 +1014,7 @@ EOF
 	}
 	# shellcheck disable=SC2329
 	pkg_install() {
-		printf 'pkg_install %s
-' "$*" >>"${STUB_LOG}"
+		printf 'pkg_install %s\n' "$*" >>"${STUB_LOG}"
 	}
 	_modsecurity_nginx_headers "${tree}"
 	[ "$(<"${tree}/src/http/ngx_http_request.h")" = patched ]

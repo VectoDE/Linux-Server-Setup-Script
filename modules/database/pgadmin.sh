@@ -239,8 +239,11 @@ mod_verify() {
 		[[ ${status} != 200 ]] || break
 		sleep 1
 	done
-	[[ ${status} == 200 ]] ||
+	if [[ ${status} != 200 ]]; then
+		# The web server's error log names the cause: the proxy to gunicorn, permissions or a ModSecurity rule.
+		tail -n 20 "$(web_log_file "$(web_server)" error)" >&2 || true
 		die "pgadmin: the admin port answers ${status:-nothing} for /${PGADMIN_PATH}/login instead of the login page."
+	fi
 	grep -qi 'pgadmin' <<<"${page}" || die "pgadmin: /${PGADMIN_PATH}/login is not pgAdmin's login page."
 	return
 }

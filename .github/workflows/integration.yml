@@ -135,39 +135,16 @@ jobs:
       matrix:
         system: [debian-12, debian-13, rocky-9, almalinux-10]
         run: [kernel, profile minimal-secure]
-        include:
-          # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases.
-          - system: debian-13
-            run: profile all
-          # Docker with Portainer, then k3s (after Docker is removed; they conflict) on every supported system. The
-          # runner itself already has Docker, so these need a clean VM.
-          - system: debian-12
-            run: containers
-          - system: debian-13
-            run: containers
-          - system: ubuntu-22.04
-            run: containers
-          - system: ubuntu-24.04
-            run: containers
-          - system: ubuntu-26.04
-            run: containers
-          - system: rocky-9
-            run: containers
-          - system: almalinux-10
-            run: containers
-          # minimal-secure on the newest Ubuntu release in a VM, without the runner image's extra software.
-          - system: ubuntu-26.04
-            run: profile minimal-secure
-          # The Kubernetes node profile with a Lynis audit.
-          - system: debian-13
-            run: profile k8s-node
-          - system: almalinux-10
-            run: profile k8s-node
-          # Docker with the monitoring stack, as on a DevOps server.
-          - system: debian-13
-            run: profile devops
-          - system: almalinux-10
-            run: profile devops
+        # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases: on
+        # Debian 13 for every change, on every distribution in the nightly and the manual runs. Docker with Portainer,
+        # then k3s (after Docker is removed; they conflict) on every supported system, in a clean VM because the runner
+        # already has Docker; minimal-secure on the newest Ubuntu release; the Kubernetes node profile with a Lynis audit;
+        # Docker with the monitoring stack, as on a DevOps server.
+        include: >-
+          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"}',
+          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+          && '{"system":"debian-12","run":"profile all"},{"system":"debian-13","run":"profile all"},{"system":"rocky-9","run":"profile all"},{"system":"almalinux-10","run":"profile all"},{"system":"ubuntu-22.04","run":"profile all"},{"system":"ubuntu-24.04","run":"profile all"},{"system":"ubuntu-26.04","run":"profile all"}'
+          || '{"system":"debian-13","run":"profile all"}')) }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -202,7 +179,9 @@ jobs:
             vm-debian-*:"profile minimal-secure") minimum=82 ;;
             vm-rocky-*:"profile minimal-secure" | vm-almalinux-*:"profile minimal-secure") minimum=80 ;;
             *:"profile minimal-secure") minimum=75 ;;
-            vm-debian-*) minimum=75 ;;
+            vm-rocky-*:"profile all" | vm-almalinux-*:"profile all") minimum=80 ;;
+            # The same minimum as the host job on the Ubuntu runners.
+            vm-debian-* | vm-ubuntu-*) minimum=75 ;;
             *) minimum=60 ;;
             esac
             tests/integration/run.sh "$SYSTEM" --profile "${RUN#profile }" "$minimum"
