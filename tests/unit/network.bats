@@ -231,9 +231,14 @@ KEY_B=TrMvSoP4jYQlY6RIzBgbssQqY3vxI2Pi+y71lOWWXX0=
 	config_set LSS_NTP_SERVER_ACCESS local
 	run mod_check
 	[[ ${output} == *"LSS_NTP_SERVER_ACCESS must be vpn or public."* ]]
+	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/apparmor
+	echo N >"${SVC_APPARMOR_ENABLED}"
 	[ "$(_ntp_conf)" = /etc/chrony/conf.d/lss-ntp-server.conf ]
 	use_os rocky-9
 	[ "$(_ntp_conf)" = /etc/chrony.d/lss-ntp-server.conf ]
+	# A RHEL container on a Debian or Ubuntu host: the host's AppArmor profile lets chronyd read /etc/chrony/ only.
+	echo Y >"${SVC_APPARMOR_ENABLED}"
+	[ "$(_ntp_conf)" = /etc/chrony/conf.d/lss-ntp-server.conf ]
 	[ "$(_ntp_unit)" = chronyd ]
 }
 
@@ -269,6 +274,8 @@ KEY_B=TrMvSoP4jYQlY6RIzBgbssQqY3vxI2Pi+y71lOWWXX0=
 
 @test "the time module's chrony configuration reads the confdir of ntp-server last" {
 	load_module time
+	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/apparmor
+	echo N >"${SVC_APPARMOR_ENABLED}"
 	# shellcheck disable=SC2329 # called by the functions under test
 	install() {
 		printf 'install %s\n' "$*" >>"${STUB_LOG}"

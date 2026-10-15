@@ -21,8 +21,15 @@ _ntp_unit() {
 	return
 }
 
+# _ntp_conf: the file in the directory the time module's chrony configuration reads last.
 _ntp_conf() {
-	if os_is_debian; then printf '/etc/chrony/conf.d/%s' "${NTP_FILE_NAME}"; else printf '/etc/chrony.d/%s' "${NTP_FILE_NAME}"; fi
+	local dir
+	dir=$(
+		# shellcheck source=/dev/null
+		source "$(module_file time)"
+		_time_confdir
+	)
+	printf '%s/%s' "${dir}" "${NTP_FILE_NAME}"
 	return
 }
 

@@ -42,9 +42,14 @@ mod_install() {
 }
 
 # The directory chrony reads further settings from, where ntp-server puts its own: inside chrony's directory of /etc,
-# which the AppArmor profile of chronyd on Ubuntu lets it read.
+# which the AppArmor profile of chronyd (Debian, Ubuntu) lets it read. The RHEL family uses /etc/chrony.d, except under
+# an AppArmor kernel (a container on a Debian or Ubuntu host), where the host's profile for /usr/sbin/chronyd applies.
 _time_confdir() {
-	if os_is_debian; then printf '/etc/chrony/conf.d'; else printf '/etc/chrony.d'; fi
+	if os_is_debian || [[ $(cat "${SVC_APPARMOR_ENABLED:-/sys/module/apparmor/parameters/enabled}" 2>/dev/null) == Y ]]; then
+		printf '/etc/chrony/conf.d'
+	else
+		printf '/etc/chrony.d'
+	fi
 	return
 }
 
