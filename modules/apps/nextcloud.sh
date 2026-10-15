@@ -154,6 +154,7 @@ mod_configure() {
 	app_db_secrets postgres "${NC_USER}"
 	app_secret nextcloud-admin-password "${NC_USER}" 32 admin-password
 	_nc_compose | app_compose
+	app_backup DB=postgres DB_USER=nextcloud LIVE=html
 	app_up
 	_nc_install
 	_nc_settings
@@ -177,6 +178,7 @@ _nc_dav() {
 mod_verify() {
 	local page status probe
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait status.php 200) || die "nextcloud: https://$(app_domain)/status.php does not answer."
 	[[ $(jq -r '.installed' <<<"${page%$'\n'*}" 2>/dev/null) == true ]] || die "nextcloud: Nextcloud is not installed."
 	[[ $(jq -r '.maintenance' <<<"${page%$'\n'*}" 2>/dev/null) == false ]] || die "nextcloud: Nextcloud is in maintenance mode."
@@ -196,6 +198,7 @@ mod_verify() {
 	timeout 600 systemctl start lss-nextcloud-cron.service || die "nextcloud: the background jobs fail (journalctl -u lss-nextcloud-cron)."
 	if state_installed collabora; then
 		log_command _nc_occ richdocuments:activate-config || die "nextcloud: Nextcloud Office cannot reach Collabora Online."
+		app_collabora_check
 	fi
 	return
 }

@@ -194,6 +194,8 @@ mod_configure() {
 		sandbox+=(NoNewPrivileges=no RestrictSUIDSGID=no)
 	fi
 	svc_sandbox "${SU_UNIT}.service" "${sandbox[@]}"
+	# The backup takes the deployed checkout and the state of the updater (its home) along.
+	app_backup "PATHS=${path} ${SU_HOME}"
 	svc_enable "${SU_UNIT}"
 	if [[ $(files_changes_of self-updater) != "${before}" ]]; then
 		svc_restart "${SU_UNIT}" || die "self-updater: ${SU_UNIT} does not start; see journalctl -u ${SU_UNIT}."
@@ -211,6 +213,7 @@ mod_verify() {
 	local status='' i commit
 	[[ $(_su_installed) == "${SU_VERSION}" ]] || die "self-updater: Self-Updater ${SU_VERSION} is not installed."
 	svc_is_active "${SU_UNIT}" || die "self-updater: ${SU_UNIT} is not running; see journalctl -u ${SU_UNIT}."
+	app_verify_backup
 	[[ $(stat -c '%a %U:%G' "${SU_ENV}") == "640 root:${SU_USER}" ]] || die "self-updater: ${SU_ENV} must be mode 640, root:${SU_USER}."
 	# The first deployment runs right after the start (--immediate): a clone of the repository into the workspace.
 	for ((i = 0; i < 100; i++)); do
@@ -235,6 +238,7 @@ mod_remove() {
 	file_remove "${SU_SUDOERS}"
 	file_remove "${SU_CONFIG}"
 	file_remove "${SU_ENV}"
+	app_backup_remove
 	if [[ -n $(_su_installed) ]]; then
 		log_command npm uninstall --global @vectode/self-updater || die "self-updater: npm cannot remove Self-Updater."
 		files_note_change "removed Self-Updater"

@@ -130,6 +130,7 @@ mod_configure() {
 	app_secret uptime-kuma-admin-password "${KUMA_USER}" 32 admin-password
 	_kuma_script | app_file config/lss-kuma.js "${KUMA_USER}" 0444
 	_kuma_compose | app_compose
+	app_backup COPY=data
 	app_up
 	app_site "$(opt_int port)"
 	app_wait '' 302 >/dev/null || die "uptime-kuma: https://$(app_domain)/ does not answer."
@@ -144,6 +145,7 @@ mod_configure() {
 mod_verify() {
 	local page result
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait '' 302) || die "uptime-kuma: https://$(app_domain)/ does not answer."
 	page=$(app_wait dashboard 200 60) || die "uptime-kuma: the dashboard does not answer."
 	grep -qi 'uptime kuma' <<<"${page}" || die "uptime-kuma: https://$(app_domain)/dashboard is not Uptime Kuma."

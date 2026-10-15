@@ -325,8 +325,15 @@ and writes a bucket and an object to MinIO. Nextcloud and Collabora Online link 
 in either order.
 
 Data lives in Docker volumes named after the stack (`lss-nextcloud_html`, `lss-nextcloud_db`, ...). `lss remove`
-keeps them; `--purge` deletes them with the secrets. Back them up with `docker run` or a restic path of your own;
-the `restic` module does not include them yet.
+keeps them; `--purge` deletes them with the secrets. Before every restic backup, `/usr/local/lib/lss/app-backup` saves
+what each app registered in `/etc/lss/app-backup`. It dumps the PostgreSQL and MariaDB databases (Nextcloud, Keycloak,
+n8n, Matomo, WordPress) and copies the SQLite apps (Forgejo, Vaultwarden, Uptime Kuma) while the app is paused for a
+moment, both to `/var/backups/lss-apps`. Restic backs up that directory together with the file volumes, which stay where
+they are (Nextcloud's files, MinIO's objects). `lss verify` runs this step for each app, so a broken dump shows up before
+the night's backup.
+
+Nextcloud and Collabora Online call each other through the web server, and both check the other's certificate. Without
+the `tls` module, every site gets a self-signed certificate for its own names, and each app trusts the other's site.
 
 `minio` is the MinIO server code, maintained as [PGSTY Silo](https://github.com/pgsty/silo) since MinIO archived its
 community edition in 2026. The S3 API answers on `LSS_MINIO_DOMAINS`, the web console on

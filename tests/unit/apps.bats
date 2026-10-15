@@ -21,6 +21,9 @@ port|8081|Port on 127.0.0.1"
 	printf '{"icc": false}\n' >"${APP_DOCKER_CONFIG}"
 	ENGINE_LOG=${BATS_TEST_TMPDIR}/engine.log
 	: >"${ENGINE_LOG}"
+	APP_BACKUP_SCRIPT=${BATS_TEST_TMPDIR}/app-backup
+	APP_BACKUP_REGISTRY=${BATS_TEST_TMPDIR}/app-backup.d
+	APP_BACKUP_DIR=${BATS_TEST_TMPDIR}/lss-apps
 	WRITES=${BATS_TEST_TMPDIR}/writes
 	: >"${WRITES}"
 	# file_write as the test user; the owner it was asked for goes to $WRITES ("== MODE OWNER DEST").
@@ -340,6 +343,11 @@ docker() {
 
 @test "Nextcloud Office is linked once both apps are there, trusting the certificate of the collabora site" {
 	config_set LSS_COLLABORA_DOMAINS office.example.com
+	# shellcheck disable=SC2329 # called by app_collabora_check
+	curl() {
+		printf 'curl %s\n' "$*" >>"${STUB_LOG}"
+		printf '{"status": "Ok"}\n200'
+	}
 	LSS_MODULE=collabora
 	app_nextcloud_office
 	[ ! -s "${ENGINE_LOG}" ]
@@ -354,16 +362,17 @@ docker() {
 	grep -qF "exec -T app sh -c cat >/tmp/lss-web.pem" "${ENGINE_LOG}"
 	grep -qxF "${occ} security:certificates:import /tmp/lss-web.pem" "${ENGINE_LOG}"
 	grep -qxF "${occ} richdocuments:activate-config" "${ENGINE_LOG}"
+	grep -q '^curl .*--resolve office.example.com:443:127.0.0.1 -X POST .*https://office.example.com/hosting/wopiAccessCheck$' "${STUB_LOG}"
 	[ -n "$(state_get nextcloud trusted_cert)" ]
 	: >"${ENGINE_LOG}"
 	app_nextcloud_office
 	run ! grep -q 'certificates:import' "${ENGINE_LOG}"
 	# With the tls module, only a private CA needs trusting.
 	state_set tls status installed
-	[ -z "$(_app_nc_trust)" ]
+	[ -z "$(_app_route_trust collabora)" ]
 	printf 'CA\n' >"${BATS_TEST_TMPDIR}/ca.pem"
 	config_set LSS_TLS_CA_BUNDLE "${BATS_TEST_TMPDIR}/ca.pem"
-	[ "$(_app_nc_trust)" = "${BATS_TEST_TMPDIR}/ca.pem" ]
+	[ "$(_app_route_trust collabora)" = "${BATS_TEST_TMPDIR}/ca.pem" ]
 	DOCKER_EXIT=1 run app_nextcloud_office
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"Nextcloud Office (richdocuments) cannot be installed"* ]]
@@ -446,4 +455,101 @@ docker() {
 	}
 	APP_GET_DOMAIN=console.example.com app_get login >/dev/null
 	grep -qF -- "--resolve console.example.com:443:127.0.0.1 https://console.example.com/login" "${STUB_LOG}"
+}
+
+@test "Collabora trusts the host CAs and the Nextcloud route, and starts again when Nextcloud comes second" {
+	config_set LSS_NEXTCLOUD_DOMAINS cloud.example.com
+	config_set LSS_COLLABORA_DOMAINS office.example.com
+	WEB_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	mkdir -p "${WEB_TLS_DIR}/nextcloud" "${WEB_TLS_DIR}/default"
+	printf 'DEFAULT\n' >"${WEB_TLS_DIR}/default/fullchain.pem"
+	local trust="${CTR_CONFIG_DIR}/lss-collabora/trust/ca.pem"
+	# Collabora alone: the CAs of the host (or the default certificate on a host without a bundle).
+	app_collabora_trust
+	[ -s "${trust}" ]
+	grep -qxF "== 0444 root:root ${trust}" "${WRITES}"
+	run ! grep -qxF NEXTCLOUD "${trust}"
+	# With the Nextcloud route: its self-signed certificate too.
+	printf 'NEXTCLOUD\n' >"${WEB_TLS_DIR}/nextcloud/fullchain.pem"
+	app_collabora_trust
+	[ "${LSS_FILE_CHANGED}" = 1 ]
+	grep -qxF NEXTCLOUD "${trust}"
+	app_collabora_trust
+	[ "${LSS_FILE_CHANGED}" = 0 ]
+	# Nextcloud second: Collabora gets the new certificate and starts again before the access check.
+	# shellcheck disable=SC2329 # called by app_nextcloud_office
+	curl() {
+		printf 'curl %s\n' "$*" >>"${STUB_LOG}"
+		printf '{"status": "Ok"}\n200'
+	}
+	command -v jq >/dev/null || skip "jq is not installed"
+	state_set docker status installed
+	state_set collabora status installed
+	printf 'services: {}\n' >"${CTR_CONFIG_DIR}/lss-collabora/compose.yaml"
+	printf 'NEXTCLOUD 2\n' >"${WEB_TLS_DIR}/nextcloud/fullchain.pem"
+	LSS_MODULE=nextcloud
+	app_nextcloud_office
+	grep -q "compose --project-name lss-collabora .* up .*--force-recreate" "${ENGINE_LOG}"
+	grep -q '^curl .* https://office.example.com/hosting/wopiAccessCheck$' "${STUB_LOG}"
+	grep -qxF 'NEXTCLOUD 2' "${trust}"
+}
+
+@test "the WOPI access check of Collabora must reach Nextcloud with a valid certificate" {
+	config_set LSS_NEXTCLOUD_DOMAINS cloud.example.com
+	config_set LSS_COLLABORA_DOMAINS office.example.com
+	# shellcheck disable=SC2329 # called by app_collabora_check
+	curl() {
+		printf 'curl %s\n' "$*" >>"${STUB_LOG}"
+		printf '%s\n%s' "${ANSWER}" "${CODE:-200}"
+	}
+	ANSWER='{"status": "Ok"}' app_collabora_check
+	grep -qF -- '--data {"callbackUrl":"https://cloud.example.com/status.php"}' "${STUB_LOG}"
+	ANSWER='{"status": "SelfSignedCertificate"}' run app_collabora_check
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'cannot reach Nextcloud at https://cloud.example.com with a valid certificate ({"status": "SelfSignedCertificate"}'* ]]
+	ANSWER='{"status": "Ok"}' CODE=502 run app_collabora_check
+	[ "${status}" -eq 1 ]
+}
+
+@test "an app registers its data for the backup, which verify saves and removal forgets" {
+	app_backup DB=postgres DB_USER=demo LIVE=html 'COPY=data cache'
+	local conf="${APP_BACKUP_REGISTRY}/demo.conf"
+	grep -qxF "== 0755 root:root ${APP_BACKUP_SCRIPT}" "${WRITES}"
+	cmp "${REPO_ROOT}/libexec/lss-app-backup" "${APP_BACKUP_SCRIPT}"
+	grep -qxF "== 0600 root:root ${conf}" "${WRITES}"
+	grep -qxF PROJECT=lss-demo "${conf}"
+	grep -qxF "COMPOSE=${CTR_CONFIG_DIR}/lss-demo/compose.yaml" "${conf}"
+	grep -qxF DB=postgres "${conf}"
+	grep -qxF DB_USER=demo "${conf}"
+	grep -qxF 'COPY=data cache' "${conf}"
+	grep -qxF LIVE=html "${conf}"
+	grep -qxF PATHS= "${conf}"
+	run app_backup DATABASE=postgres
+	[[ ${output} == *"app_backup does not know 'DATABASE=postgres'"* ]]
+	run app_backup 'PATHS=/srv;rm'
+	[ "${status}" -eq 1 ]
+	# verify runs the script for this app; a database app needs a dump.
+	printf '#!/bin/sh\necho "save $*" >>"%s"\n' "${STUB_LOG}" >"${APP_BACKUP_SCRIPT}"
+	chmod +x "${APP_BACKUP_SCRIPT}"
+	run app_verify_backup
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the database dump for the backup is empty"* ]]
+	grep -qxF 'save demo' "${STUB_LOG}"
+	mkdir -p "${APP_BACKUP_DIR}/demo"
+	printf 'SQL\n' >"${APP_BACKUP_DIR}/demo/db.sql"
+	app_verify_backup
+	printf '#!/bin/sh\nexit 1\n' >"${APP_BACKUP_SCRIPT}"
+	run app_verify_backup
+	[[ ${output} == *"saving the data of the app for the backup fails"* ]]
+	# Removal keeps the saved data unless --purge; the script goes with the last app.
+	app_backup_remove
+	[ ! -e "${conf}" ]
+	[ ! -e "${APP_BACKUP_REGISTRY}" ]
+	[ ! -e "${APP_BACKUP_SCRIPT}" ]
+	[ -s "${APP_BACKUP_DIR}/demo/db.sql" ]
+	run app_verify_backup
+	[[ ${output} == *"the backup would leave the app out"* ]]
+	app_backup COPY=data
+	LSS_PURGE=1 app_backup_remove
+	[ ! -e "${APP_BACKUP_DIR}/demo" ]
 }

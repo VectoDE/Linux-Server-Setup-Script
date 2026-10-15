@@ -245,3 +245,47 @@ jobs:
         run: |
           read -ra modules <<<"$MODULES"
           tests/integration/run.sh "$SYSTEM" --base "$BASE" "${modules[@]}"
+
+  # The app stacks on arm64. The arm64 runners have no KVM, so the stacks run on the runner itself (host), Ubuntu
+  # 24.04: the multi-architecture images, the database containers and the web servers on aarch64. The runner's own
+  # Docker goes first, so the docker module sets Docker up as on a fresh server.
+  apps-arm64:
+    name: ubuntu-24.04 arm64 / apps ${{ matrix.set }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        set: [office, dev, web]
+        include:
+          - set: office
+            base: docker,nginx
+            modules: nextcloud collabora,nextcloud vaultwarden
+          - set: dev
+            base: docker,apache
+            modules: forgejo uptime-kuma n8n
+          - set: web
+            base: docker,caddy,tls
+            modules: keycloak matomo wordpress minio
+            settings: LSS_MINIO_MODE=docker
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Remove the runner's Docker
+        run: |
+          sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
+          mapfile -t packages < <(dpkg-query -W -f "\${Package}\n" 'moby-*' 'docker-*' containerd 'containerd.io' 2>/dev/null)
+          [ "${#packages[@]}" -eq 0 ] || sudo NEEDRESTART_SUSPEND=1 apt-get -qq purge -y "${packages[@]}" >/dev/null
+          sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+      - name: Install, verify, reinstall, remove
+        env:
+          BASE: ${{ matrix.base }}
+          MODULES: ${{ matrix.modules }}
+          LSS_TEST_SETTINGS: ${{ matrix.settings }}
+        run: |
+          read -ra modules <<<"$MODULES"
+          tests/integration/run.sh host --base "$BASE" "${modules[@]}"

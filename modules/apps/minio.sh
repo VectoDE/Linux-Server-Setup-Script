@@ -173,9 +173,11 @@ mod_configure() {
 		printf '%s' "$(opt root_user)" | app_file config/root-user "${SILO_USER}" 0444
 		app_secret minio-root-password "${SILO_USER}" 40 root-password
 		_minio_compose | app_compose
+		app_backup LIVE=data
 		app_up
 	else
 		_minio_native
+		app_backup "PATHS=${SILO_DATA}"
 	fi
 	app_site "$(opt_int api_port)"
 	app_site "$(opt_int console_port)" minio-console "${console[@]}"
@@ -205,6 +207,7 @@ _minio_s3() {
 mod_verify() {
 	local page bucket probe user status
 	user=$(opt root_user)
+	app_verify_backup
 	if _minio_docker; then
 		app_verify_stack
 	else
@@ -244,6 +247,7 @@ mod_remove() {
 		return 0
 	fi
 	app_site_remove minio
+	app_backup_remove
 	svc_disable silo.service
 	svc_dropin_remove silo.service lss-sandbox
 	file_remove "${SILO_ETC}"

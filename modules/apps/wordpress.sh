@@ -113,6 +113,7 @@ _wp_install() {
 mod_configure() {
 	app_db_secrets mariadb "${WP_USER}"
 	_wp_compose | app_compose
+	app_backup DB=mariadb LIVE=html
 	app_up
 	app_site "$(opt_int port)"
 	app_wait wp-includes/images/w-logo-blue.png 200 >/dev/null || die "wordpress: https://$(app_domain)/ does not answer."
@@ -123,6 +124,7 @@ mod_configure() {
 mod_verify() {
 	local page jar status
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait wp-login.php 200) || die "wordpress: the login page does not answer."
 	grep -q 'name="pwd"' <<<"${page}" || die "wordpress: https://$(app_domain)/wp-login.php shows no login."
 	page=$(app_get wp-json/) || true

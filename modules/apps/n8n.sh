@@ -138,6 +138,7 @@ mod_configure() {
 	app_db_secrets postgres "${N8N_USER}"
 	app_secret n8n-encryption-key "${N8N_USER}" 48 encryption-key
 	_n8n_compose | app_compose
+	app_backup DB=postgres DB_USER=n8n LIVE=data
 	app_up
 	app_site "$(opt_int port)"
 	app_wait healthz/readiness 200 >/dev/null || die "n8n: https://$(app_domain)/healthz/readiness does not answer."
@@ -156,6 +157,7 @@ _n8n_rest() {
 mod_verify() {
 	local page jar body id name
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait healthz/readiness 200) || die "n8n: https://$(app_domain)/healthz/readiness does not answer."
 	page=$(app_wait signin 200 60) || die "n8n: the sign-in page does not answer."
 	grep -qi 'n8n' <<<"${page}" || die "n8n: https://$(app_domain)/signin is not n8n."

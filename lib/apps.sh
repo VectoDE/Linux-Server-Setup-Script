@@ -218,6 +218,9 @@ app_exec() {
 
 # Nextcloud Office: the collabora module and the nextcloud module link each other, whichever comes second.
 APP_NEXTCLOUD_PROJECT=lss-nextcloud
+APP_COLLABORA_PROJECT=lss-collabora
+# The certificates Collabora checks Nextcloud's against (mounted into the container; see app_collabora_trust).
+APP_COLLABORA_TRUST=trust/ca.pem
 
 # app_domains_of MODULE: the host names of another app module (its option domains, or MODULE.<host name>).
 app_domains_of() {
@@ -244,17 +247,50 @@ _app_nc_occ() {
 	return
 }
 
-# _app_nc_trust: the certificate Nextcloud must trust to reach the Collabora site: the CA of a private ACME server
-# (LSS_TLS_CA_BUNDLE) or, without the tls module, the self-signed certificate of the collabora site; nothing for
-# Let's Encrypt. Prints the file, or nothing.
-_app_nc_trust() {
-	local bundle
+# _app_route_trust ROUTE: the certificate an app must trust to reach the route ROUTE of this server through the web
+# server: the CA of a private ACME server (LSS_TLS_CA_BUNDLE) or, without the tls module, the self-signed certificate
+# of the route; nothing for Let's Encrypt. Prints the file, or nothing.
+_app_route_trust() {
+	local route=$1 bundle
 	if state_installed tls; then
 		bundle=$(config_option tls ca_bundle '')
 		[[ -z ${bundle} || ! -s ${bundle} ]] || printf '%s' "${bundle}"
-	elif [[ -s ${WEB_TLS_DIR}/collabora/fullchain.pem ]]; then
-		printf '%s/collabora/fullchain.pem' "${WEB_TLS_DIR}"
+	elif [[ -s ${WEB_TLS_DIR}/${route}/fullchain.pem ]]; then
+		printf '%s/%s/fullchain.pem' "${WEB_TLS_DIR}" "${route}"
 	fi
+	return
+}
+
+# app_collabora_trust: the certificates Collabora checks the one of Nextcloud against when it fetches and saves
+# documents (WOPI): the CAs of the host and the trust anchor of the Nextcloud route (_app_route_trust), in
+# APP_COLLABORA_TRUST of the collabora stack. LSS_FILE_CHANGED tells whether it changed.
+app_collabora_trust() {
+	local dir="${CTR_CONFIG_DIR}/${APP_COLLABORA_PROJECT}" bundle trust content=''
+	for bundle in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
+		if [[ -s ${bundle} ]]; then
+			content=$(<"${bundle}")
+			break
+		fi
+	done
+	trust=$(_app_route_trust nextcloud)
+	[[ -z ${trust} ]] || content+=${content:+$'\n'}$(<"${trust}")
+	# Collabora refuses an empty file; the default certificate of the web server always exists.
+	[[ -n ${content} ]] || content=$(<"${WEB_TLS_DIR}/default/fullchain.pem")
+	install -d -m 0700 "${dir}" "$(dirname "${dir}/${APP_COLLABORA_TRUST}")"
+	printf '%s\n' "${content}" | file_write 0444 root:root "${dir}/${APP_COLLABORA_TRUST}"
+	return
+}
+
+# app_collabora_check: Collabora reaches Nextcloud through the web server and accepts its certificate (the WOPI
+# access check of Collabora, the same connection it opens for every document).
+app_collabora_check() {
+	local nextcloud collabora page
+	read -r nextcloud _ <<<"$(app_domains_of nextcloud)"
+	read -r collabora _ <<<"$(app_domains_of collabora)"
+	page=$(APP_GET_DOMAIN=${collabora} app_get hosting/wopiAccessCheck -X POST -H 'Content-Type: application/json' \
+		--data "{\"callbackUrl\":\"https://${nextcloud}/status.php\"}") || true
+	[[ $(app_status "${page}") == 200 && ${page%$'\n'*} =~ \"status\":\ *\"Ok\" ]] ||
+		die "${LSS_MODULE}: Collabora Online cannot reach Nextcloud at https://${nextcloud} with a valid certificate (${page%$'\n'*})."
 	return
 }
 
@@ -277,7 +313,7 @@ app_nextcloud_office() {
 			die "${LSS_MODULE}: occ cannot set the address of Collabora Online."
 		files_note_change "linked Nextcloud Office to ${url}"
 	fi
-	trust=$(_app_nc_trust)
+	trust=$(_app_route_trust collabora)
 	if [[ -n ${trust} ]]; then
 		sum=$(sha256sum "${trust}" | cut -d ' ' -f 1)
 		if [[ $(state_get nextcloud trusted_cert) != "${sum}" ]]; then
@@ -291,6 +327,16 @@ app_nextcloud_office() {
 	fi
 	log_command _app_nc_occ richdocuments:activate-config ||
 		die "${LSS_MODULE}: Nextcloud Office cannot reach Collabora Online at ${url}; see the log."
+	# Collabora installed first knew no certificate of Nextcloud yet: it gets it now and starts again.
+	if [[ ${LSS_MODULE} == nextcloud ]]; then
+		app_collabora_trust
+		if [[ ${LSS_FILE_CHANGED} == 1 ]]; then
+			log_info "Starting ${APP_COLLABORA_PROJECT} again, so it trusts the certificate of Nextcloud"
+			ctr_compose_up "${APP_COLLABORA_PROJECT}" "${CTR_CONFIG_DIR}/${APP_COLLABORA_PROJECT}/compose.yaml" --force-recreate
+			APP_GET_DOMAIN=${first} app_wait '' 200 >/dev/null || die "${LSS_MODULE}: Collabora Online does not answer at ${url}."
+		fi
+	fi
+	app_collabora_check
 	return
 }
 
@@ -394,6 +440,64 @@ app_verify_stack() {
 	page=$(app_get '' --head) || true
 	grep -qi '^strict-transport-security:' <<<"${page}" ||
 		die "${LSS_MODULE}: https://$(app_domain)/ sends no Strict-Transport-Security header; the web server site is missing."
+	return
+}
+
+# The data of the apps for the restic backup: each app registers what lss-app-backup (libexec) saves of it before every
+# backup, whether or not the restic module is installed yet.
+APP_BACKUP_SCRIPT=/usr/local/lib/lss/app-backup
+APP_BACKUP_REGISTRY=/etc/lss/app-backup
+APP_BACKUP_DIR=/var/backups/lss-apps
+
+# app_backup KEY=VALUE...: registers the data of the app with lss-app-backup: DB=postgres|mariadb (the service "db",
+# dumped) with DB_USER, COPY=VOLUMES (copied while the app is paused: SQLite), LIVE=VOLUMES (backed up in place),
+# PATHS=DIRECTORIES (native installations); volumes and directories separated by spaces.
+app_backup() {
+	local pair key
+	local -A values=([DB]=none [DB_USER]='' [COPY]='' [LIVE]='' [PATHS]='')
+	for pair in "$@"; do
+		key=${pair%%=*}
+		[[ ${pair} == *=* && ${key} =~ ^[A-Z_]+$ && -v values[${key}] && ${pair#*=} =~ ^[A-Za-z0-9_./\ -]*$ ]] ||
+			die "${LSS_MODULE}: app_backup does not know '${pair}'."
+		values[${key}]=${pair#*=}
+	done
+	file_write 0755 root:root "${APP_BACKUP_SCRIPT}" <"${LSS_ROOT}/libexec/lss-app-backup"
+	install -d -m 0700 "${APP_BACKUP_REGISTRY}"
+	file_write 0600 root:root "${APP_BACKUP_REGISTRY}/${LSS_MODULE}.conf" <<EOT
+# Managed by lss (module ${LSS_MODULE}): what lss-app-backup saves of the app before every restic backup.
+PROJECT=$(app_project)
+COMPOSE=$(app_compose_file)
+DB=${values[DB]}
+DB_USER=${values[DB_USER]}
+COPY=${values[COPY]}
+LIVE=${values[LIVE]}
+PATHS=${values[PATHS]}
+EOT
+	return
+}
+
+# app_verify_backup: lss-app-backup saves the data of the app (the dump of its database is not empty).
+app_verify_backup() {
+	local conf="${APP_BACKUP_REGISTRY}/${LSS_MODULE}.conf"
+	[[ -f ${conf} ]] || die "${LSS_MODULE}: ${conf} is missing; the backup would leave the app out."
+	log_command "${APP_BACKUP_SCRIPT}" "${LSS_MODULE}" ||
+		die "${LSS_MODULE}: saving the data of the app for the backup fails; see the log."
+	if ! grep -qx 'DB=none' "${conf}"; then
+		[[ -s ${APP_BACKUP_DIR}/${LSS_MODULE}/db.sql ]] || die "${LSS_MODULE}: the database dump for the backup is empty."
+	fi
+	return
+}
+
+# app_backup_remove: the registration of the app; with --purge also its saved data. The script goes with the last app.
+app_backup_remove() {
+	file_remove "${APP_BACKUP_REGISTRY}/${LSS_MODULE}.conf"
+	if [[ ${LSS_PURGE:-0} == 1 ]]; then
+		rm -rf -- "${APP_BACKUP_DIR:?}/${LSS_MODULE}"
+	fi
+	if [[ -d ${APP_BACKUP_REGISTRY} ]] && [[ -z $(ls -A "${APP_BACKUP_REGISTRY}") ]]; then
+		rmdir "${APP_BACKUP_REGISTRY}"
+		file_remove "${APP_BACKUP_SCRIPT}"
+	fi
 	return
 }
 
@@ -540,6 +644,7 @@ app_site_remove() {
 app_remove() {
 	local name=${LSS_MODULE} secret
 	app_site_remove "${name}"
+	app_backup_remove
 	if [[ -s $(app_compose_file) ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
 		local -a options=(--remove-orphans)
 		[[ ${LSS_PURGE:-0} != 1 ]] || options+=(--volumes)

@@ -90,6 +90,7 @@ _vw_admin_token() {
 mod_configure() {
 	_vw_admin_token
 	_vw_compose | app_compose
+	app_backup COPY=data
 	app_up
 	app_site "$(opt_int port)"
 	app_wait alive 200 >/dev/null || die "vaultwarden: https://$(app_domain)/alive does not answer."
@@ -108,6 +109,7 @@ _vw_admin() {
 mod_verify() {
 	local page jar email id status
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait alive 200) || die "vaultwarden: https://$(app_domain)/alive does not answer."
 	page=$(app_wait '' 200 60) || die "vaultwarden: the web vault does not answer."
 	grep -qi 'bitwarden\|vaultwarden' <<<"${page}" || die "vaultwarden: https://$(app_domain)/ is not the web vault."

@@ -121,6 +121,7 @@ mod_configure() {
 	app_secret forgejo-secret-key "${FJ_USER}" 64 secret-key
 	app_secret forgejo-internal-token "${FJ_USER}" 64 internal-token
 	_fj_compose | app_compose
+	app_backup COPY=data
 	app_up
 	app_site "$(opt_int port)"
 	app_wait api/healthz 200 >/dev/null || die "forgejo: https://$(app_domain)/api/healthz does not answer."
@@ -143,6 +144,7 @@ mod_verify() {
 	local page repo user
 	user=$(opt admin_user)
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait api/healthz 200) || die "forgejo: https://$(app_domain)/api/healthz does not answer."
 	[[ $(jq -r '.status' <<<"${page%$'\n'*}" 2>/dev/null) =~ ^(pass|warn)$ ]] || die "forgejo: the health check fails."
 	page=$(app_wait user/login 200 60) || die "forgejo: the login page does not answer."

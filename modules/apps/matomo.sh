@@ -178,6 +178,7 @@ _mt_token() {
 mod_configure() {
 	app_db_secrets mariadb "${MT_USER}"
 	_mt_compose | app_compose
+	app_backup DB=mariadb LIVE=html
 	app_up
 	app_site "$(opt_int port)"
 	app_wait matomo.js 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.js does not answer."
@@ -202,6 +203,7 @@ _mt_api() {
 mod_verify() {
 	local page action
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait 'index.php?module=Login' 200) || die "matomo: the login page does not answer."
 	grep -q 'form_password\|name="form_password"' <<<"${page}" || die "matomo: https://$(app_domain)/index.php?module=Login shows no login."
 	# Used, not only running: a page view goes in through the tracker and comes out of the reporting API.

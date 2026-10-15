@@ -43,26 +43,17 @@ _cool_wopi_hosts() {
 	return
 }
 
-# _cool_verify_tls: Collabora checks the certificate of Nextcloud only when it comes from a public CA (the tls module
-# without a private ACME server); the image has no way to add another CA, and the connection stays on this server.
-_cool_verify_tls() {
-	if state_installed tls && [[ -z $(config_option tls ca_bundle '') ]]; then
-		printf 'true'
-	else
-		printf 'false'
-	fi
-	return
-}
-
 # _cool_compose: the stack. Collabora runs without capabilities and without new privileges, so it cannot build its
 # chroot jails; COOL_FORCE_LANDLOCK makes it isolate the document processes with Landlock instead. The root file
 # system stays writable because the jails are created below /opt/cool. The admin console is off: it would need a
-# password in the environment.
+# password in the environment. Collabora always checks the certificate of Nextcloud (storage.ssl.as_scheme: an https
+# WOPI address means a checked TLS connection), against the CAs of the image and app_collabora_trust.
 _cool_compose() {
 	local domain params
 	domain=$(app_domain)
 	params="--o:ssl.enable=false --o:ssl.termination=true --o:admin_console.enable=false"
-	params+=" --o:ssl.ssl_verification=$(_cool_verify_tls) --o:logging.level=warning"
+	params+=" --o:ssl.ssl_verification=true --o:storage.ssl.as_scheme=true"
+	params+=" --o:storage.ssl.ca_file_path=/etc/coolwsd/lss-ca.pem --o:logging.level=warning"
 	cat <<EOF
 # Managed by lss (module collabora). Change LSS_COLLABORA_* in /etc/lss/lss.conf and run lss configure collabora.
 name: $(app_project)
@@ -80,6 +71,8 @@ services:
       - 127.0.0.1:$(opt_int port):9980
     extra_hosts:
 $(_cool_extra_hosts)
+    volumes:
+$(app_mount "${APP_COLLABORA_TRUST}" /etc/coolwsd/lss-ca.pem)
     tmpfs:
       - /tmp:mode=1777,size=512m
 $(app_hardening "$(opt memory)" 1024 writable)
@@ -98,6 +91,8 @@ _cool_extra_hosts() {
 }
 
 mod_configure() {
+	app_collabora_trust
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || APP_CHANGED=1
 	_cool_compose | app_compose
 	app_up
 	app_site "$(opt_int port)"
@@ -128,6 +123,7 @@ mod_verify() {
 	if state_installed nextcloud; then
 		log_command _app_nc_occ richdocuments:activate-config ||
 			die "collabora: Nextcloud Office cannot reach Collabora Online; see the log."
+		app_collabora_check
 	fi
 	return
 }

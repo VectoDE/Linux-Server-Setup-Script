@@ -90,6 +90,7 @@ mod_configure() {
 	app_secret keycloak-db-password "${APP_POSTGRES_USER}" 32 db-password.db
 	_kc_config
 	_kc_compose | app_compose
+	app_backup DB=postgres DB_USER=keycloak
 	app_up
 	app_site "$(opt_int port)"
 	app_wait realms/master/.well-known/openid-configuration 200 >/dev/null ||
@@ -111,6 +112,7 @@ _kc_token() {
 mod_verify() {
 	local page token headers user id status
 	app_verify_stack
+	app_verify_backup
 	page=$(app_wait realms/master/.well-known/openid-configuration 200) || die "keycloak: the master realm does not answer."
 	[[ $(jq -r '.issuer' <<<"${page%$'\n'*}" 2>/dev/null) == "https://$(app_domain)/realms/master" ]] ||
 		die "keycloak: the issuer is not https://$(app_domain)/realms/master (KC_HOSTNAME or the proxy headers are wrong)."
