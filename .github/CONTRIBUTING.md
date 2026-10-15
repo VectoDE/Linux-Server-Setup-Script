@@ -99,15 +99,17 @@ and checks it against this list before approving:
 4. **Security.** No weaker default than before; no path a local user controls is written, chowned or followed as
    root; settings are validated in `mod_check` before anything changes; nothing is downloaded without a check.
 5. **Lockout.** Changes to SSH, the firewall, PAM or sudo keep a way in and are covered by the lockout checks.
-6. **Compatibility.** A changed setting name or default is labelled `breaking-change` with migration notes, and
-   `lss update` migrates the state of existing installations.
+6. **Compatibility.** A changed setting name or default is labelled `breaking-change` with migration notes, and a
+   module of the new version takes over the state an older version left (installed after `lss update`, applied with
+   `lss configure`).
 7. **Documentation.** README, module guide, hardening guide and `CHANGELOG.md` match the change.
 
 ## Releases
 
-From 2.0.0 on, releases are built by the release workflow on `main`: it tags the version, attaches the archive with a
-signed build attestation and publishes the GitHub release. The version step comes from the pull request labels:
-`breaking-change` makes a major release, `enhancement` a minor one, anything else a patch.
+From 2.0.0 on, releases are built by the release workflow on `main`: it tags the version, attaches the archive,
+`bootstrap.sh`, the Ansible collection, the SBOM and `SHA256SUMS` with a signed build attestation and publishes the
+GitHub release. The version step comes from the pull request labels: `breaking-change` makes a major release,
+`enhancement` a minor one, anything else a patch. Details: [releasing](../docs/releasing.md).
 
 ## License
 
