@@ -122,7 +122,7 @@ services:
       - 127.0.0.1:$(opt_int api_port):9000
       - 127.0.0.1:$(opt_int console_port):9001
     volumes:
-      - data:/data
+      - data:/data:z
 $(app_mount config/root-user /run/secrets/access_key)
 $(app_mount secrets/root-password /run/secrets/secret_key)
     tmpfs:
@@ -204,6 +204,12 @@ _minio_s3() {
 	return
 }
 
+# _minio_error PAGE: the S3 error code in the XML answer PAGE (such as SignatureDoesNotMatch).
+_minio_error() {
+	sed -n 's:.*<Code>\([A-Za-z]*\)</Code>.*:\1:p' <<<"$1" | head -n 1
+	return
+}
+
 mod_verify() {
 	local page bucket probe user status
 	user=$(opt root_user)
@@ -228,9 +234,13 @@ mod_verify() {
 	printf '%s' "${bucket}" >"${probe}"
 	status=$(app_status "$(_minio_s3 "${user}" minio-root-password PUT "${bucket}")")
 	[[ ${status} == 200 ]] || die "minio: creating the bucket ${bucket} answers ${status}."
-	status=$(app_status "$(_minio_s3 "${user}" minio-root-password PUT "${bucket}/probe.txt" --data-binary "@${probe}")")
+	# The hash of the body goes along explicitly: curl before 8.x leaves x-amz-content-sha256 out, and the server then
+	# checks the signature against the hash of an empty body.
+	page=$(_minio_s3 "${user}" minio-root-password PUT "${bucket}/probe.txt" --data-binary "@${probe}" \
+		-H "x-amz-content-sha256: $(sha256sum "${probe}" | cut -d ' ' -f 1)")
 	rm -f -- "${probe}"
-	[[ ${status} == 200 ]] || die "minio: storing an object answers ${status}."
+	status=$(app_status "${page}")
+	[[ ${status} == 200 ]] || die "minio: storing an object answers ${status} ($(_minio_error "${page}"))."
 	page=$(_minio_s3 "${user}" minio-root-password GET "${bucket}/probe.txt")
 	[[ ${page%$'\n'*} == "${bucket}" ]] || die "minio: the stored object does not come back."
 	status=$(app_status "$(_minio_s3 "${user}" minio-root-password DELETE "${bucket}/probe.txt")")

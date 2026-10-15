@@ -296,6 +296,8 @@ docker() {
 	[[ ${output} == *"backend:"*"internal: true"* ]]
 	run app_init data /data 1000:1000
 	[[ ${output} == *'entrypoint: ["chown", "1000:1000", "/data"]'* ]]
+	# Shared SELinux label: the app mounts the volume with another MCS category than init.
+	[[ ${output} == *"- data:/data:z"* ]]
 	[[ ${output} == *"network_mode: none"*"cap_drop: [ALL]"*"cap_add: [CHOWN]"*"read_only: true"* ]]
 	[[ ${output} == *'restart: "no"'* ]]
 }

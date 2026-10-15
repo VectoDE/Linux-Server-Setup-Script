@@ -57,7 +57,7 @@ services:
     ports:
       - 127.0.0.1:$(opt_int port):8080
     volumes:
-      - data:/data
+      - data:/data:z
 $(app_mount secrets/admin-token /run/secrets/admin-token)
     tmpfs:
       - /tmp:mode=1777,size=64m

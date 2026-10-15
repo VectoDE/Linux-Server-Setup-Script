@@ -153,7 +153,8 @@ _mt_install() {
 # _mt_set SECTION KEY VALUE: a setting of config.ini.php, changed only when it differs.
 _mt_set() {
 	local section=$1 key=$2 value=$3
-	if ! app_exec app grep -qx "${key} = ${value}" /var/www/html/config/config.ini.php 2>/dev/null; then
+	# Matomo's ini writer puts strings in quotes (the console sets "0"), the installer writes plain numbers.
+	if ! app_exec app grep -Eqx "${key} = \"?${value}\"?" /var/www/html/config/config.ini.php 2>/dev/null; then
 		log_command _mt_console config:set --section="${section}" --key="${key}" --value="${value}" ||
 			die "matomo: the console cannot set ${section}.${key}."
 		files_note_change "matomo setting ${section}.${key}"

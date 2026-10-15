@@ -588,7 +588,8 @@ app_db_secrets() {
 # app_init VOLUME PATH UID:GID: the service "init", which gives the mount point PATH of the named volume VOLUME (not
 # what is inside) to the container user UID:GID before the app starts; for images whose data directory belongs to root
 # while the app runs as another user. It runs as root with only CAP_CHOWN, without a network, and exits. The app waits
-# for it with "depends_on: init: condition: service_completed_successfully".
+# for it with "depends_on: init: condition: service_completed_successfully". Both mount the volume with ":z" (the shared
+# SELinux label): each container of a stack gets its own MCS categories, which would lock the other one out.
 app_init() {
 	local volume=$1 path=$2 ids=$3
 	cat <<EOF
@@ -598,7 +599,7 @@ app_init() {
     entrypoint: ["chown", "${ids}", "${path}"]
     network_mode: none
     volumes:
-      - ${volume}:${path}
+      - ${volume}:${path}:z
     restart: "no"
     cap_drop: [ALL]
     cap_add: [CHOWN]
