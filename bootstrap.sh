@@ -80,7 +80,8 @@ bs_die() {
 # --- versions -----------------------------------------------------------------------------------------------------
 
 bs_valid_version() {
-	[[ $1 =~ ${BS_VERSION_RE} ]]
+	local version=$1
+	[[ ${version} =~ ${BS_VERSION_RE} ]]
 	return
 }
 
@@ -492,19 +493,20 @@ EOF
 }
 
 bs_main() {
-	local version='' rollback=0 dir
+	local version='' rollback=0 dir arg
 	while [[ $# -gt 0 ]]; do
-		case $1 in
+		arg=$1
+		case ${arg} in
 		--rollback) rollback=1 ;;
 		--dry-run) LSS_DRY_RUN=1 ;;
 		-h | --help)
 			bs_usage
 			return 0
 			;;
-		-*) bs_die "Unknown option '$1'. See 'bootstrap.sh --help'." ;;
+		-*) bs_die "Unknown option '${arg}'. See 'bootstrap.sh --help'." ;;
 		*)
-			[[ -z ${version} ]] || bs_die "Name one version, not '${version}' and '$1'."
-			version=$1
+			[[ -z ${version} ]] || bs_die "Name one version, not '${version}' and '${arg}'."
+			version=${arg}
 			;;
 		esac
 		shift

@@ -41,27 +41,28 @@ printf '%064d  lss-%s.tar.gz\n' 0 "${D}" >"${RELEASE_DIR}/download/v${D}/SHA256S
 
 # expect_active VERSION [PREVIOUS]: the links and the command point where they should, and lss answers.
 expect_active() {
+	local version=$1 previous=${2:-}
 	in_target "set -e
-		[[ \$(readlink /opt/lss/current) == '$1' ]] || { echo \"current is \$(readlink /opt/lss/current), expected $1\"; exit 1; }
-		[[ -z '${2:-}' || \$(readlink /opt/lss/previous) == '${2:-}' ]] || { echo \"previous is \$(readlink /opt/lss/previous)\"; exit 1; }
+		[[ \$(readlink /opt/lss/current) == '${version}' ]] || { echo \"current is \$(readlink /opt/lss/current), expected ${version}\"; exit 1; }
+		[[ -z '${previous}' || \$(readlink /opt/lss/previous) == '${previous}' ]] || { echo \"previous is \$(readlink /opt/lss/previous)\"; exit 1; }
 		[[ \$(readlink /usr/local/sbin/lss) == /opt/lss/current/lss ]]
-		[[ \$(lss version) == 'lss $1' ]]
-		[[ -z \$(find /opt/lss/$1 -perm /022 ! -type l) && \$(stat -c %U /opt/lss/$1/lss) == root ]] || { echo 'writable or foreign files'; exit 1; }
+		[[ \$(lss version) == 'lss ${version}' ]]
+		[[ -z \$(find /opt/lss/${version} -perm /022 ! -type l) && \$(stat -c %U /opt/lss/${version}/lss) == root ]] || { echo 'writable or foreign files'; exit 1; }
 		ls /opt/lss"
 	return
 }
 
 # expect_refused COMMAND MESSAGE: the command fails with the message, and nothing changed.
 expect_refused() {
-	local output
-	if output=$(in_target "$1" 2>&1); then
+	local command=$1 message=$2 output
+	if output=$(in_target "${command}" 2>&1); then
 		printf '%s\n' "${output}"
-		echo "'$1' should have been refused." >&2
+		echo "'${command}' should have been refused." >&2
 		exit 1
 	fi
 	printf '%s\n' "${output}"
-	grep -qF -- "$2" <<<"${output}" || {
-		echo "'$1' failed without '$2'." >&2
+	grep -qF -- "${message}" <<<"${output}" || {
+		echo "'${command}' failed without '${message}'." >&2
 		exit 1
 	}
 	return

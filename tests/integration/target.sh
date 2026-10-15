@@ -19,8 +19,9 @@ group_end() {
 
 # in_target SCRIPT: runs a script as root in the container, with the release settings of the test.
 in_target() {
+	local script=$1
 	docker exec -i -e LSS_RELEASE_URL=file:///srv/release -e LSS_RELEASE_WORKFLOW -e LSS_RELEASE_REF \
-		"${TARGET_CONTAINER}" bash -c "$1"
+		"${TARGET_CONTAINER}" bash -c "${script}"
 	return
 }
 

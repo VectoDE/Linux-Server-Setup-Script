@@ -33,7 +33,8 @@ output() {
 
 # labels SHA: labels of the pull request a commit came from; none without the GitHub CLI or for direct pushes.
 labels() {
-	gh api "repos/${REPOSITORY}/commits/$1/pulls" --jq '.[].labels[].name' 2>/dev/null || true
+	local sha=$1
+	gh api "repos/${REPOSITORY}/commits/${sha}/pulls" --jq '.[].labels[].name' 2>/dev/null || true
 	return
 }
 

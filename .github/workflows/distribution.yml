@@ -97,17 +97,18 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tests/ansible/requirements.txt
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-      - name: ansible-lint
-        working-directory: ansible
-        run: ansible-lint --offline
-      - name: Build the collection and check the module documentation
+      - name: Build and install the collection, check the module documentation
         run: |
           scripts/release/build.sh "$RUNNER_TEMP/dist"
           version="$(cat VERSION)"
           ansible-galaxy collection install "$RUNNER_TEMP/dist/vectode-lss-$version.tar.gz" -p "$RUNNER_TEMP/collections"
+          echo "ANSIBLE_COLLECTIONS_PATH=$RUNNER_TEMP/collections" >> "$GITHUB_ENV"
           ANSIBLE_COLLECTIONS_PATH="$RUNNER_TEMP/collections" ansible-doc vectode.lss.lss > /dev/null
           ANSIBLE_COLLECTIONS_PATH="$RUNNER_TEMP/collections" ansible-doc -t role vectode.lss.lss > /dev/null
           jq -e '.bomFormat == "CycloneDX" and (.components | length > 0)' "$RUNNER_TEMP/dist/lss-$version.cdx.json" > /dev/null
+      - name: ansible-lint
+        working-directory: ansible
+        run: ansible-lint --offline
 
   update:
     name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / bootstrap and update

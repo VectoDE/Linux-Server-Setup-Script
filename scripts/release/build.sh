@@ -52,13 +52,15 @@ commit_time=$(git log -1 --format=%ct HEAD)
 
 # yaml_value FILE KEY: a top-level "key: value" of a YAML file, without quotes.
 yaml_value() {
-	sed -nE "s/^$2: *\"?([^\"]*)\"? *$/\1/p" "$1"
+	local file=$1 key=$2
+	sed -nE "s/^${key}: *\"?([^\"]*)\"? *$/\1/p" "${file}"
 	return
 }
 
 # set_yaml_value FILE KEY VALUE
 set_yaml_value() {
-	sed -i -E "s/^$2: .*/$2: \"$3\"/" "$1"
+	local file=$1 key=$2 value=$3
+	sed -i -E "s/^${key}: .*/${key}: \"${value}\"/" "${file}"
 	return
 }
 
