@@ -161,26 +161,55 @@ web_default_cert() {
 		return 0
 	fi
 	name=$(hostname -f 2>/dev/null || hostname)
+	_web_self_signed "${dir}" "${name}"
+	files_note_change "self-signed default certificate"
+	return
+}
+
+# _web_self_signed DIR DOMAIN...: a self-signed certificate for the names DOMAIN (the first one is the subject) in
+# DIR/fullchain.pem and DIR/privkey.pem, valid for 825 days; the key is readable by WEB_GROUP.
+_web_self_signed() {
+	local dir=$1 tmp san domain
+	shift
+	san=''
+	for domain in "$@"; do
+		san+="${san:+,}DNS:${domain}"
+	done
 	tmp=$(mktemp -d)
-	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 -subj "/CN=${name}" \
-		-addext "subjectAltName=DNS:${name}" -keyout "${tmp}/privkey.pem" -out "${tmp}/fullchain.pem" >/dev/null 2>&1 ||
-		die "web: could not create the self-signed default certificate."
-	install -d -m 0755 "${WEB_TLS_DIR}"
+	if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 -subj "/CN=$1" \
+		-addext "subjectAltName=${san}" -keyout "${tmp}/privkey.pem" -out "${tmp}/fullchain.pem" >/dev/null 2>&1; then
+		rm -rf -- "${tmp}"
+		die "web: could not create a self-signed certificate for $1."
+	fi
 	# Certificates are state, not configuration: the tls module's deploy hook replaces them, so they are not
 	# recorded as managed files (lss verify would report every renewal as a change made outside lss).
-	install -d -m 0755 "${dir}"
+	install -d -m 0755 "${WEB_TLS_DIR}" "${dir}"
 	install -m 0640 -o root -g "${WEB_GROUP}" "${tmp}/privkey.pem" "${dir}/privkey.pem"
 	install -m 0644 -o root -g root "${tmp}/fullchain.pem" "${dir}/fullchain.pem"
-	files_note_change "self-signed default certificate"
 	rm -rf -- "${tmp}"
 	return
 }
 
-# web_cert_placeholder NAME: until NAME has a certificate of its own, its directory holds a copy of the default
-# certificate, so a site can point at WEB_TLS_DIR/NAME from the start and keeps that path after the real one arrives.
+# web_cert_placeholder NAME [DOMAIN...]: until NAME has a certificate of its own, its directory holds a copy of the
+# default certificate, so a site can point at WEB_TLS_DIR/NAME from the start and keeps that path after the real one
+# arrives. With DOMAIN, the placeholder is a self-signed certificate for these names instead, so clients that trust
+# it (a Nextcloud that calls Collabora through the web server) can check the host name; it follows the names and is
+# renewed within 30 days of expiry, and a certificate of the tls module (lineage NAME) is never replaced.
 web_cert_placeholder() {
 	local name=$1 dir
+	shift
 	dir="${WEB_TLS_DIR}/${name}"
+	if [[ $# -gt 0 ]]; then
+		[[ ! -s ${WEB_CERT_LIVE}/${name}/fullchain.pem ]] || return 0
+		if [[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] &&
+			[[ $(web_cert_domains "${dir}/fullchain.pem") == "$(printf '%s\n' "$@" | sort -u)" ]] &&
+			openssl x509 -checkend $((30 * 86400)) -noout -in "${dir}/fullchain.pem" >/dev/null 2>&1; then
+			return 0
+		fi
+		_web_self_signed "${dir}" "$@"
+		files_note_change "self-signed certificate for ${name}"
+		return
+	fi
 	[[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] && return 0
 	install -d -m 0755 "${dir}"
 	install -m 0644 -o root -g root "${WEB_TLS_DIR}/default/fullchain.pem" "${dir}/fullchain.pem"
@@ -639,7 +668,7 @@ web_proxy_route() {
 	local name=$1 upstream=$2
 	shift 2
 	[[ $# -gt 0 ]] || die "web: the route ${name} has no host names."
-	web_cert_placeholder "${name}"
+	web_cert_placeholder "${name}" "$@"
 	web_site_write "${name}" proxy "${upstream}" "$@"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_reload
 	if state_installed tls; then

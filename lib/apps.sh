@@ -245,15 +245,15 @@ _app_nc_occ() {
 }
 
 # _app_nc_trust: the certificate Nextcloud must trust to reach the Collabora site: the CA of a private ACME server
-# (LSS_TLS_CA_BUNDLE) or, without the tls module, the self-signed default certificate of the web server; nothing for
+# (LSS_TLS_CA_BUNDLE) or, without the tls module, the self-signed certificate of the collabora site; nothing for
 # Let's Encrypt. Prints the file, or nothing.
 _app_nc_trust() {
 	local bundle
 	if state_installed tls; then
 		bundle=$(config_option tls ca_bundle '')
 		[[ -z ${bundle} || ! -s ${bundle} ]] || printf '%s' "${bundle}"
-	elif [[ -s ${WEB_TLS_DIR}/default/fullchain.pem ]]; then
-		printf '%s/default/fullchain.pem' "${WEB_TLS_DIR}"
+	elif [[ -s ${WEB_TLS_DIR}/collabora/fullchain.pem ]]; then
+		printf '%s/collabora/fullchain.pem' "${WEB_TLS_DIR}"
 	fi
 	return
 }

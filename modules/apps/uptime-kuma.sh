@@ -75,18 +75,27 @@ const password = fs.readFileSync("/run/secrets/admin-password", "utf8").trim();
 const socket = io("http://127.0.0.1:3001", { transports: ["websocket"], reconnection: false });
 const fail = (message) => { console.error(message); process.exit(1); };
 const call = (event, ...args) => new Promise((resolve) => socket.emit(event, ...args, resolve));
+// The server registers its handlers only after it has answered the connection, so the first question is asked
+// again until an answer comes.
+const ask = async (event, ...args) => {
+	for (let attempt = 0; attempt < 20; attempt++) {
+		const answer = await Promise.race([call(event, ...args), new Promise((resolve) => setTimeout(resolve, 3000))]);
+		if (answer !== undefined) return answer;
+	}
+	fail(`no answer to ${event}`);
+};
 setTimeout(() => fail("timeout"), 120000);
 socket.on("connect_error", (error) => fail(`connect: ${error.message}`));
 socket.on("connect", async () => {
 	if (action === "setup") {
-		const needed = await call("needSetup");
+		const needed = await ask("needSetup");
 		if (!needed) { console.log("exists"); process.exit(0); }
 		const result = await call("setup", username, password);
 		if (!result.ok) fail(`setup: ${result.msg}`);
 		console.log("created");
 		process.exit(0);
 	}
-	const login = await call("login", { username, password, token: "" });
+	const login = await ask("login", { username, password, token: "" });
 	if (!login.ok) fail(`login: ${login.msg}`);
 	const added = await call("add", {
 		type: "http", name: "lss verify", url: "http://127.0.0.1:3001/", method: "GET", interval: 20,

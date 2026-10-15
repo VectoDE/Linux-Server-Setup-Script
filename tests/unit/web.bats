@@ -241,6 +241,37 @@ EOF
 	[ "$(files_changes_of core)" = 1 ]
 }
 
+@test "a route's placeholder is self-signed for its names, follows them and leaves a tls certificate alone" {
+	as_test_user
+	fake_openssl
+	web_cert_placeholder office office.example.com docs.example.com
+	grep -q '^openssl req -x509 .*-subj /CN=office.example.com -addext subjectAltName=DNS:office.example.com,DNS:docs.example.com ' "${STUB_LOG}"
+	grep -q "^install -m 0640 -o root -g ${WEB_GROUP} .*/privkey.pem ${WEB_TLS_DIR}/office/privkey.pem$" "${STUB_LOG}"
+	[ -s "${WEB_TLS_DIR}/office/fullchain.pem" ]
+	[ "$(files_changes_of core)" = 1 ]
+	# The same names: kept.
+	: >"${STUB_LOG}"
+	export STUB_SAN='DNS:office.example.com, DNS:docs.example.com'
+	web_cert_placeholder office office.example.com docs.example.com
+	run ! grep -q '^openssl req' "${STUB_LOG}"
+	[ "$(files_changes_of core)" = 1 ]
+	# Other names: a new one.
+	web_cert_placeholder office office.example.com
+	grep -q '^openssl req .*subjectAltName=DNS:office.example.com ' "${STUB_LOG}"
+	[ "$(files_changes_of core)" = 2 ]
+	# A certificate of the tls module stays.
+	: >"${STUB_LOG}"
+	mkdir -p "${WEB_CERT_LIVE}/office"
+	printf 'issued\n' >"${WEB_CERT_LIVE}/office/fullchain.pem"
+	web_cert_placeholder office other.example.com
+	run ! grep -q '^openssl req' "${STUB_LOG}"
+	# openssl failing stops with an error.
+	export STUB_EXIT_openssl_req=1
+	run web_cert_placeholder shop shop.example.com
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"could not create a self-signed certificate for shop.example.com"* ]]
+}
+
 @test "the default certificate is self-signed for the host name with a key for the web group" {
 	as_test_user
 	fake_openssl

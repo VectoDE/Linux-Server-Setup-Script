@@ -338,15 +338,15 @@ docker() {
 	[ "$(app_domains_of collabora)" = 'office.example.com docs.example.com' ]
 }
 
-@test "Nextcloud Office is linked once both apps are there, trusting the certificate of the web server" {
+@test "Nextcloud Office is linked once both apps are there, trusting the certificate of the collabora site" {
 	config_set LSS_COLLABORA_DOMAINS office.example.com
 	LSS_MODULE=collabora
 	app_nextcloud_office
 	[ ! -s "${ENGINE_LOG}" ]
 	state_set nextcloud status installed
 	WEB_TLS_DIR=${BATS_TEST_TMPDIR}/tls
-	mkdir -p "${WEB_TLS_DIR}/default"
-	printf 'CERT\n' >"${WEB_TLS_DIR}/default/fullchain.pem"
+	mkdir -p "${WEB_TLS_DIR}/collabora"
+	printf 'CERT\n' >"${WEB_TLS_DIR}/collabora/fullchain.pem"
 	app_nextcloud_office
 	local occ="docker compose --project-name lss-nextcloud -f ${CTR_CONFIG_DIR}/lss-nextcloud/compose.yaml exec -T app php occ"
 	grep -qxF "${occ} app:install richdocuments" "${ENGINE_LOG}"
