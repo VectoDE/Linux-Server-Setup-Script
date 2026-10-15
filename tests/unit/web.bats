@@ -537,7 +537,7 @@ EOF
 	[ "${LSS_FILE_CHANGED}" = 0 ]
 	web_site_write app proxy http://127.0.0.1:3000 app.example.com
 	[ "${LSS_FILE_CHANGED}" = 1 ]
-	run ! grep -qE 'listen|http2' "${conf}/app.conf"
+	run ! grep -qE '^[[:space:]]+listen |http2' "${conf}/app.conf"
 	grep -qxF $'\t\tproxy_pass http://127.0.0.1:3000;' "${conf}/app.conf"
 	grep -qxF $'\t\tinclude /etc/nginx/lss/proxy.conf;' "${conf}/app.conf"
 	[ "$(files_changes_of core)" = 2 ]
