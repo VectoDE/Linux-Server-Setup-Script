@@ -204,8 +204,11 @@ mod_verify() {
 		[[ ${status} != 200 ]] || break
 		sleep 1
 	done
-	[[ ${status} == 200 ]] ||
+	if [[ ${status} != 200 ]]; then
+		# The web server's error log names the cause: PHP-FPM, file permissions or a ModSecurity rule.
+		tail -n 20 "$(web_log_file "$(web_server)" error)" >&2 || true
 		die "phpmyadmin: the admin port answers ${status:-nothing} for /${PMA_PATH}/ instead of the login page."
+	fi
 	grep -qF 'name="pma_username"' <<<"${page}" ||
 		die "phpmyadmin: /${PMA_PATH}/ shows no login form; PHP may lack the mysqli extension."
 	# PHP 8.4 is newer than the PHP versions phpMyAdmin 5.2 names; a deprecation notice in the page means PHP shows

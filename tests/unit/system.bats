@@ -656,6 +656,59 @@ EOF
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
+@test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {
+	# shellcheck disable=SC2329 # called by the function under test
+	svc_dropin() {
+		printf '== %s %s\n' "$1" "$2"
+		cat
+	}
+	run svc_sandbox demo.service ReadWritePaths=-/var/lib/demo PrivateDevices=no
+	[ "${status}" -eq 0 ]
+	[ "${lines[0]}" = '== demo.service lss-sandbox' ]
+	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	grep -qxF 'ProtectSystem=strict' <<<"${output}"
+	[ "${lines[-2]}" = 'ReadWritePaths=-/var/lib/demo' ]
+	[ "${lines[-1]}" = 'PrivateDevices=no' ]
+	# Under SELinux a program with an entrypoint label of its own enters its domain (postgresql_t), which NoNewPrivileges
+	# would block: a policy module lets systemd start that domain, once, and NoNewPrivileges stays.
+	export STUB_EXIT_selinuxenabled=0
+	local label=system_u:object_r:postgresql_exec_t:s0 modules='' postgres=${BATS_TEST_TMPDIR}/postgres
+	# shellcheck disable=SC2329 # called by the function under test
+	systemctl() {
+		printf '{ path=%s ; argv[]=%s -D /var/lib/pgsql/data ; ignore_errors=no }\n' "${postgres}" "${postgres}"
+	}
+	# shellcheck disable=SC2329
+	stat() {
+		[[ ${*: -1} == "${postgres}" ]] && printf '%s\n' "${label}"
+	}
+	# Before the package brings the program there is nothing to label; the module calls svc_sandbox again later.
+	svc_sandbox postgresql.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+	touch "${postgres}"
+	# shellcheck disable=SC2329
+	semodule() {
+		if [[ $1 == -l ]]; then
+			printf '%s\n' "${modules}"
+		else
+			printf 'semodule %s %s\n' "$1" "${2##*/}" >>"${STUB_LOG}"
+			cat "$2" >>"${STUB_LOG}"
+		fi
+	}
+	svc_sandbox postgresql.service >"${BATS_TEST_TMPDIR}/dropin"
+	grep -qxF 'NoNewPrivileges=yes' "${BATS_TEST_TMPDIR}/dropin"
+	grep -qxF 'semodule -i lss_nnp_postgresql.cil' "${STUB_LOG}"
+	grep -qxF '(allow init_t postgresql_t (process2 (nnp_transition nosuid_transition)))' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	modules='lss_nnp_postgresql'
+	svc_sandbox postgresql.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+	# A program without a domain of its own (bin_t) stays in init_t; there is nothing to allow.
+	label=system_u:object_r:bin_t:s0
+	modules=''
+	svc_sandbox pgadmin.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+}
+
 @test "svc_apparmor_confined needs an enforcing profile, from the list or the label of a running process" {
 	export SVC_APPARMOR_ENABLED=${BATS_TEST_TMPDIR}/enabled SVC_APPARMOR_PROFILES=${BATS_TEST_TMPDIR}/profiles
 	export SVC_PROC=${BATS_TEST_TMPDIR}/proc

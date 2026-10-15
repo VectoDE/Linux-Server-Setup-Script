@@ -108,8 +108,11 @@ mod_verify() {
 		[[ ${status} != 200 ]] || break
 		sleep 1
 	done
-	[[ ${status} == 200 ]] ||
+	if [[ ${status} != 200 ]]; then
+		# The web server's error log names the cause: PHP-FPM, file permissions or a ModSecurity rule.
+		tail -n 20 "$(web_log_file "$(web_server)" error)" >&2 || true
 		die "adminer: the admin port answers ${status:-nothing} for /${ADMINER_PATH}/ instead of the login page."
+	fi
 	grep -qF 'auth[username]' <<<"${page}" || die "adminer: /${ADMINER_PATH}/ shows no login form."
 	# The server list of the login plugin proves that Adminer loaded adminer-plugins.php.
 	first=$(opt servers)
