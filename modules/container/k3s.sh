@@ -252,14 +252,23 @@ _k3s_wait() {
 }
 
 mod_verify() {
-	local key value actual status
+	local key value actual status i
 	svc_is_active "${K3S_UNIT}" || die "k3s: the server is not running; see journalctl -u k3s."
 	_k3s_wait 180 "${K3S_BIN}" kubectl get --raw=/readyz || die "k3s: the Kubernetes API is not ready."
 	_k3s_wait 180 "${K3S_BIN}" kubectl get nodes -o 'jsonpath={.items[0].status.conditions[?(@.type=="Ready")].status}' ||
 		die "k3s: the node does not become Ready; see k3s kubectl describe nodes."
 	[[ $(stat -c '%a %U' "${K3S_KUBECONFIG}") == '600 root' ]] || die "k3s: ${K3S_KUBECONFIG} must be mode 600 and owned by root."
-	status=$("${K3S_BIN}" secrets-encrypt status 2>/dev/null || true)
-	[[ ${status} == *'Encryption Status: Enabled'* ]] || die "k3s: secrets are not encrypted at rest."
+	# The status comes from the server's encryption controller, which can report later than the API on a busy host.
+	for ((i = 0; i < 60; i += 2)); do
+		status=$("${K3S_BIN}" secrets-encrypt status 2>&1 || true)
+		[[ ${status} != *'Encryption Status: Enabled'* ]] || break
+		sleep 2
+	done
+	if [[ ${status} != *'Encryption Status: Enabled'* ]]; then
+		# The status names the keys and whether their hashes match, never the key material.
+		printf 'k3s: secrets-encrypt status: %s\n' "${status//$'\n'/$'\n'k3s: secrets-encrypt status: }" >&2
+		die "k3s: secrets are not encrypted at rest."
+	fi
 	if ! os_in_container; then
 		while IFS='=' read -r key value; do
 			key=${key// /}
