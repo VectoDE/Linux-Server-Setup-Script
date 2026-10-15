@@ -1,0 +1,278 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Every push to main becomes a release (docs/releasing.md): scripts/release/prepare.sh picks the version from the
+# pull request labels, the signed release commit and tag go to main, and scripts/release/build.sh builds the release
+# once from the tagged commit:
+#   lss-V.tar.gz, bootstrap.sh, the Ansible collection vectode-lss-V.tar.gz, the CycloneDX SBOM lss-V.cdx.json and
+#   SHA256SUMS, all covered by one signed build attestation (Sigstore, SLSA provenance) kept as lss-V.intoto.jsonl.
+# bootstrap.sh and `lss update` install a version only when its checksum and this attestation verify, signed by this
+# workflow on refs/heads/main. Commits with "[skip release]" in the message are left out, and so is the release
+# commit itself.
+#
+# The deploy key that may push past the rulesets of main and of the version tags is only handed to the "Commit and
+# tag" job, which runs no code of the repository: it applies the version change prepared and checked without the key.
+# Run it by hand to pick the version step, with a pre-release name (rc.1) for a test release or a candidate, or with
+# "attach" to build and attach the files of an existing tag again.
+# Every step skips what already exists, so a rerun is safe.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version step
+        type: choice
+        options: [auto, patch, minor, major, attach]
+        default: auto
+      prerelease:
+        description: Pre-release name such as rc.1 (a test of the release workflow or a candidate; empty for a release)
+        type: string
+        required: false
+      tag:
+        description: Existing tag for attach (default the version in VERSION)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+# One release at a time; a run that waits behind another sees its release commit and starts from there.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Pick the version and check
+    if: github.repository == 'VectoDE/Linux-Server-Setup-Script' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read # labels that decide the version step
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Skip when main moved on
+        id: current
+        run: |
+          main="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$main" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main is at ${main:0:7}, this run is for ${GITHUB_SHA:0:7}; the newer run releases both."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Pick the version
+        id: version
+        if: steps.current.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP: ${{ inputs.bump || 'auto' }}
+          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+          TAG: ${{ inputs.tag }}
+          RELEASE_NOTES: ${{ runner.temp }}/release/notes.md
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          if [ "$BUMP" = attach ]; then
+            tag="${TAG:-v$(cat VERSION)}"
+            if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
+              ! git rev-parse --verify --quiet "refs/tags/$tag" > /dev/null; then
+              echo "::error::$tag is not an existing version tag."
+              exit 1
+            fi
+            # Only released code: the tag must point to a commit on main. Later jobs build exactly this commit.
+            sha="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
+            if ! git merge-base --is-ancestor "$sha" "$GITHUB_SHA"; then
+              echo "::error::$tag does not point to a commit on main."
+              exit 1
+            fi
+            git tag --list "$tag" --format='%(contents)' > "$RELEASE_NOTES"
+            printf 'release=true\nversion=%s\ntag=%s\nsha=%s\n' "${tag#v}" "$tag" "$sha" | tee -a "$GITHUB_OUTPUT"
+          else
+            RELEASE_BUMP="$BUMP" scripts/release/prepare.sh
+          fi
+          git diff --binary > "$RUNNER_TEMP/release/version.patch"
+      # Saved before the checks run, so nothing they do can change what gets committed.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.version.outputs.release == 'true'
+        with:
+          name: release
+          path: ${{ runner.temp }}/release/
+          retention-days: 7
+      - name: Check the release
+        if: steps.version.outputs.release == 'true' && inputs.bump != 'attach'
+        run: |
+          scripts/dev/install-bats.sh "$RUNNER_TEMP/bats"
+          "$RUNNER_TEMP/bats/bin/bats" tests/unit
+
+  commit:
+    name: Commit and tag
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true' && inputs.bump != 'attach'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release # holds the deploy key and the signing key; only main can use it
+    permissions:
+      contents: read # the push uses the deploy key, not this token
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The deploy key is the only actor that may push past the rulesets of main and of the version tags. Its push
+          # starts this workflow again, which finds nothing new to release.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          persist-credentials: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+      - name: Commit and tag
+        id: push
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          # SSH key registered as a signing key on the maintainer's GitHub account, so release commits and tags show as
+          # verified. The public half is in .github/allowed_signers.
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          patch="$RUNNER_TEMP/release/version.patch"
+          changed="$(git apply --numstat "$patch" | cut -f3 | LC_ALL=C sort | tr '\n' ' ')"
+          # A pre-release leaves CHANGELOG.md alone.
+          versioned="VERSION ansible/galaxy.yml ansible/roles/lss/defaults/main.yml "
+          if [ "$changed" != "CHANGELOG.md $versioned" ] && [ "$changed" != "$versioned" ]; then
+            echo "::error::The version change touches unexpected files: $changed"
+            exit 1
+          fi
+          git apply "$patch"
+          key="$RUNNER_TEMP/signing-key"
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          git config user.name "VectoDE"
+          git config user.email "157636760+VectoDE@users.noreply.github.com"
+          git config gpg.format ssh
+          git config user.signingkey "$key"
+          git config gpg.ssh.allowedSignersFile .github/allowed_signers
+          git commit --quiet --all --gpg-sign --message "Release $TAG" --message "[skip release]"
+          git tag --sign "$TAG" --file "$RUNNER_TEMP/release/notes.md" --cleanup=verbatim
+          git tag --verify "$TAG"
+          rm -f "$key"
+          git push --atomic origin HEAD:main "refs/tags/$TAG"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  package:
+    name: Build and sign the release
+    needs: [prepare, commit]
+    if: always() && needs.prepare.outputs.release == 'true' && contains(fromJSON('["success", "skipped"]'), needs.commit.result)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # Sigstore signature for the build attestation
+      attestations: write # stores the attestation with the repository
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - name: Pick the verified commit
+        id: source
+        env:
+          SHA: ${{ needs.commit.outputs.sha || needs.prepare.outputs.sha }}
+        run: |
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::There is no verified commit to build."
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+      - name: Install ansible-core (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tests/ansible/requirements.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Build
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if [ "$(cat VERSION)" != "$VERSION" ]; then
+            echo "::error::The commit has version $(cat VERSION), the release is $VERSION."
+            exit 1
+          fi
+          scripts/release/build.sh "$RUNNER_TEMP/dist"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: attest
+        with:
+          subject-path: ${{ runner.temp }}/dist/*
+      - name: Keep the attestation next to the files
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: cp "$BUNDLE" "$RUNNER_TEMP/dist/lss-$VERSION.intoto.jsonl"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: ${{ runner.temp }}/dist/
+          retention-days: 7
+
+  github:
+    name: GitHub release
+    needs: [prepare, package]
+    if: always() && needs.package.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # GitHub release and its files
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: ${{ runner.temp }}/dist
+      - name: Create the release or attach the signed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.package.outputs.sha }}
+        run: |
+          # The tag must still point to the commit that was built and signed.
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
+          if [ "$tagged" != "$SHA" ]; then
+            echo "::error::$TAG points to $tagged, but $SHA was built."
+            exit 1
+          fi
+          assets=("$RUNNER_TEMP"/dist/*)
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" -R "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" "${assets[@]}" -R "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release/notes.md" $prerelease

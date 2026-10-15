@@ -1,0 +1,174 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# How lss reaches servers, tested with real signatures: two test releases are built with scripts/release/build.sh,
+# exactly as the release workflow builds a release, and get a real build attestation (Sigstore) from this workflow.
+# bootstrap.sh and `lss update` then install, update, roll back and downgrade them on every supported system and
+# refuse tampered copies (tests/integration/update.sh); the Ansible collection is linted and installs and updates lss
+# over SSH (tests/integration/ansible.sh). Only the signer differs from a release: bootstrap.sh accepts these test
+# builds because the tests name this workflow and ref in LSS_RELEASE_WORKFLOW and LSS_RELEASE_REF.
+name: Release and update
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribution-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSION_A: 2.0.0-ci.1
+  VERSION_B: 2.0.0-ci.2
+
+jobs:
+  build:
+    name: Build and sign test releases
+    # Pull requests from forks and Dependabot get no OIDC token to sign with; the release workflow is unaffected.
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # Sigstore signature for the test attestations
+      attestations: write # stores them with the repository, as a release does
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ansible-core (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tests/ansible/requirements.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Build two releases
+        run: |
+          for version in "$VERSION_A" "$VERSION_B"; do
+            scripts/release/build.sh --version "$version" "$RUNNER_TEMP/release/download/v$version"
+          done
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: attest-a
+        with:
+          subject-path: ${{ runner.temp }}/release/download/v${{ env.VERSION_A }}/*
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: attest-b
+        with:
+          subject-path: ${{ runner.temp }}/release/download/v${{ env.VERSION_B }}/*
+      - name: Lay the releases out like GitHub releases
+        env:
+          BUNDLE_A: ${{ steps.attest-a.outputs.bundle-path }}
+          BUNDLE_B: ${{ steps.attest-b.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE_A" "$RUNNER_TEMP/release/download/v$VERSION_A/lss-$VERSION_A.intoto.jsonl"
+          cp "$BUNDLE_B" "$RUNNER_TEMP/release/download/v$VERSION_B/lss-$VERSION_B.intoto.jsonl"
+          mkdir -p "$RUNNER_TEMP/release/latest/download"
+          cp "$RUNNER_TEMP/release/download/v$VERSION_B/SHA256SUMS" "$RUNNER_TEMP/release/latest/download/SHA256SUMS"
+          find "$RUNNER_TEMP/release" -type f | sort
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-release
+          path: ${{ runner.temp }}/release/
+          retention-days: 3
+
+  lint:
+    name: Ansible collection lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ansible-core and ansible-lint (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tests/ansible/requirements.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: ansible-lint
+        working-directory: ansible
+        run: ansible-lint --offline
+      - name: Build the collection and check the module documentation
+        run: |
+          scripts/release/build.sh "$RUNNER_TEMP/dist"
+          version="$(cat VERSION)"
+          ansible-galaxy collection install "$RUNNER_TEMP/dist/vectode-lss-$version.tar.gz" -p "$RUNNER_TEMP/collections"
+          ANSIBLE_COLLECTIONS_PATH="$RUNNER_TEMP/collections" ansible-doc vectode.lss.lss > /dev/null
+          ANSIBLE_COLLECTIONS_PATH="$RUNNER_TEMP/collections" ansible-doc -t role vectode.lss.lss > /dev/null
+          jq -e '.bomFormat == "CycloneDX" and (.components | length > 0)' "$RUNNER_TEMP/dist/lss-$version.cdx.json" > /dev/null
+
+  update:
+    name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / bootstrap and update
+    needs: build
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
+        arch: [x64, arm64]
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-release
+          path: ${{ runner.temp }}/release
+      - name: Install, update, roll back, downgrade, refuse
+        env:
+          SYSTEM: ${{ matrix.system }}
+          LSS_RELEASE_WORKFLOW: distribution.yml
+          LSS_RELEASE_REF: ${{ github.ref }}
+        run: tests/integration/update.sh "$SYSTEM" "$RUNNER_TEMP/release" "$VERSION_A" "$VERSION_B"
+
+  ansible:
+    name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / Ansible collection
+    needs: build
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
+        arch: [x64, arm64]
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-release
+          path: ${{ runner.temp }}/release
+      - name: Install ansible-core (hash-pinned) and the collection
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes -r tests/ansible/requirements.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/ansible-galaxy" collection install \
+            "$RUNNER_TEMP/release/download/v$VERSION_A/vectode-lss-$VERSION_A.tar.gz" -p "$RUNNER_TEMP/collections"
+      - name: Install lss and modules with the role, update, remove
+        env:
+          SYSTEM: ${{ matrix.system }}
+          LSS_RELEASE_WORKFLOW: distribution.yml
+          LSS_RELEASE_REF: ${{ github.ref }}
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections
+        run: tests/integration/ansible.sh "$SYSTEM" "$RUNNER_TEMP/release" "$VERSION_A" "$VERSION_B"
