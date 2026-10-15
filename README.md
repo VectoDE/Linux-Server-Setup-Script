@@ -372,10 +372,13 @@ LSS_MAIL_RELAY_FORWARD=admin@example.com
 ```
 
 `mailserver` receives and delivers mail for `LSS_MAILSERVER_DOMAINS`: Postfix on port 25, submission on 587
-(STARTTLS) and 465 (TLS) with login only and the sender tied to the login, Dovecot with IMAPS on 993, Rspamd as spam
-filter (reject from score 15, a header from 6) that signs outgoing mail with DKIM and checks SPF, DKIM and DMARC of
-incoming mail. Mailboxes are `LSS_MAILSERVER_USERS`, aliases `LSS_MAILSERVER_ALIASES`; postmaster and abuse of every
-domain go to the first mailbox. Each password is a secret:
+(STARTTLS) and 465 (TLS) with login only, Dovecot with IMAPS on 993, Rspamd as spam filter (reject from score 15, a
+header from 6) that signs outgoing mail with DKIM and checks SPF, DKIM and DMARC of incoming mail. Mailboxes are
+`LSS_MAILSERVER_USERS`, aliases `LSS_MAILSERVER_ALIASES`; postmaster and abuse of every domain go to the first mailbox.
+A login sends only as its own address and the aliases that lead to it, in the envelope (Postfix) and in the From
+header (Rspamd); anything else is rejected. DKIM signs mail of a login with the key of the login's domain only, so an
+alias in another domain goes out unsigned. Mail the server sends itself (sendmail, cron, the guard) is signed when its
+From names a hosted domain. Each password is a secret:
 
 ```bash
 LSS_MAILSERVER_DOMAINS=example.com example.org
