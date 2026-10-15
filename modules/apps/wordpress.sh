@@ -94,11 +94,11 @@ _wp_installed() {
 
 # _wp_install: step 2 of the installer; the password goes to curl as a file.
 _wp_install() {
-	local email page password
+	local email page
 	_wp_installed && return 0
 	email=$(opt admin_email)
 	[[ -n ${email} ]] || email=$(opt admin_user)@$(app_domain)
-	secret_load wordpress-admin-password password 32
+	secret_get wordpress-admin-password 32 >/dev/null || die "wordpress: the password of the administrator cannot be created."
 	log_info "wordpress: installing WordPress (administrator $(opt admin_user), password in $(secret_path wordpress-admin-password))"
 	page=$(app_get 'wp-admin/install.php?step=2' -X POST --data-urlencode "weblog_title=$(opt title)" \
 		--data-urlencode "user_name=$(opt admin_user)" --data-urlencode "admin_password@$(secret_path wordpress-admin-password)" \

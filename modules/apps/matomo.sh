@@ -117,14 +117,14 @@ _mt_post() {
 # curl as files, so they never show up in the process list; "**********" makes the installer use the database
 # password from MATOMO_DATABASE_PASSWORD_FILE.
 _mt_install() {
-	local jar email site domain password
+	local jar email site domain
 	_mt_installed && return 0
 	domain=$(app_domain)
 	email=$(opt admin_email)
 	[[ -n ${email} ]] || email=$(opt admin_user)@${domain}
 	site=$(opt site_url)
 	[[ -n ${site} ]] || site=https://${domain}
-	secret_load matomo-admin-password password 32
+	secret_get matomo-admin-password 32 >/dev/null || die "matomo: the password of the super user cannot be created."
 	log_info "matomo: installing Matomo (super user $(opt admin_user), password in $(secret_path matomo-admin-password))"
 	jar=$(mktemp)
 	if ! {

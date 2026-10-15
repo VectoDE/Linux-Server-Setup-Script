@@ -169,17 +169,17 @@ web_default_cert() {
 # _web_self_signed DIR DOMAIN...: a self-signed certificate for the names DOMAIN (the first one is the subject) in
 # DIR/fullchain.pem and DIR/privkey.pem, valid for 825 days; the key is readable by WEB_GROUP.
 _web_self_signed() {
-	local dir=$1 tmp san domain
+	local dir=$1 subject=$2 tmp san domain
 	shift
 	san=''
 	for domain in "$@"; do
 		san+="${san:+,}DNS:${domain}"
 	done
 	tmp=$(mktemp -d)
-	if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 -subj "/CN=$1" \
+	if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 -subj "/CN=${subject}" \
 		-addext "subjectAltName=${san}" -keyout "${tmp}/privkey.pem" -out "${tmp}/fullchain.pem" >/dev/null 2>&1; then
 		rm -rf -- "${tmp}"
-		die "web: could not create a self-signed certificate for $1."
+		die "web: could not create a self-signed certificate for ${subject}."
 	fi
 	# Certificates are state, not configuration: the tls module's deploy hook replaces them, so they are not
 	# recorded as managed files (lss verify would report every renewal as a change made outside lss).
