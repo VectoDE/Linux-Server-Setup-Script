@@ -1,0 +1,7 @@
+{# SPDX-FileCopyrightText: 2025-2026 VectoDE
+
+   SPDX-License-Identifier: MIT #}
+# Managed by Ansible (role vectode.lss.lss). Changes here are overwritten on the next run.
+{% for key, value in lss_settings | dictsort %}
+{{ key }}={{ (value | string | lower) if value is boolean else value }}
+{% endfor %}

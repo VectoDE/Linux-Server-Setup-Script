@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+---
+- name: Check the settings
+  ansible.builtin.assert:
+    that:
+      - lss_version is match('^[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?$')
+      - lss_settings.keys() | reject('match', '^LSS_[A-Z0-9_]+$') | list | length == 0
+      - lss_settings.values() | map('string') | select('search', '\n') | list | length == 0
+    fail_msg: lss_version is a version like 2.0.1, and lss_settings maps names like LSS_NGINX_MAX_BODY to one-line values.
+    quiet: true
+
+- name: Read the active lss version
+  ansible.builtin.stat:
+    path: /opt/lss/current
+    follow: false
+  register: lss_current
+
+- name: Install the verified release of lss {{ lss_version }}
+  ansible.builtin.script:
+    cmd: bootstrap.sh {{ lss_version | quote }}
+  when: not lss_current.stat.exists or lss_current.stat.lnk_target | default('') != lss_version
+  changed_when: true
+
+- name: Create /etc/lss
+  ansible.builtin.file:
+    path: /etc/lss
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write /etc/lss/lss.conf
+  ansible.builtin.template:
+    src: lss.conf.j2
+    dest: /etc/lss/lss.conf
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install the modules
+  vectode.lss.lss:
+    profile: "{{ lss_profile | default(omit, true) }}"
+    modules: "{{ lss_modules }}"
+    mode: "{{ lss_mode | default(omit, true) }}"
+  when: lss_profile | length > 0 or lss_modules | length > 0
+
+- name: Remove modules
+  vectode.lss.lss:
+    modules: "{{ lss_modules_absent }}"
+    state: absent
+  when: lss_modules_absent | length > 0

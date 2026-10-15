@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+---
+argument_specs:
+  main:
+    short_description: Install lss from a verified release and set up the server with its modules.
+    description:
+      - Runs bootstrap.sh of this collection on the target, which installs lss to /opt/lss/<version> only after the
+        SHA-256 and the GitHub build attestation of the release verify.
+      - Writes /etc/lss/lss.conf and installs or removes modules with the module vectode.lss.lss.
+    options:
+      lss_version:
+        type: str
+        description: Version of lss to install; by default the version of this collection.
+      lss_settings:
+        type: dict
+        default: {}
+        description: Settings as KEY: value pairs for /etc/lss/lss.conf.
+      lss_profile:
+        type: str
+        default: ""
+        description: Profile to install.
+      lss_modules:
+        type: list
+        elements: str
+        default: []
+        description: Modules to install.
+      lss_modules_absent:
+        type: list
+        elements: str
+        default: []
+        description: Modules to remove.
+      lss_mode:
+        type: str
+        default: ""
+        choices: ["", native, docker]
+        description: native or docker for services that support both.
