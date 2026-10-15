@@ -612,11 +612,28 @@ EOF
 	grep -qxF 'ProtectSystem=strict' <<<"${output}"
 	[ "${lines[-2]}" = 'ReadWritePaths=-/var/lib/demo' ]
 	[ "${lines[-1]}" = 'PrivateDevices=no' ]
-	# Under SELinux the service enters its own domain (postgresql_t, haproxy_t), which NoNewPrivileges would block.
+	# Under SELinux a program with an entrypoint label of its own enters its domain (postgresql_t, haproxy_t), which
+	# NoNewPrivileges would block; any other program keeps NoNewPrivileges.
 	export STUB_EXIT_selinuxenabled=0
-	run svc_sandbox demo.service
+	local label=system_u:object_r:postgresql_exec_t:s0
+	# shellcheck disable=SC2329 # called by the function under test
+	systemctl() {
+		printf '{ path=/usr/bin/postgres ; argv[]=/usr/bin/postgres -D /var/lib/pgsql/data ; ignore_errors=no }\n'
+	}
+	# shellcheck disable=SC2329
+	stat() {
+		[[ ${*: -1} == /usr/bin/postgres ]] && printf '%s\n' "${label}"
+	}
+	run svc_sandbox postgresql.service
 	grep -qxF 'NoNewPrivileges=no' <<<"${output}"
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	label=system_u:object_r:bin_t:s0
+	run svc_sandbox pgadmin.service
+	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
+	export STUB_EXIT_selinuxenabled=1
+	label=system_u:object_r:postgresql_exec_t:s0
+	run svc_sandbox postgresql.service
+	grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
 @test "svc_apparmor_confined needs an enforcing profile, from the list or the label of a running process" {

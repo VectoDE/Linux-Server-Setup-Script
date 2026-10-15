@@ -109,11 +109,25 @@ svc_wait_port() {
 	return 1
 }
 
-# _svc_nnp: yes, or no under SELinux. A confined service enters its own domain on exec (httpd_t, postgresql_t,
-# aide_t); NoNewPrivileges blocks that change wherever the policy does not allow it (avc: nnp_transition), and the
-# service then runs in init_t, which may not touch its own files and is less confined than its domain.
+# _svc_nnp [UNIT]: the NoNewPrivileges value of a sandbox. Under SELinux a confined service enters its own domain on
+# exec (httpd_t, postgresql_t, aide_t); NoNewPrivileges blocks that change wherever the policy does not allow it (avc:
+# nnp_transition), and the service then runs in init_t, which may not touch its own files and is less confined than
+# its domain. So it is "no" for a UNIT whose program carries an entrypoint label of its own (TYPE_exec_t), and "yes"
+# for every other unit, whose program would stay in init_t anyway. Without UNIT (the scanner units, whose wrappers run
+# the scanners) it is "no" under SELinux.
 _svc_nnp() {
-	if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+	local unit=${1:-} program type
+	if ! command -v selinuxenabled >/dev/null 2>&1 || ! selinuxenabled; then
+		printf 'yes'
+		return
+	fi
+	if [[ -z ${unit} ]]; then
+		printf 'no'
+		return
+	fi
+	program=$(systemctl show -P ExecStart "${unit}" 2>/dev/null | sed -n 's/^{ path=\([^ ;]*\) .*/\1/p' | head -n 1)
+	type=$(stat -c %C "${program:-/nonexistent}" 2>/dev/null | cut -d : -f 3)
+	if [[ ${type} == ?*_exec_t ]]; then
 		printf 'no'
 	else
 		printf 'yes'
@@ -146,7 +160,7 @@ svc_sandbox() {
 	shift
 	{
 		printf '# Managed by lss (module %s). Sandbox of %s.\n[Service]\n' "${LSS_MODULE:-lss}" "${unit}"
-		printf '%s\n' "NoNewPrivileges=$(_svc_nnp)" ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
+		printf '%s\n' "NoNewPrivileges=$(_svc_nnp "${unit}")" ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
 			ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes ProtectControlGroups=yes \
 			ProtectClock=yes ProtectHostname=yes RestrictSUIDSGID=yes RestrictRealtime=yes RestrictNamespaces=yes \
 			LockPersonality=yes SystemCallArchitectures=native \
