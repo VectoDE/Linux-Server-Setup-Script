@@ -69,6 +69,7 @@ start_target() {
 		docker rm -f "${container}" >/dev/null 2>&1 || true
 		docker run -d --name "${container}" --hostname lss-test --privileged --cgroupns=host \
 			-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec \
+			-v /var/lib/containers \
 			-v "${PWD}:/src:ro" "lss-test:${system}" >/dev/null
 		in_target 'for i in $(seq 60); do s=$(systemctl is-system-running 2>/dev/null || true); [[ $s == running || $s == degraded ]] && exit 0; sleep 1; done; exit 1'
 		in_target 'cp -a /src /opt/lss-src'
@@ -116,6 +117,15 @@ stop_target() {
 				echo "--- ${unit}"
 				journalctl -u "${unit}" -n 40 --no-pager
 			done
+			for engine in docker podman; do
+				command -v "${engine}" >/dev/null 2>&1 || continue
+				"${engine}" ps --all
+				for name in $("${engine}" ps --all --format "{{.Names}}"); do
+					echo "--- ${engine} logs ${name}"
+					"${engine}" logs --tail 40 "${name}"
+				done
+			done
+			ss -ltnp
 			ps -eo pid,ppid,etime,args --forest | tail -n 60
 			tail -n 30 /var/log/mysql/error.log /var/log/mariadb/mariadb.log 2>/dev/null
 			# With auditd running, AppArmor and SELinux denials go to its log instead of the journal.

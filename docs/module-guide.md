@@ -99,6 +99,19 @@ All of `lib/` is loaded in every step. The ones modules use most:
 - `fw_allow 443/tcp 51820/udp:vpn` opens ports for the module. The scope after the colon is `public` (default),
   `vpn` (only from the VPN network) or `local` (nothing is opened). lss records the rule for the module, applies it
   when the firewall module is installed (also later), and closes it again when the module is removed.
+- `fw_trust NETWORK INTERFACE` accepts all traffic from NETWORK arriving on INTERFACE, recorded and removed like a
+  port. Only for networks of the server itself (a pod network on its bridge).
+
+### Containers
+
+- `ctr_run NAME IMAGE [OPTION...] [-- COMMAND...]` runs a container with the engine of the server (docker or podman)
+  under the rules of `lib/container.sh`: the image as `registry/name@sha256:...`, `--publish ADDRESS:PORT:PORT`
+  with an address, `--volume` with named volumes or host paths outside system directories (a container may mount its
+  own `/etc/lss/containers/NAME`), `--cap` for single capabilities, `--memory` and `--pids` for other limits,
+  `--writable` only when the image cannot run with a read-only root. A container with the same definition is left
+  alone. `ctr_remove NAME` deletes it; named volumes stay.
+- `ctr_compose_check FILE` and `ctr_compose_up PROJECT FILE` do the same for Compose files (Docker only).
+- `ctr_firewall_setup` is for engine modules only; published ports are opened with `fw_allow` like any other port.
 
 ### Secrets, system and logging
 

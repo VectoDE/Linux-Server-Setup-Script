@@ -4,7 +4,7 @@
 
 MOD_NAME="guard"
 MOD_GROUP="security"
-MOD_DESCRIPTION="Keeps the server at the level lss set up: daily verify and repair, failed services, disk, updates, vulnerable packages, logins, scanner findings, alerts"
+MOD_DESCRIPTION="Keeps the server at the level lss set up: daily verify and repair, failed services, disk, updates, vulnerable packages and container images, logins, scanner findings, alerts"
 MOD_REQUIRES="system"
 MOD_OPTIONS="autofix|true|Configure modules again that fail verify or were changed outside lss
 time|07:00|Time of the daily check (HH:MM)

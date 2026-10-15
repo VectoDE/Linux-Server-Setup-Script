@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# lss container firewall: keeps published container ports behind the firewall rules of lss. Installed by the
+# container modules (docker, podman, k3s) as /usr/local/lib/lss/container-firewall and run by
+# lss-container-firewall.service: "start" (and reload) loads the rules, "stop" removes them, "print" shows them.
+#
+# Why: a published port (docker run -p, podman run -p, a Kubernetes NodePort or hostPort) is rewritten to the
+# container's address before the host firewall sees it (DNAT), so it is forwarded, not delivered. The INPUT rules of
+# ufw and firewalld never apply to it, and the port is open to the world even though the firewall says otherwise.
+#
+# How: the nftables table "inet lss_containers" has its own forward chain. A packet must be accepted by every base
+# chain on a hook, so this chain filters forwarded traffic whatever Docker, Podman, kube-proxy, ufw or firewalld do in
+# their own tables, and none of them flushes it on a reload. It drops every new connection that was redirected to a
+# container network unless the port it was sent to (before the redirect) is in the list of ports lss opened
+# (/var/lib/lss/container-ports, written from the firewall rules every module recorded with fw_allow). Connections
+# straight to a container address (from a neighbour on the same network) are dropped for the Docker and Podman
+# networks. Traffic the containers start themselves and answers to it pass.
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+PORTS=${LSS_CONTAINER_PORTS:-/var/lib/lss/container-ports}
+TABLE=lss_containers
+# Docker (docker0, br-<id>), Podman (netavark podman<N>, CNI cni-podman<N>): new connections from outside need a
+# redirected, allowed port.
+ENGINE_BRIDGES=(docker0 'br-*' 'podman*' 'cni-podman*')
+# k3s (cni0 for pods on this node, flannel for pods on other nodes): only redirected connections (NodePort, hostPort)
+# are checked; pod traffic between nodes is routed to pod addresses directly and passes.
+CLUSTER_BRIDGES=(cni0 'flannel*')
+
+# rule PROTO PORT SOURCE: the accept rule for one allowed port; prints nothing for an invalid line.
+rule() {
+	local proto=$1 port=$2 source=$3 match=''
+	[[ ${proto} == tcp || ${proto} == udp ]] || return 0
+	[[ ${port} =~ ^[0-9]{1,5}(-[0-9]{1,5})?$ ]] || return 0
+	if [[ ${source} =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ ]]; then
+		match="ip saddr ${source} "
+	elif [[ ${source} =~ ^[0-9A-Fa-f:]+(/[0-9]{1,3})?$ && ${source} == *:* ]]; then
+		match="ip6 saddr ${source} "
+	elif [[ ${source} != any ]]; then
+		return 0
+	fi
+	printf '\t\t%smeta l4proto %s ct original proto-dst %s accept\n' "${match}" "${proto}" "${port}"
+	return
+}
+
+ruleset() {
+	local bridge proto port source
+	# Creating the table first makes the delete succeed on the first run; the three lines run as one transaction.
+	printf 'table inet %s\ndelete table inet %s\n' "${TABLE}" "${TABLE}"
+	printf 'table inet %s {\n\tchain forward {\n' "${TABLE}"
+	printf '\t\ttype filter hook forward priority -10; policy accept;\n'
+	printf '\t\tct state established,related accept\n'
+	for bridge in "${ENGINE_BRIDGES[@]}" "${CLUSTER_BRIDGES[@]}"; do
+		printf '\t\tiifname "%s" accept\n' "${bridge}"
+	done
+	for bridge in "${ENGINE_BRIDGES[@]}" "${CLUSTER_BRIDGES[@]}"; do
+		printf '\t\toifname "%s" ct status dnat jump published\n' "${bridge}"
+	done
+	for bridge in "${ENGINE_BRIDGES[@]}"; do
+		printf '\t\toifname "%s" ct state new drop\n' "${bridge}"
+	done
+	printf '\t}\n\tchain published {\n'
+	if [[ -r ${PORTS} ]]; then
+		while read -r proto port source; do
+			[[ -n ${proto} ]] || continue
+			rule "${proto}" "${port}" "${source:-any}"
+		done <"${PORTS}"
+	fi
+	printf '\t\tdrop\n\t}\n}\n'
+	return
+}
+
+main() {
+	local action=${1:-start}
+	case ${action} in
+	start | reload) ruleset | nft -f - ;;
+	stop) nft delete table inet "${TABLE}" 2>/dev/null || true ;;
+	print) ruleset ;;
+	*)
+		echo "usage: container-firewall start|reload|stop|print" >&2
+		return 2
+		;;
+	esac
+	return
+}
+
+# The unit tests source this file without running it.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi

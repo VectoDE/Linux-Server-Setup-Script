@@ -18,7 +18,8 @@ lib/
   template.sh           {{NAME}} placeholders, without eval
   pkg.sh repo.sh fetch.sh   packages, vendor repositories with pinned keys, downloads with pinned checksums
   service.sh            systemd units, drop-ins and timers
-  firewall.sh           ufw or firewalld; ports recorded per module
+  firewall.sh           ufw or firewalld; ports and trusted networks recorded per module
+  container.sh          hardened container runs, Compose check, container firewall, Trivy
   secrets.sh state.sh   generated secrets; which modules are installed, in which version and mode
   ui.sh                 the interactive menu (whiptail, or plain prompts)
 modules/<group>/        one file per module
@@ -26,6 +27,7 @@ templates/<module>/     configuration files that modules render
 data/repos data/keys    vendor repositories and their public keys
 profiles/               module sets with settings
 libexec/lss-guard       the daily check of the guard module
+libexec/lss-container-firewall   nftables rules for published container ports
 ```
 
 ## A run
@@ -80,6 +82,20 @@ module. If the firewall module is installed, the rule is applied at once; if it 
 recorded rule. Removing a module closes its ports. While the firewall module enables the firewall, a timer is armed
 that switches it off again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock
 you out.
+
+Published container ports never reach the INPUT rules of ufw or firewalld: Docker, Podman and kube-proxy redirect
+them to the container address (DNAT), so the packet is forwarded. The container modules (docker, podman, k3s)
+therefore install `lss-container-firewall.service`. It loads the nftables table `inet lss_containers` with a forward
+chain of its own, which every forwarded packet has to pass whatever the other tables say, and which no other tool
+flushes. A connection redirected to a container network passes only when its original port is listed in
+`/var/lib/lss/container-ports`; lss writes that list from the `public` and `vpn` rules of every module (`vpn` keeps
+its source network), and reloads the chain whenever a rule is added or removed. New connections straight to a Docker
+or Podman address are dropped. Traffic the containers start themselves passes.
+
+`fw_trust NETWORK INTERFACE` accepts everything from a network on one interface, for networks that belong to the
+server, such as the k3s pod network on `cni0`. ufw matches network and interface; firewalld puts the interface into its
+trusted zone. Networks broader than /8 (IPv4) or /32 (IPv6) and networks that contain the server's own address are
+refused.
 
 ## Security of lss itself
 

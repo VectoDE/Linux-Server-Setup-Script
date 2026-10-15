@@ -136,3 +136,40 @@ journalctl() {
 	[ "${#FINDINGS[@]}" -eq 1 ]
 	[[ ${FINDINGS[0]} == "Certificate old expires "* ]]
 }
+
+@test "container images with HIGH or CRITICAL vulnerabilities are a finding with the numbers; a failed scan is a note" {
+	TRIVY=${BATS_TEST_TMPDIR}/trivy
+	cat >"${TRIVY}" <<'STUB'
+#!/usr/bin/env bash
+case ${*: -1} in
+docker.io/library/nginx:1.27) printf 'HIGH\nCRITICAL\nHIGH\n' ;;
+ccc) exit 1 ;;
+*) ;;
+esac
+STUB
+	chmod +x "${TRIVY}"
+	# shellcheck disable=SC2329 # called by check_containers
+	docker() {
+		printf 'aaa docker.io/library/nginx 1.27\naaa docker.io/library/nginx latest\nbbb docker.io/library/redis 8\nccc <none> <none>\n'
+	}
+	# shellcheck disable=SC2329 # called by check_containers
+	podman() {
+		return 0
+	}
+	check_containers
+	[ "${#FINDINGS[@]}" -eq 1 ]
+	[ "${FINDINGS[0]}" = "The docker image docker.io/library/nginx:1.27 has 1 critical and 2 high vulnerabilities (trivy image docker.io/library/nginx:1.27); update the image." ]
+	[ "${#NOTES[@]}" -eq 1 ]
+	[ "${NOTES[0]}" = "Trivy could not scan the docker image ccc." ]
+}
+
+@test "the container image scan is skipped without Trivy" {
+	TRIVY=${BATS_TEST_TMPDIR}/missing
+	# shellcheck disable=SC2329 # would be called by check_containers
+	docker() {
+		printf 'aaa docker.io/library/nginx 1.27\n'
+	}
+	check_containers
+	[ "${#FINDINGS[@]}" -eq 0 ]
+	[ "${#NOTES[@]}" -eq 0 ]
+}

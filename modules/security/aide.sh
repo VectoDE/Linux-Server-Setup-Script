@@ -48,6 +48,9 @@ _aide_excludes() {
 !/var/lib/docker
 !/var/lib/containerd
 !/var/lib/rancher
+!/var/lib/containers
+!/var/lib/kubelet
+!/var/lib/cni
 !/var/lib/clamav
 !/var/lib/rkhunter
 !/var/lib/fail2ban
