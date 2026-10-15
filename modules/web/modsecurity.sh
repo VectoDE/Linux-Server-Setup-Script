@@ -730,13 +730,33 @@ mod_verify() {
 		# The engine reports why it cannot write the audit log in the error log of the web server.
 		ls -l "${log%/*}" >&2 || true
 		tail -n 20 "$(web_log_file "${server}" error)" >&2 || true
-		# Which process holds the audit log open, as which user, and what the kernel refused.
-		ps -o pid,user,args -p "$(pgrep -d , -x 'nginx|apache2|httpd')" >&2 || true
-		find /proc/[0-9]*/fd -lname "${log}*" 2>/dev/null >&2 || true
-		journalctl -k -n 400 --no-pager 2>/dev/null | grep -iE 'denied|audit' | tail -n 20 >&2 || true
+		[[ ${server} != nginx ]] || _modsecurity_debug_probe "${url}" "${unit}" "${log}" >&2 || true
 		die "modsecurity: the request with a script tag is missing from the audit log ${log}."
 	fi
 	return
+}
+
+# _modsecurity_debug_probe URL UNIT LOG: sends the blocked request again with the engine's debug log switched on and
+# prints what the engine says about its audit log; the configuration is put back afterwards.
+_modsecurity_debug_probe() {
+	local url=$1 unit=$2 log=$3 main debug
+	main=$(_modsecurity_conf_dir nginx)/main.conf
+	debug=${log%/*}/debug.log
+	install -m 0640 -o "$(web_user nginx)" -g root /dev/null "${debug}"
+	cp -p -- "${main}" "${main}.lss-debug"
+	printf 'SecDebugLog %s\nSecDebugLogLevel 9\n' "${debug}" >>"${main}"
+	if svc_reload "${unit}"; then
+		sleep 2
+		curl -s --max-time 10 -o /dev/null -H 'Host: localhost' "${url}?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E" || true
+		sleep 2
+		echo "--- ModSecurity debug log (audit and logging lines)"
+		grep -iE 'audit|relevant|logging|save' "${debug}" | tail -n 40
+		echo "--- last lines"
+		tail -n 15 "${debug}"
+	fi
+	mv -f -- "${main}.lss-debug" "${main}"
+	rm -f -- "${debug}"
+	svc_reload "${unit}"
 }
 
 mod_remove() {
