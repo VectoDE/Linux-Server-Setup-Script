@@ -114,10 +114,12 @@ jobs:
       matrix:
         system: [debian-12, debian-13, rocky-9, almalinux-10]
         run: [kernel, profile minimal-secure]
-        include:
-          # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases.
-          - system: debian-13
-            run: profile all
+        # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases: on
+        # Debian 13 for every change, on every distribution in the nightly and the manual runs.
+        include: >-
+          ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+          && '[{"system":"debian-12","run":"profile all"},{"system":"debian-13","run":"profile all"},{"system":"rocky-9","run":"profile all"},{"system":"almalinux-10","run":"profile all"}]'
+          || '[{"system":"debian-13","run":"profile all"}]') }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
