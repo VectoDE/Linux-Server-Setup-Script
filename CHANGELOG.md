@@ -79,6 +79,11 @@ now or later.
   the time module serves the WireGuard network or everyone, rate-limited).
 - Profile `devops` (minimal-secure, Docker and the monitoring stack); `webhosting` adds restic and db-dumps, `all`
   every new module.
+- Mail modules: `mail-relay` (send-only Postfix on the loopback addresses, through a smarthost with a checked
+  certificate or directly with opportunistic TLS or DANE), `mailserver` (Postfix, Dovecot and Rspamd: submission with
+  TLS and login only, senders tied to their login, spam filter, DKIM signing, SPF, DKIM and DMARC checks; it prints the
+  MX, SPF, DKIM, DMARC and PTR records to set) and `webmail` (checksum-verified Roundcube on the web server). guard
+  sends its e-mail through them. Profile `office`; `all` adds mailserver and webmail.
 - guard checks the age of the last backup (`LSS_GUARD_BACKUP_MAX_AGE`), runs a restore test every week and exports
   its results for Prometheus through the node exporter.
 - The services of the backup, monitoring and network modules run with a systemd sandbox drop-in; a service that
