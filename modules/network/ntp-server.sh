@@ -163,6 +163,10 @@ mod_verify() {
 		grep -n '^confdir' "$(_ntp_main_conf)" 2>&1 | sed 's/^/ntp-server: main file: /' >&2 || true
 		find "$(dirname "$(_ntp_conf)")" -maxdepth 1 -printf '%M %u %s %f\n' 2>&1 | sed 's/^/ntp-server: confdir: /' >&2 || true
 		ps -o args= -C chronyd 2>&1 | sed 's/^/ntp-server: process: /' >&2 || true
+		chronyd -v 2>&1 | sed 's/^/ntp-server: version: /' >&2 || true
+		tail -c 40 "$(_ntp_main_conf)" | od -c | sed 's/^/ntp-server: main file end: /' >&2 || true
+		chronyd -p -f "$(_ntp_conf)" 2>&1 | sed 's/^/ntp-server: own file: /' >&2 || true
+		chronyd -p "confdir $(dirname "$(_ntp_conf)")" 2>&1 | sed 's/^/ntp-server: confdir alone: /' >&2 || true
 		ss -Hlunp 2>/dev/null | grep chronyd | sed 's/^/ntp-server: socket: /' >&2 || true
 		die "ntp-server: chronyd does not answer NTP requests on port ${NTP_PORT}."
 	fi
