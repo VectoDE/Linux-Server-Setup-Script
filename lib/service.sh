@@ -122,8 +122,11 @@ _svc_selinux_on() {
 _svc_selinux_nnp() {
 	local unit=$1 program type domain module dir
 	_svc_selinux_on || return 0
-	program=$(systemctl show -P ExecStart "${unit}" 2>/dev/null | sed -n 's/^{ path=\([^ ;]*\) .*/\1/p' | head -n 1)
-	type=$(stat -c %C "${program:-/nonexistent}" 2>/dev/null | cut -d : -f 3)
+	program=$(systemctl show -P ExecStart "${unit}" 2>/dev/null | sed -n 's/^{ path=\([^ ;]*\) .*/\1/p' | head -n 1) || true
+	# A module may sandbox its unit before the package brings the program; it calls svc_sandbox again after the
+	# installation, and the module follows then.
+	[[ -n ${program} && -e ${program} ]] || return 0
+	type=$(stat -c %C "${program}" 2>/dev/null | cut -d : -f 3) || true
 	[[ ${type} == ?*_exec_t ]] || return 0
 	domain=${type%_exec_t}_t
 	module=lss_nnp_${type%_exec_t}

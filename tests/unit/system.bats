@@ -615,15 +615,19 @@ EOF
 	# Under SELinux a program with an entrypoint label of its own enters its domain (postgresql_t), which NoNewPrivileges
 	# would block: a policy module lets systemd start that domain, once, and NoNewPrivileges stays.
 	export STUB_EXIT_selinuxenabled=0
-	local label=system_u:object_r:postgresql_exec_t:s0 modules=''
+	local label=system_u:object_r:postgresql_exec_t:s0 modules='' postgres=${BATS_TEST_TMPDIR}/postgres
 	# shellcheck disable=SC2329 # called by the function under test
 	systemctl() {
-		printf '{ path=/usr/bin/postgres ; argv[]=/usr/bin/postgres -D /var/lib/pgsql/data ; ignore_errors=no }\n'
+		printf '{ path=%s ; argv[]=%s -D /var/lib/pgsql/data ; ignore_errors=no }\n' "${postgres}" "${postgres}"
 	}
 	# shellcheck disable=SC2329
 	stat() {
-		[[ ${*: -1} == /usr/bin/postgres ]] && printf '%s\n' "${label}"
+		[[ ${*: -1} == "${postgres}" ]] && printf '%s\n' "${label}"
 	}
+	# Before the package brings the program there is nothing to label; the module calls svc_sandbox again later.
+	svc_sandbox postgresql.service >/dev/null
+	run ! grep -q semodule "${STUB_LOG}"
+	touch "${postgres}"
 	# shellcheck disable=SC2329
 	semodule() {
 		if [[ $1 == -l ]]; then
