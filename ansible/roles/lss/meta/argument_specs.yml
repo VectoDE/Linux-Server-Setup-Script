@@ -16,7 +16,7 @@ argument_specs:
       lss_settings:
         type: dict
         default: {}
-        description: Settings as KEY: value pairs for /etc/lss/lss.conf.
+        description: Settings for /etc/lss/lss.conf, as a mapping from setting name to value.
       lss_profile:
         type: str
         default: ""
