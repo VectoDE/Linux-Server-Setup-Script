@@ -35,7 +35,7 @@ vm_image() {
 	expected=$(curl --proto '=https' --tlsv1.2 -fsSL --retry 3 "${sums}" | grep -F "${url##*/}" |
 		grep -oE '[0-9a-f]{64,128}' | head -n 1)
 	[[ -n ${expected} ]] || {
-		echo "No checksum for ${url##*/} in ${sums}" >&2
+		echo "Checksum missing for ${url##*/} in ${sums}" >&2
 		return 1
 	}
 	if [[ ! -f ${file} ]] || ! "${algo}sum" --check --quiet <<<"${expected}  ${file}" >/dev/null 2>&1; then

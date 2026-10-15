@@ -105,6 +105,38 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
 for `wireguard`); those outliers are left out, like one Rocky 9 container run of `mail-relay` that took six minutes.
 
+Web, runtime and database modules, measured the same way. Modules that only work together are tested together; their
+row is the cost of the whole set, including the web server or PHP it needs.
+
+| Modules tested together            | Install and verify | Peak RAM                    | Disk    | While running                         |
+| ---------------------------------- | ------------------ | --------------------------- | ------- | ------------------------------------- |
+| `nginx` `tls` `vhost`              | 50 s               | 640 MiB (dnf), else 270 MiB | 235 MiB | nginx, renewal timer                  |
+| `apache` `tls` `vhost`             | 60 s               | 370 MiB                     | 170 MiB | Apache, renewal timer                 |
+| `caddy` `tls` `vhost`              | 30 s               | 210 MiB                     | 110 MiB | Caddy, renewal timer                  |
+| `haproxy`                          | 10 s               | 215 MiB                     | 10 MiB  | haproxy                               |
+| `nginx` `modsecurity`              | 155 s (build)      | 1.5 GiB                     | 55 MiB  | nginx with the Core Rule Set          |
+| `apache` `modsecurity`             | 45 s               | 310 MiB                     | 110 MiB | Apache with the Core Rule Set         |
+| `nginx` `php`                      | 30 s               | 275 MiB                     | 125 MiB | nginx, PHP-FPM                        |
+| `php` `composer`                   | 40 s               | 305 MiB                     | 285 MiB | PHP-FPM                               |
+| `node`                             | 15 s               | 435 MiB                     | 285 MiB | –                                     |
+| `python`                           | 30 s               | 755 MiB (dnf), else 145 MiB | 90 MiB  | –                                     |
+| `java`                             | 30 s               | 485 MiB                     | 735 MiB | –                                     |
+| `go`                               | 10 s               | 255 MiB                     | 285 MiB | –                                     |
+| `dotnet`                           | 25 s               | 480 MiB                     | 690 MiB | –                                     |
+| `ruby`                             | 15 s               | 265 MiB                     | 265 MiB | –                                     |
+| `mariadb`                          | 25 s               | 470 MiB                     | 455 MiB | mariadbd                              |
+| `mysql`                            | 40 s               | 900 MiB                     | 1.2 GiB | mysqld                                |
+| `postgresql`                       | 25 s               | 300 MiB                     | 305 MiB | postgres                              |
+| `redis`                            | 15 s               | 165 MiB                     | 95 MiB  | redis-server                          |
+| `valkey`                           | 10 s               | 165 MiB                     | 85 MiB  | valkey-server                         |
+| `mongodb`                          | 25 s               | 820 MiB                     | 780 MiB | mongod                                |
+| `nginx` `php` `mariadb` `phpmyadmin` | 45 s               | 385 MiB                     | 170 MiB | nginx, PHP-FPM, mariadbd              |
+| `caddy` `php` `adminer`            | 35 s               | 240 MiB                     | 135 MiB | Caddy, PHP-FPM                        |
+| `apache` `postgresql` `pgadmin`    | 70 s               | 500 MiB                     | 705 MiB | Apache, pgAdmin (gunicorn), postgres  |
+
+`nginx` `modsecurity` builds libmodsecurity and the nginx module from source on the first install; that is where the
+time and the peak memory go. Later runs reuse the build.
+
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
 
 ## Quick start

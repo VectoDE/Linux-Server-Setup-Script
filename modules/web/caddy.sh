@@ -158,6 +158,7 @@ mod_configure() {
 	svc_sandbox caddy.service ReadWritePaths=-/var/lib/caddy ReadWritePaths=-/var/log/caddy RuntimeDirectory=caddy \
 		RuntimeDirectoryMode=0750
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	web_selinux_admin_port
 	web_test caddy || die "caddy: the configuration does not load; see above."
 	svc_enable caddy
 	# A restart, not a reload: the caddy user has to pick up its new group (the TLS keys are readable by it).
