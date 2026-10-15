@@ -34,7 +34,8 @@ mail_fqdn() {
 
 # mail_valid_domain NAME: a DNS name with at least two labels (example.com, mail.example.org).
 mail_valid_domain() {
-	[[ $1 =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]
+	local name=$1
+	[[ ${name} =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]
 	return
 }
 

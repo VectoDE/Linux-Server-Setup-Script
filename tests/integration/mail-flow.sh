@@ -33,7 +33,8 @@ fail() {
 }
 
 state() {
-	sed -n "s/^$2=//p" "${STATE}/$1"
+	local module=$1 key=$2
+	sed -n "s/^${key}=//p" "${STATE}/${module}"
 	return
 }
 
@@ -91,7 +92,8 @@ fetch_subject() {
 
 # txt NAME: the value of a TXT record in the DNS records lss printed, its strings joined.
 txt() {
-	awk -v name="$1." '$1 == name && $2 == "TXT" { $1 = ""; $2 = ""; print }' "${DNS_FILE}" |
+	local name=$1
+	awk -v name="${name}." '$1 == name && $2 == "TXT" { $1 = ""; $2 = ""; print }' "${DNS_FILE}" |
 		sed -E 's/^ +//; s/" "//g; s/^"//; s/"$//'
 	return
 }

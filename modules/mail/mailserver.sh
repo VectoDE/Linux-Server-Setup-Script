@@ -28,6 +28,8 @@ MS_MAILBOXES=/etc/postfix/lss-mailboxes
 MS_VIRTUAL=/etc/postfix/lss-virtual
 MS_SENDERS=/etc/postfix/lss-senders
 MS_ALIASES=/etc/postfix/lss-aliases
+# The first line of the files lss writes for this module.
+MS_HEADER='# Managed by lss (module mailserver).'
 MS_RECIPIENT_ACCESS=/etc/postfix/lss-recipient-access
 MS_RSPAMD=/etc/rspamd/local.d
 MS_DKIM_DIR=/var/lib/rspamd/dkim
@@ -484,20 +486,20 @@ _ms_tables() {
 	local -a owners=()
 	verify="${MAIL_VERIFY_LOCALPART}@${MS_DOMAINS[0]}"
 	{
-		printf '# Managed by lss (module mailserver).\n'
+		printf '%s\n' "${MS_HEADER}"
 		for address in "${MS_ADDRESSES[@]}" "${verify}"; do
 			printf '%s OK\n' "${address}"
 		done
 	} | file_write 0644 root:root "${MS_MAILBOXES}"
 	{
-		printf '# Managed by lss (module mailserver).\n'
+		printf '%s\n' "${MS_HEADER}"
 		for source in $(printf '%s\n' "${!MS_ALIAS[@]}" | sort); do
 			printf '%s %s\n' "${source}" "${MS_ALIAS[${source}]}"
 		done
 	} | file_write 0644 root:root "${MS_VIRTUAL}"
 	# A login sends as its own address and as the aliases that lead to it.
 	{
-		printf '# Managed by lss (module mailserver).\n'
+		printf '%s\n' "${MS_HEADER}"
 		for address in "${MS_ADDRESSES[@]}"; do
 			printf '%s %s\n' "${address}" "${address}"
 		done
@@ -539,7 +541,7 @@ mynetworks = 127.0.0.0/8 [::1]/128
 smtpd_banner = \$myhostname ESMTP
 biff = no
 append_dot_mydomain = no
-message_size_limit = $(($(opt_int message_size) * 1024 * 1024))
+message_size_limit = $(($(opt_int message_size) << 20))
 mailbox_size_limit = 0
 recipient_delimiter = +
 virtual_mailbox_domains = ${MS_DOMAINS[*]}
@@ -606,7 +608,7 @@ _ms_submission() {
 }
 
 _ms_master() {
-	printf '# Managed by lss (module mailserver).\n'
+	printf '%s\n' "${MS_HEADER}"
 	printf 'smtp      inet  n       -       n       -       -       smtpd\n'
 	_ms_submission submission submission smtpd_tls_security_level=encrypt smtpd_tls_auth_only=yes
 	_ms_submission submissions 465 smtpd_tls_wrappermode=yes smtpd_tls_security_level=encrypt smtpd_tls_auth_only=yes
@@ -620,8 +622,8 @@ _ms_master() {
 
 # _ms_ptr4 ADDRESS / _ms_ptr6 ADDRESS: the reverse DNS name of an IPv4 or IPv6 address.
 _ms_ptr4() {
-	local a b c d
-	IFS=. read -r a b c d <<<"$1"
+	local address=$1 a b c d
+	IFS=. read -r a b c d <<<"${address}"
 	printf '%s.%s.%s.%s.in-addr.arpa.' "${d}" "${c}" "${b}" "${a}"
 	return
 }

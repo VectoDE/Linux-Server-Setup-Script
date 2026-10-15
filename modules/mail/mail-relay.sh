@@ -22,7 +22,8 @@ RELAY_SASL=/etc/postfix/lss-sasl-passwd
 RELAY_GENERIC=/etc/postfix/lss-generic
 
 _relay_address_ok() {
-	[[ $1 =~ ^[A-Za-z0-9._%+-]+@([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9]$ ]]
+	local address=$1
+	[[ ${address} =~ ^[A-Za-z0-9._%+-]+@([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9]$ ]]
 	return
 }
 
