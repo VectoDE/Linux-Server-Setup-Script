@@ -704,7 +704,7 @@ _traefik_die() {
 }
 
 mod_verify() {
-	local port i answer='' server status
+	local port i answer='' server
 	port=$(opt_int dashboard_port)
 	svc_is_active "${TRAEFIK_UNIT}" || _traefik_die "${TRAEFIK_UNIT} is not running."
 	for ((i = 0; i < 30; i++)); do
@@ -739,10 +739,9 @@ mod_verify() {
 			die "traefik: ${server} does not listen on 127.0.0.1:${WEB_BACKEND_HTTPS_PORT} only (backend mode)."
 		[[ $(curl -fsS --max-time 10 http://127.0.0.1/.well-known/acme-challenge/lss-probe 2>/dev/null) == lss ]] ||
 			die "traefik: ACME challenges on port 80 do not reach ${server}."
-		status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' --resolve "lss-check.invalid:443:127.0.0.1" \
-			https://lss-check.invalid/ || true)
-		[[ ${status} =~ ^[1-5][0-9][0-9]$ ]] || _traefik_die "requests for other host names do not reach ${server} (status ${status})."
 	fi
+	# HTTPS to the backend: the sites of the vhost module (a host name without a site gets no answer from the web
+	# server, so it shows nothing).
 	_traefik_verify_sites
 	_traefik_verify_routes
 	_traefik_verify_admin
