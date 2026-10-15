@@ -180,7 +180,7 @@ mod_configure() {
 	_mt_compose | app_compose
 	app_up
 	app_site "$(opt_int port)"
-	app_wait matomo.php 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.php does not answer."
+	app_wait matomo.js 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.js does not answer."
 	_mt_install
 	_mt_set General force_ssl 1
 	_mt_set General assume_secure_protocol 1

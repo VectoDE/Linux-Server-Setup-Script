@@ -130,7 +130,7 @@ mod_verify() {
 		rm -f -- "${jar}"
 		die "vaultwarden: the invited user is missing from the user list."
 	fi
-	status=$(app_status "$(_vw_admin "${jar}" "users/${id}/delete" -X POST)")
+	status=$(app_status "$(_vw_admin "${jar}" "users/${id}/delete" -X POST -H 'Content-Type: application/json')")
 	rm -f -- "${jar}"
 	[[ ${status} == 200 ]] || die "vaultwarden: deleting the invited user answers ${status}."
 	return

@@ -335,19 +335,13 @@ app_timer_remove() {
 	return
 }
 
-# app_site PORT [NAME DOMAIN...]: the HTTPS site NAME (default: the module) for the host names DOMAIN (default: those of
-# the app), proxied to 127.0.0.1:PORT, with a certificate from the tls module when it is installed. The web server
-# reloads when the site changed.
+# app_site PORT [NAME DOMAIN...]: the HTTPS route NAME (default: the module) for the host names DOMAIN (default: those
+# of the app) to 127.0.0.1:PORT, through web_proxy_route (lib/web.sh).
 app_site() {
 	local port=$1 name=${2:-${LSS_MODULE}}
 	local -a domains=("${@:3}")
 	[[ ${#domains[@]} -gt 0 ]] || read -ra domains <<<"$(app_domains)"
-	web_cert_placeholder "${name}"
-	web_site_write "${name}" proxy "http://127.0.0.1:${port}" "${domains[@]}"
-	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_reload
-	if state_installed tls; then
-		web_cert_issue "${name}" "${domains[@]}"
-	fi
+	web_proxy_route "${name}" "http://127.0.0.1:${port}" "${domains[@]}"
 	return
 }
 
@@ -532,18 +526,10 @@ app_netrc() {
 	return
 }
 
-# app_site_remove NAME: removes the site NAME of app_site with its certificates.
+# app_site_remove NAME: removes the route NAME of app_site.
 app_site_remove() {
 	local name=$1
-	if [[ -n $(web_server) ]]; then
-		web_site_remove "${name}"
-		web_reload
-	fi
-	file_remove "${WEB_TLS_DIR}/${name}"
-	if [[ -d ${WEB_CERT_LIVE}/${name} ]] && command -v certbot >/dev/null 2>&1; then
-		log_command certbot delete --non-interactive --cert-name "${name}" ||
-			log_warn "${name}: certbot could not delete the certificate ${name}."
-	fi
+	web_proxy_route_remove "${name}"
 	return
 }
 

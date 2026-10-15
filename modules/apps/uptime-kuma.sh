@@ -93,12 +93,12 @@ socket.on("connect", async () => {
 		retryInterval: 20, resendInterval: 0, maxretries: 0, timeout: 16, maxredirects: 10,
 		accepted_statuscodes: ["200-399"], notificationIDList: {}, ignoreTls: false, upsideDown: false,
 		expiryNotification: false, kafkaProducerBrokers: [], kafkaProducerSaslOptions: { mechanism: "None" },
-		conditions: [], active: true,
+		conditions: [], rabbitmqNodes: [], active: true,
 	});
 	if (!added.ok) fail(`add monitor: ${added.msg}`);
 	socket.on("heartbeat", async (beat) => {
 		if (beat.monitorID !== added.monitorID) return;
-		const removed = await call("deleteMonitor", added.monitorID);
+		const removed = await call("deleteMonitor", added.monitorID, false);
 		if (!removed.ok) fail(`delete monitor: ${removed.msg}`);
 		if (beat.status !== 1) fail(`the monitor reports down: ${beat.msg}`);
 		console.log("up");
@@ -111,7 +111,8 @@ EOF
 
 # _kuma ACTION: runs the client in the container.
 _kuma() {
-	app_exec app node /opt/lss/lss-kuma.js "$1"
+	local action=$1
+	app_exec app node /opt/lss/lss-kuma.js "${action}"
 	return
 }
 

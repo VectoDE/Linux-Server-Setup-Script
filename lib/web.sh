@@ -631,6 +631,38 @@ web_site_remove() {
 	return
 }
 
+# web_proxy_route NAME UPSTREAM DOMAIN...: publishes a local service (UPSTREAM, such as http://127.0.0.1:8081) as the
+# HTTPS route NAME for the host names DOMAIN, with a certificate from the tls module when it is installed. The one
+# place where an app becomes reachable from outside: today it writes a reverse-proxy site of the web server, and an
+# edge proxy in front of the web server can take its routes over here. Reloads the web server when the site changed.
+web_proxy_route() {
+	local name=$1 upstream=$2
+	shift 2
+	[[ $# -gt 0 ]] || die "web: the route ${name} has no host names."
+	web_cert_placeholder "${name}"
+	web_site_write "${name}" proxy "${upstream}" "$@"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_reload
+	if state_installed tls; then
+		web_cert_issue "${name}" "$@"
+	fi
+	return
+}
+
+# web_proxy_route_remove NAME: removes the route of web_proxy_route with its certificates.
+web_proxy_route_remove() {
+	local name=$1
+	if [[ -n $(web_server) ]]; then
+		web_site_remove "${name}"
+		web_reload
+	fi
+	file_remove "${WEB_TLS_DIR}/${name}"
+	if [[ -d ${WEB_CERT_LIVE}/${name} ]] && command -v certbot >/dev/null 2>&1; then
+		log_command certbot delete --non-interactive --cert-name "${name}" ||
+			log_warn "${name}: certbot could not delete the certificate ${name}."
+	fi
+	return
+}
+
 # web_admin_write NAME PATH php|proxy|strip TARGET: publishes an admin interface below /PATH/ on the admin server
 # (WEB_ADMIN_PORT). TARGET is a directory with PHP files or an upstream URL. proxy passes the whole path on (the
 # upstream serves below /PATH/), strip removes /PATH first (for upstreams that only serve their root, such as Netdata).
