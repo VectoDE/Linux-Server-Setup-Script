@@ -88,6 +88,9 @@ now or later.
   its results for Prometheus through the node exporter.
 - The services of the backup, monitoring and network modules run with a systemd sandbox drop-in; a service that
   listens on the WireGuard address starts after the interface.
+- Website on GitHub Pages: lss explained as a film that plays while scrolling, generated from the module metadata,
+  the profiles and `data/systems.conf` on every deploy, with a strict Content Security Policy, a still version for
+  reduced motion and Lighthouse 100 checked in CI.
 
 ### Removed
 
