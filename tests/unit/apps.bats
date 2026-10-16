@@ -556,3 +556,19 @@ docker() {
 	LSS_PURGE=1 app_backup_remove
 	[ ! -e "${APP_BACKUP_DIR}/demo" ]
 }
+
+@test "app_waf_hits names the ModSecurity rules of the latest audit entries" {
+	run app_waf_hits
+	[ "${status}" -eq 0 ]
+	[ -z "${output}" ]
+	state_set nginx status installed
+	state_set modsecurity status installed
+	# shellcheck disable=SC2329 # called by app_waf_hits
+	web_log_dir() { printf '%s' "${BATS_TEST_TMPDIR}/log"; }
+	mkdir -p "${BATS_TEST_TMPDIR}/log/modsecurity"
+	printf '%s\n' '---H---' 'ModSecurity: Warning. [file "x.conf"] [line "1"] [id "932180"] [rev ""] [msg "Restricted File Upload Attempt"]' \
+		'ModSecurity: Access denied with code 403 (phase 2). [id "949110"] [msg "Inbound Anomaly Score Exceeded (Total Score: 5)"]' \
+		>"${BATS_TEST_TMPDIR}/log/modsecurity/audit.log"
+	run app_waf_hits
+	[ "${output}" = '[id "932180"] [msg "Restricted File Upload Attempt"] [id "949110"] [msg "Inbound Anomaly Score Exceeded (Total Score: 5)"]' ]
+}

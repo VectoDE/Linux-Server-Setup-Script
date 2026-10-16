@@ -104,7 +104,7 @@ mod_configure() {
 }
 
 mod_verify() {
-	local page probe pdf status
+	local page probe pdf status answer waf
 	app_verify_stack
 	page=$(app_wait '' 200) || die "collabora: https://$(app_domain)/ does not answer."
 	[[ ${page%$'\n'*} == OK ]] || die "collabora: https://$(app_domain)/ answers '${page%$'\n'*}' instead of OK."
@@ -116,8 +116,11 @@ mod_verify() {
 	printf 'lss verify %s\n' "$(date +%s)" >"${probe}"
 	status=$(app_status "$(app_get cool/convert-to/pdf -F "data=@${probe};filename=lss-verify.txt" -o "${pdf}" --max-time 120)")
 	if [[ ${status} != 200 || $(head -c 4 "${pdf}") != %PDF ]]; then
+		# The answer tells Collabora's own refusal from one of the web server or its firewall.
+		answer=$(head -c 300 "${pdf}" | tr -c '[:print:]' ' ' | sed 's/<[^>]*>/ /g; s/  */ /g')
 		rm -f -- "${probe}" "${pdf}"
-		die "collabora: converting a document to PDF failed (HTTP ${status})."
+		waf=$(app_waf_hits)
+		die "collabora: converting a document to PDF failed (HTTP ${status}: ${answer:-empty answer})${waf:+; ModSecurity: ${waf}}."
 	fi
 	rm -f -- "${probe}" "${pdf}"
 	if state_installed nextcloud; then

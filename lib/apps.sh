@@ -403,6 +403,19 @@ app_get() {
 	return
 }
 
+# app_waf_hits: the rule IDs and messages of the latest ModSecurity audit entries (modsecurity module), so a check that
+# the web application firewall turned away says which rules fired; prints nothing without ModSecurity.
+app_waf_hits() {
+	local server log
+	state_installed modsecurity || return 0
+	server=$(web_server) || return 0
+	log=$(web_log_dir "${server}")/modsecurity/audit.log
+	[[ -r ${log} ]] || return 0
+	tail -n 300 "${log}" | grep -oE '\[id "[0-9]+"\]|\[msg "[^"]{1,120}"\]|"ruleId":"[0-9]+"|"message":"[^"]{1,120}"' |
+		tail -n 12 | paste -sd ' ' -
+	return 0
+}
+
 # app_status PAGE: the HTTP status at the end of the output of app_get.
 app_status() {
 	local page=$1
