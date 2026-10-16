@@ -90,6 +90,12 @@ fetch_subject() {
 	return
 }
 
+# rejects: how many messages Postfix refused because Rspamd's header-From check rejected them.
+rejects() {
+	journalctl --no-pager -q -o cat SYSLOG_FACILITY=2 | grep -c 'milter-reject.*belongs to another login' || true
+	return
+}
+
 # signed MESSAGE DOMAIN: MESSAGE carries a DKIM signature of DOMAIN (folded headers joined).
 signed() {
 	local mail=$1 domain=$2
@@ -139,7 +145,7 @@ full_curl() {
 }
 
 server() {
-	local alice bob domain selector token mail result output ip i symbol forged
+	local alice bob domain selector token mail result output ip i symbol forged seen
 	local -a mailboxes=()
 	full_curl
 	HOSTNAME_MAIL=$(state mailserver hostname)
@@ -172,11 +178,19 @@ server() {
 	# The From header must name an address of the login: another mailbox and an unowned address of another hosted
 	# domain are rejected even though the envelope sender is the login's own; an alias the login owns passes and is
 	# signed.
+	seen=$(rejects)
 	for forged in "${bob}" "ceo@${bob#*@}"; do
 		message "${forged}" "${alice}" "lss flow forged ${token}"
 		output=$(smtp "smtp://${HOSTNAME_MAIL}:587" "${alice}" "${alice}" "${alice}" --ssl-reqd) &&
 			fail "${alice} sent with the From address ${forged}."
-		[[ ${output} == *'(55)'* || ${output} == *554* ]] || fail "the From address ${forged} was not rejected: ${output}"
+		# Postfix logs the reason; curl only reports that the message was refused.
+		for ((i = 0; i < 10; i++)); do
+			(($(rejects) > seen)) && break
+			sleep 1
+		done
+		(($(rejects) > seen)) ||
+			fail "the From address ${forged} was refused for another reason: ${output} $(journalctl --no-pager -q -n 15 SYSLOG_FACILITY=2)"
+		seen=$(rejects)
 	done
 	say "${alice} cannot send with the From address ${bob} or ceo@${bob#*@} (rejected by Rspamd)"
 	message "info@${domain}" "${bob}" "lss flow alias ${token}"

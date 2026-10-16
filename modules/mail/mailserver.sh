@@ -500,7 +500,7 @@ _ms_sender_filter() {
 local rspamd_logger = require "rspamd_logger"
 
 local map_path = "${MS_RSPAMD_SENDERS}"
-local reply = "5.7.1 From header address belongs to another login"
+local reply = "From header address belongs to another login"
 local senders = {}
 local loaded = false
 

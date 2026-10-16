@@ -347,7 +347,7 @@ load_module() {
 	[[ ${output} == *'type = "prefilter"'* ]]
 	[[ ${output} == *'task:get_user()'* && ${output} == *'#headers == 1 and #from == 1'* ]]
 	[[ ${output} == *'task:set_pre_result("reject", reply, "lss")'* ]]
-	[[ ${output} == *'local reply = "5.7.1 From header address belongs to another login"'* ]]
+	[[ ${output} == *'local reply = "From header address belongs to another login"'* ]]
 	[[ ${output} != *'"Not'* && ${output} != *'"No'* ]]
 }
 
