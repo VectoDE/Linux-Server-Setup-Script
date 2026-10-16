@@ -1068,3 +1068,19 @@ EOF
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"nginx-dev 1.28.3-2ubuntu1.11 has no nginx sources in ${MODSEC_NGINX_DEV_SRC}."* ]]
 }
+
+@test "ModSecurity 3 lets well-formed multipart bodies through, ModSecurity 2 keeps the strict test" {
+	use_os debian-13
+	# shellcheck source=modules/web/modsecurity.sh
+	source "${REPO_ROOT}/modules/web/modsecurity.sh"
+	LSS_MODULE=modsecurity
+	# shellcheck disable=SC2329 # called by the function under test
+	_modsecurity_json() { return 1; }
+	run _modsecurity_engine_conf nginx
+	[ "${status}" -eq 0 ]
+	grep -qF "SecRule MULTIPART_UNMATCHED_BOUNDARY \"@eq 1\" \"id:'200004'," <<<"${output}"
+	grep -qxF 'SecPcreMatchLimit 1000' <<<"${output}"
+	run _modsecurity_engine_conf apache
+	[ "${status}" -eq 0 ]
+	grep -qF "SecRule MULTIPART_UNMATCHED_BOUNDARY \"!@eq 0\" \"id:'200004'," <<<"${output}"
+}

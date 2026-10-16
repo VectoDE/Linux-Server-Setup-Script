@@ -479,7 +479,7 @@ mod_install() {
 
 # _modsecurity_engine_conf SERVER: the engine settings after modsecurity.conf-recommended of ModSecurity.
 _modsecurity_engine_conf() {
-	local server=$1 bytes nofiles json=0
+	local server=$1 bytes nofiles json=0 unmatched
 	bytes=$(_modsecurity_bytes "$(_modsecurity_max_body)")
 	# Bodies without uploads (forms, JSON) up to 1 MiB: the recommended 128 KiB turns away ordinary JSON documents.
 	nofiles=$((bytes < 1048576 ? bytes : 1048576))
@@ -507,7 +507,17 @@ EOF
 	cat <<'EOF'
 SecRule REQBODY_ERROR "!@eq 0" "id:'200002',phase:2,t:none,log,deny,status:400,msg:'Failed to parse request body.',logdata:'%{reqbody_error_msg}',severity:2"
 SecRule MULTIPART_STRICT_ERROR "!@eq 0" "id:'200003',phase:2,t:none,log,deny,status:400,msg:'Multipart request body failed strict validation: PE %{REQBODY_PROCESSOR_ERROR}, BQ %{MULTIPART_BOUNDARY_QUOTED}, BW %{MULTIPART_BOUNDARY_WHITESPACE}, DB %{MULTIPART_DATA_BEFORE}, DA %{MULTIPART_DATA_AFTER}, HF %{MULTIPART_HEADER_FOLDING}, LF %{MULTIPART_LF_LINE}, SM %{MULTIPART_MISSING_SEMICOLON}, IQ %{MULTIPART_INVALID_QUOTING}, IP %{MULTIPART_INVALID_PART}, IH %{MULTIPART_INVALID_HEADER_FOLDING}, FL %{MULTIPART_FILE_LIMIT_EXCEEDED}'"
-SecRule MULTIPART_UNMATCHED_BOUNDARY "!@eq 0" "id:'200004',phase:2,t:none,log,deny,msg:'Multipart parser detected a possible unmatched boundary.'"
+EOF
+	# ModSecurity 3 (nginx) sets MULTIPART_UNMATCHED_BOUNDARY to 2 for every well-formed body that ends with its final
+	# boundary and to 1 only for a possible unmatched one; "!@eq 0" of ModSecurity 2 would turn away every upload, so
+	# libmodsecurity's own recommendation tests for 1.
+	if [[ ${server} == nginx ]]; then
+		unmatched='@eq 1'
+	else
+		unmatched='!@eq 0'
+	fi
+	printf '%s\n' "SecRule MULTIPART_UNMATCHED_BOUNDARY \"${unmatched}\" \"id:'200004',phase:2,t:none,log,deny,msg:'Multipart parser detected a possible unmatched boundary.'\""
+	cat <<'EOF'
 SecPcreMatchLimit 1000
 SecPcreMatchLimitRecursion 1000
 SecRule TX:/^MSC_/ "!@streq 0" "id:'200005',phase:2,t:none,log,deny,msg:'ModSecurity internal error flagged: %{MATCHED_VAR_NAME}'"
