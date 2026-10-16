@@ -274,7 +274,7 @@ time.sleep(30)' >"${port_file}" 2>/dev/null 3>&- &
 @test "without a firewall tool rules are only recorded and applied later" {
 	use_os debian-12
 	PATH=$(printf '%s' "${PATH}" | tr ':' '\n' | grep -v fixtures/bin | paste -sd:)
-	command -v ufw >/dev/null && skip "ufw is installed on this machine"
+	type -P ufw >/dev/null && skip "ufw is installed on this machine"
 	LSS_MODULE=web
 	fw_allow 443/tcp
 	[ "$(cat "${LSS_STATE_DIR}/firewall/web")" = 443/tcp ]
@@ -803,4 +803,40 @@ EOF
 	grep -qxF 'URIs: https://repo.example.invalid/debian/' "${BATS_TEST_TMPDIR}/writes"
 	grep -qxF 'Suites: trixie/' "${BATS_TEST_TMPDIR}/writes"
 	run ! grep -q '^Components:' "${BATS_TEST_TMPDIR}/writes"
+}
+
+@test "ufw runs again when it loses the iptables race (initcaps) and passes other failures through" {
+	local bin=${BATS_TEST_TMPDIR}/racebin
+	mkdir -p "${bin}"
+	FW_UFW_DELAY=0
+	printf '1\n' >"${BATS_TEST_TMPDIR}/fails"
+	cat >"${bin}/ufw" <<SCRIPT
+#!/usr/bin/env bash
+printf 'ufw %s\n' "\$*" >>"${STUB_LOG}"
+left=\$(cat "${BATS_TEST_TMPDIR}/fails")
+if ((left > 0)); then
+	printf '%s\n' \$((left - 1)) >"${BATS_TEST_TMPDIR}/fails"
+	printf '%s\n' "\${UFW_ERROR:-ERROR: initcaps}" >&2
+	exit 1
+fi
+echo 'Rule added'
+SCRIPT
+	chmod +x "${bin}/ufw"
+	PATH="${bin}:${PATH}"
+	run ufw allow 443/tcp
+	[ "${status}" -eq 0 ]
+	[ "${output}" = 'Rule added' ]
+	[ "$(grep -c '^ufw allow 443/tcp' "${STUB_LOG}")" -eq 2 ]
+	: >"${STUB_LOG}"
+	printf '9\n' >"${BATS_TEST_TMPDIR}/fails"
+	run ufw allow 443/tcp
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'ERROR: initcaps'* ]]
+	[ "$(grep -c '^ufw allow 443/tcp' "${STUB_LOG}")" -eq "${FW_UFW_TRIES}" ]
+	: >"${STUB_LOG}"
+	printf '1\n' >"${BATS_TEST_TMPDIR}/fails"
+	UFW_ERROR='ERROR: Bad port' run ufw allow 443/tcp
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'ERROR: Bad port'* ]]
+	[ "$(grep -c '^ufw allow 443/tcp' "${STUB_LOG}")" -eq 1 ]
 }
