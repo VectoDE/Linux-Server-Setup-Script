@@ -7,7 +7,7 @@
 # Seconds lss waits for a unit to start. Some units (MySQL) wait for their service without a limit; a service that
 # never reports ready would stop the run for good.
 SVC_START_TIMEOUT=${SVC_START_TIMEOUT:-300}
-# Sources of the SELinux policy modules that lss loads for the workers of a master process (svc_selinux_spawner).
+# Sources of the SELinux policy modules that let services start their programs in their domains (svc_selinux_spawner).
 SVC_SELINUX_DIR=${SVC_SELINUX_DIR:-/etc/lss/selinux}
 
 svc_exists() {
@@ -150,27 +150,44 @@ _svc_selinux_loaded() {
 	return
 }
 
-# svc_selinux_spawner NAME PROGRAM DIR...: lets a master process that systemd starts from PROGRAM start its workers
-# from the DIRs in their own SELinux domains (the Postfix master: postfix_qmgr_t, postfix_smtpd_t; Dovecot:
-# dovecot_auth_t) while the sandbox keeps NoNewPrivileges. NoNewPrivileges forbids each such change unless the policy
-# allows it (avc: nnp_transition), and the workers never start. The policy itself names the domain of every program
-# (selinuxexeccon); the policy module lss_nnp_NAME allows exactly these changes and nothing else. Its source stays in
-# SVC_SELINUX_DIR, so a second run loads it only when an update brought other programs. Without SELinux it does
-# nothing.
+# svc_exec_programs UNIT: the programs systemd runs for UNIT (ExecStartPre, ExecStart, ExecStartPost), one per line.
+svc_exec_programs() {
+	local property
+	for property in ExecStartPre ExecStart ExecStartPost; do
+		systemctl show -P "${property}" "$1" 2>/dev/null | grep -o 'path=[^ ;]*' | cut -d = -f 2
+	done
+	return 0
+}
+
+# svc_selinux_spawner NAME SOURCE PATH...: lets a process start programs in their own SELinux domains while its
+# sandbox keeps NoNewPrivileges: the Postfix master its daemons (postfix_qmgr_t, postfix_smtpd_t), Dovecot its auth
+# process (dovecot_auth_t), systemd the helpers of postfix.service (restorecon, newaliases). NoNewPrivileges forbids
+# each such change unless the policy allows it (avc: nnp_transition), and the program does not start. SOURCE is the
+# domain of the process (init_t for systemd) or the program systemd starts it from; the PATHs are programs or
+# directories of programs. The policy itself names the domain of every program (selinuxexeccon), and the policy module
+# lss_spawn_NAME allows exactly these changes and nothing else. Its source stays in SVC_SELINUX_DIR, so a second run
+# loads it only when an update brought other programs. Without SELinux it does nothing.
 svc_selinux_spawner() {
-	local name=$1 program=$2 module=lss_nnp_$1 master dir file domain
+	local name=$1 source=$2 module=lss_spawn_$1 path file domain
 	shift 2
 	_svc_selinux_on || return 0
-	master=$(selinuxexeccon "${program}" system_u:system_r:init_t:s0 2>/dev/null | cut -d : -f 3) || true
-	[[ -n ${master} ]] || die "${LSS_MODULE:-lss}: SELinux names no domain for ${program}."
-	local -a rules=()
-	for dir in "$@"; do
-		[[ -d ${dir} ]] || continue
-		for file in "${dir}"/*; do
+	if [[ ${source} == /* ]]; then
+		domain=$(selinuxexeccon "${source}" system_u:system_r:init_t:s0 2>/dev/null | cut -d : -f 3) || true
+		[[ -n ${domain} ]] || die "${LSS_MODULE:-lss}: SELinux names no domain for ${source}."
+		source=${domain}
+	fi
+	local -a rules=() files=()
+	for path in "$@"; do
+		if [[ -d ${path} ]]; then
+			files=("${path}"/*)
+		else
+			files=("${path}")
+		fi
+		for file in "${files[@]}"; do
 			[[ -f ${file} && -x ${file} ]] || continue
-			domain=$(selinuxexeccon "${file}" "system_u:system_r:${master}:s0" 2>/dev/null | cut -d : -f 3) || true
-			[[ -z ${domain} || ${domain} == "${master}" ]] ||
-				rules+=("(allow ${master} ${domain} (process2 (nnp_transition nosuid_transition)))")
+			domain=$(selinuxexeccon "${file}" "system_u:system_r:${source}:s0" 2>/dev/null | cut -d : -f 3) || true
+			[[ -z ${domain} || ${domain} == "${source}" ]] ||
+				rules+=("(allow ${source} ${domain} (process2 (nnp_transition nosuid_transition)))")
 		done
 	done
 	if [[ ${#rules[@]} -eq 0 ]]; then
@@ -183,14 +200,14 @@ svc_selinux_spawner() {
 		return 0
 	fi
 	log_command semodule -i "${SVC_SELINUX_DIR}/${module}.cil" ||
-		die "${LSS_MODULE:-lss}: SELinux does not take the policy module ${module} for the workers of ${master}; see the log."
-	files_note_change "SELinux module ${module}: ${master} starts its workers in their domains with NoNewPrivileges"
+		die "${LSS_MODULE:-lss}: SELinux does not take the policy module ${module} for ${source}; see the log."
+	files_note_change "SELinux module ${module}: ${source} starts its programs in their domains with NoNewPrivileges"
 	return
 }
 
 # svc_selinux_spawner_remove NAME: unloads the policy module of svc_selinux_spawner and deletes its source.
 svc_selinux_spawner_remove() {
-	local module=lss_nnp_$1
+	local module=lss_spawn_$1
 	if command -v semodule >/dev/null 2>&1 && _svc_selinux_loaded "${module}"; then
 		log_command semodule -r "${module}" ||
 			die "${LSS_MODULE:-lss}: SELinux keeps the policy module ${module}; see the log."

@@ -117,13 +117,20 @@ EOF
 
 # mail_postfix_sandbox [DIRECTIVE...]: the systemd sandbox of the Postfix master and its daemons. They write the queue,
 # their state and the local mailboxes only. Postfix needs /dev/log of the host for syslog, so /dev stays. Under SELinux
-# the master starts its daemons in their own domains with NoNewPrivileges (svc_selinux_spawner).
+# the master starts its daemons in their own domains with NoNewPrivileges (svc_selinux_spawner), and so does systemd
+# for the helpers of the unit: on the RHEL family postfix.service relabels its directories (restorecon) and rebuilds
+# the aliases (newaliases, that is sendmail) before the start.
 mail_postfix_sandbox() {
-	local daemons
+	local daemons sendmail unit
+	local -a programs
+	unit=$(mail_postfix_template)
 	daemons=$(postconf -h daemon_directory 2>/dev/null) || true
 	daemons=${daemons:-/usr/libexec/postfix}
+	sendmail=$(postconf -h sendmail_path 2>/dev/null) || true
 	svc_selinux_spawner postfix "${daemons}/master" "${daemons}"
-	svc_sandbox "$(mail_postfix_template)" PrivateDevices=no ReadWritePaths=/var/spool/postfix ReadWritePaths=/var/lib/postfix \
+	mapfile -t programs < <(svc_exec_programs "${unit}")
+	svc_selinux_spawner postfix_start init_t "${programs[@]}" "${sendmail:-/usr/sbin/sendmail}"
+	svc_sandbox "${unit}" PrivateDevices=no ReadWritePaths=/var/spool/postfix ReadWritePaths=/var/lib/postfix \
 		"$@"
 	return
 }

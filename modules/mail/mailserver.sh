@@ -929,6 +929,7 @@ mod_remove() {
 	svc_dropin_remove dovecot.service lss-sandbox
 	svc_dropin_remove rspamd.service lss-sandbox
 	svc_selinux_spawner_remove postfix
+	svc_selinux_spawner_remove postfix_start
 	svc_selinux_spawner_remove dovecot
 	local file
 	for file in "${MS_MAILBOXES}" "${MS_VIRTUAL}" "${MS_SENDERS}" "${MS_ALIASES}" "${MS_RECIPIENT_ACCESS}" "${MS_USERS}" \

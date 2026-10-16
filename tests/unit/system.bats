@@ -695,26 +695,57 @@ EOF
 	# Only the workers that change their domain, from executable files; the master's own programs stay out.
 	export STUB_EXIT_selinuxenabled=0
 	svc_selinux_spawner postfix "${dir}/master" "${dir}" "${BATS_TEST_TMPDIR}/missing"
-	grep -qxF 'semodule -i lss_nnp_postfix.cil' "${STUB_LOG}"
-	[ "$(cat "${SVC_SELINUX_DIR}/lss_nnp_postfix.cil")" = "$(printf '%s\n' \
+	grep -qxF 'semodule -i lss_spawn_postfix.cil' "${STUB_LOG}"
+	[ "$(cat "${SVC_SELINUX_DIR}/lss_spawn_postfix.cil")" = "$(printf '%s\n' \
 		'(allow postfix_master_t postfix_qmgr_t (process2 (nnp_transition nosuid_transition)))' \
 		'(allow postfix_master_t postfix_smtpd_t (process2 (nnp_transition nosuid_transition)))')" ]
 	# Loaded and unchanged: nothing to do. Gone from the policy: loaded again.
 	: >"${STUB_LOG}"
-	modules=lss_nnp_postfix
+	modules=lss_spawn_postfix
 	svc_selinux_spawner postfix "${dir}/master" "${dir}"
 	run ! grep -q semodule "${STUB_LOG}"
 	modules=''
 	svc_selinux_spawner postfix "${dir}/master" "${dir}"
-	grep -qxF 'semodule -i lss_nnp_postfix.cil' "${STUB_LOG}"
+	grep -qxF 'semodule -i lss_spawn_postfix.cil' "${STUB_LOG}"
 	: >"${STUB_LOG}"
-	modules=lss_nnp_postfix
+	modules=lss_spawn_postfix
 	svc_selinux_spawner_remove postfix
-	grep -qxF 'semodule -r lss_nnp_postfix' "${STUB_LOG}"
-	[ ! -e "${SVC_SELINUX_DIR}/lss_nnp_postfix.cil" ]
+	grep -qxF 'semodule -r lss_spawn_postfix' "${STUB_LOG}"
+	[ ! -e "${SVC_SELINUX_DIR}/lss_spawn_postfix.cil" ]
 	# A master that SELinux does not know stops the run.
 	run svc_selinux_spawner postfix "${BATS_TEST_TMPDIR}/unknown" "${dir}"
 	[ "${status}" -ne 0 ]
+	# A domain as the source and single programs: the helpers systemd runs for a unit.
+	: >"${STUB_LOG}"
+	modules=''
+	printf '#!/bin/sh\n' >"${BATS_TEST_TMPDIR}/restorecon"
+	chmod 0755 "${BATS_TEST_TMPDIR}/restorecon"
+	# shellcheck disable=SC2329
+	selinuxexeccon() {
+		if [[ ${1##*/}:$2 == restorecon:*:init_t:* ]]; then
+			printf 'system_u:system_r:setfiles_t:s0\n'
+		else
+			printf '%s\n' "$2"
+		fi
+	}
+	svc_selinux_spawner postfix_start init_t "${BATS_TEST_TMPDIR}/restorecon" "${dir}/qmgr"
+	grep -qxF 'semodule -i lss_spawn_postfix_start.cil' "${STUB_LOG}"
+	[ "$(cat "${SVC_SELINUX_DIR}/lss_spawn_postfix_start.cil")" = \
+		'(allow init_t setfiles_t (process2 (nnp_transition nosuid_transition)))' ]
+}
+
+@test "svc_exec_programs lists the programs systemd runs for a unit" {
+	# shellcheck disable=SC2329 # called by the function under test
+	systemctl() {
+		case $3 in
+		ExecStartPre) printf '%s\n' '{ path=/usr/sbin/restorecon ; argv[]=/usr/sbin/restorecon -R /var/spool/postfix/pid ; ignore_errors=yes }' \
+			'{ path=/usr/libexec/postfix/aliasesdb ; argv[]=/usr/libexec/postfix/aliasesdb ; ignore_errors=no }' ;;
+		ExecStart) printf '%s\n' '{ path=/usr/sbin/postfix ; argv[]=/usr/sbin/postfix start ; ignore_errors=no }' ;;
+		esac
+	}
+	run svc_exec_programs postfix.service
+	[ "${status}" -eq 0 ]
+	[ "${output}" = "$(printf '%s\n' /usr/sbin/restorecon /usr/libexec/postfix/aliasesdb /usr/sbin/postfix)" ]
 }
 
 @test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {
