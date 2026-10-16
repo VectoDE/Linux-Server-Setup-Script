@@ -156,7 +156,8 @@ start_run() {
 	export LSS_LOG_FILE
 	local lock=/run/lss.lock
 	exec 9>"${lock}"
-	flock -n 9 || die "Another lss run is in progress."
+	# A few seconds of patience: a helper of the run before may still be exiting with the lock inherited.
+	flock -w 5 9 || die "Another lss run is in progress."
 	log_info "lss ${LSS_VERSION} on ${OS_NAME} (${OS_ARCH}), run ${LSS_RUN_ID}"
 	return
 }

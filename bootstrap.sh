@@ -168,7 +168,9 @@ bs_fetch() {
 	file://*) proto='=file' ;;
 	*) bs_die "Refusing ${url}: releases are downloaded over HTTPS." ;;
 	esac
-	curl --proto "${proto}" --proto-redir "${proto}" --tlsv1.2 -fsSL --retry 3 --retry-delay 2 -o "${dest}" -- "${url}" ||
+	# 9>&- here and for gh: helpers must not inherit the run lock (fd 9 of lss and bootstrap.sh). A helper process that
+	# outlives the run would keep the lock and refuse the next lss run.
+	curl --proto "${proto}" --proto-redir "${proto}" --tlsv1.2 -fsSL --retry 3 --retry-delay 2 -o "${dest}" -- "${url}" 9>&- ||
 		bs_die "Download failed: ${url}"
 	return
 }
@@ -248,7 +250,7 @@ bs_check_attestation() {
 		GH_CONFIG_DIR="${dir}/.gh" XDG_CACHE_HOME="${dir}/.cache" XDG_STATE_HOME="${dir}/.state" \
 			XDG_DATA_HOME="${dir}/.data" GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1 NO_COLOR=1 \
 			"${gh}" attestation verify "${file}" --bundle "${bundle}" --repo "${BS_REPO}" \
-			--cert-identity "${signer}" --source-ref "${LSS_RELEASE_REF}" --deny-self-hosted-runners 2>&1
+			--cert-identity "${signer}" --source-ref "${LSS_RELEASE_REF}" --deny-self-hosted-runners 2>&1 9>&-
 	) || {
 		printf '%s\n' "${output}" | tail -n 5 | sed 's/^/  gh: /' >&2
 		bs_die "The attestation of ${file##*/} does not verify; it was not built by ${BS_REPO} (${LSS_RELEASE_WORKFLOW} on ${LSS_RELEASE_REF}). Nothing was installed."
@@ -420,7 +422,7 @@ bs_lock() {
 	# `lss update` holds the lock already and runs this script with LSS_LOCK_HELD=1.
 	[[ ${LSS_LOCK_HELD:-0} != 1 ]] || return 0
 	exec 9>"${LSS_LOCK}"
-	flock -n 9 || bs_die "Another lss run is in progress."
+	flock -w 5 9 || bs_die "Another lss run is in progress."
 	return
 }
 

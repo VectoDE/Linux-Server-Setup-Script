@@ -329,7 +329,7 @@ active() {
 	[[ ${output} == *"'latest' is a version like 2.0.1."* ]]
 }
 
-@test "a second run waits for no one: the lock is taken once" {
+@test "a second run gives up after a short wait: the lock is taken once" {
 	bs_lock
 	(
 		exec 9>&-
