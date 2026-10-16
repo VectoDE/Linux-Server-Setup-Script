@@ -116,25 +116,28 @@ mod_configure() {
 	app_backup DB=mariadb LIVE=html
 	app_up
 	app_site "$(opt_int port)"
-	app_wait wp-includes/images/w-logo-blue.png 200 >/dev/null || die "wordpress: https://$(app_domain)/ does not answer."
+	app_wait wp-includes/css/buttons.min.css 200 >/dev/null || die "wordpress: https://$(app_domain)/ does not answer."
 	_wp_install
 	return
 }
 
 mod_verify() {
-	local page jar status
+	local page jar status home
 	app_verify_stack
 	app_verify_backup
 	page=$(app_wait wp-login.php 200) || die "wordpress: the login page does not answer."
 	grep -q 'name="pwd"' <<<"${page}" || die "wordpress: https://$(app_domain)/wp-login.php shows no login."
-	page=$(app_get wp-json/) || true
-	[[ $(app_status "${page}") == 200 && $(jq -r '.home' <<<"${page%$'\n'*}" 2>/dev/null) == "https://$(app_domain)" ]] ||
-		die "wordpress: the REST API does not report https://$(app_domain) as the address of the site."
-	# Used, not only running: the administrator logs in and opens the dashboard.
+	# rest_route works with plain permalinks too; /wp-json/ needs pretty permalinks, which a fresh site lacks.
+	page=$(app_get 'index.php?rest_route=/') || true
+	home=$(jq -r '.home // empty' <<<"${page%$'\n'*}" 2>/dev/null) || home=''
+	[[ $(app_status "${page}") == 200 && ${home} == "https://$(app_domain)" ]] ||
+		die "wordpress: the REST API answers $(app_status "${page}") with the address '${home}' instead of https://$(app_domain)."
+	# Used, not only running: the administrator logs in and opens the dashboard. Without testcookie WordPress skips its
+	# check for a browser that blocks cookies; the session cookies land in the jar.
 	jar=$(mktemp)
-	page=$(app_get wp-login.php -b "${jar}" -c "${jar}" -b 'wordpress_test_cookie=WP%20Cookie%20check' -X POST \
+	page=$(app_get wp-login.php -b "${jar}" -c "${jar}" -X POST \
 		--data-urlencode "log=$(opt admin_user)" --data-urlencode "pwd@$(secret_path wordpress-admin-password)" \
-		-d testcookie=1 --data-urlencode "redirect_to=https://$(app_domain)/wp-admin/") || true
+		--data-urlencode "redirect_to=https://$(app_domain)/wp-admin/") || true
 	status=$(app_status "${page}")
 	if [[ ${status} != 302 ]]; then
 		rm -f -- "${jar}"
