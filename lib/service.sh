@@ -7,6 +7,8 @@
 # Seconds lss waits for a unit to start. Some units (MySQL) wait for their service without a limit; a service that
 # never reports ready would stop the run for good.
 SVC_START_TIMEOUT=${SVC_START_TIMEOUT:-300}
+# Sources of the SELinux policy modules that lss loads for the workers of a master process (svc_selinux_spawner).
+SVC_SELINUX_DIR=${SVC_SELINUX_DIR:-/etc/lss/selinux}
 
 svc_exists() {
 	systemctl list-unit-files --no-legend "$1" "$1.service" 2>/dev/null | grep -q .
@@ -130,9 +132,7 @@ _svc_selinux_nnp() {
 	[[ ${type} == ?*_exec_t ]] || return 0
 	domain=${type%_exec_t}_t
 	module=lss_nnp_${type%_exec_t}
-	if semodule -l 2>/dev/null | awk '{ print $1 }' | grep -qxF "${module}"; then
-		return 0
-	fi
+	! _svc_selinux_loaded "${module}" || return 0
 	dir=$(mktemp -d)
 	printf '(allow init_t %s (process2 (nnp_transition nosuid_transition)))\n' "${domain}" >"${dir}/${module}.cil"
 	if ! log_command semodule -i "${dir}/${module}.cil"; then
@@ -144,16 +144,60 @@ _svc_selinux_nnp() {
 	return
 }
 
-# svc_spawner_directives: sandbox directives (one per line) for a master process that starts its workers in SELinux
-# domains of their own (the Postfix master: postfix_qmgr_t, postfix_smtpd_t; Dovecot: dovecot_auth_t). NoNewPrivileges
-# forbids those changes (avc: nnp_transition) and the workers never start, so under SELinux it is off: the master runs
-# as root and drops its rights itself, and the policy confines every worker. Without SELinux it prints nothing.
-svc_spawner_directives() {
-	if _svc_selinux_on; then
-		printf '%s
-' NoNewPrivileges=no
+# _svc_selinux_loaded MODULE: the SELinux policy module MODULE is installed.
+_svc_selinux_loaded() {
+	semodule -l 2>/dev/null | awk '{ print $1 }' | grep -qxF "$1"
+	return
+}
+
+# svc_selinux_spawner NAME PROGRAM DIR...: lets a master process that systemd starts from PROGRAM start its workers
+# from the DIRs in their own SELinux domains (the Postfix master: postfix_qmgr_t, postfix_smtpd_t; Dovecot:
+# dovecot_auth_t) while the sandbox keeps NoNewPrivileges. NoNewPrivileges forbids each such change unless the policy
+# allows it (avc: nnp_transition), and the workers never start. The policy itself names the domain of every program
+# (selinuxexeccon); the policy module lss_nnp_NAME allows exactly these changes and nothing else. Its source stays in
+# SVC_SELINUX_DIR, so a second run loads it only when an update brought other programs. Without SELinux it does
+# nothing.
+svc_selinux_spawner() {
+	local name=$1 program=$2 module=lss_nnp_$1 master dir file domain
+	shift 2
+	_svc_selinux_on || return 0
+	master=$(selinuxexeccon "${program}" system_u:system_r:init_t:s0 2>/dev/null | cut -d : -f 3) || true
+	[[ -n ${master} ]] || die "${LSS_MODULE:-lss}: SELinux names no domain for ${program}."
+	local -a rules=()
+	for dir in "$@"; do
+		[[ -d ${dir} ]] || continue
+		for file in "${dir}"/*; do
+			[[ -f ${file} && -x ${file} ]] || continue
+			domain=$(selinuxexeccon "${file}" "system_u:system_r:${master}:s0" 2>/dev/null | cut -d : -f 3) || true
+			[[ -z ${domain} || ${domain} == "${master}" ]] ||
+				rules+=("(allow ${master} ${domain} (process2 (nnp_transition nosuid_transition)))")
+		done
+	done
+	if [[ ${#rules[@]} -eq 0 ]]; then
+		svc_selinux_spawner_remove "${name}"
+		return 0
 	fi
-	return 0
+	install -d -m 0755 "${SVC_SELINUX_DIR}"
+	file_write 0644 root:root "${SVC_SELINUX_DIR}/${module}.cil" < <(printf '%s\n' "${rules[@]}" | sort -u)
+	if [[ ${LSS_FILE_CHANGED} == 0 ]] && _svc_selinux_loaded "${module}"; then
+		return 0
+	fi
+	log_command semodule -i "${SVC_SELINUX_DIR}/${module}.cil" ||
+		die "${LSS_MODULE:-lss}: SELinux does not take the policy module ${module} for the workers of ${master}; see the log."
+	files_note_change "SELinux module ${module}: ${master} starts its workers in their domains with NoNewPrivileges"
+	return
+}
+
+# svc_selinux_spawner_remove NAME: unloads the policy module of svc_selinux_spawner and deletes its source.
+svc_selinux_spawner_remove() {
+	local module=lss_nnp_$1
+	if command -v semodule >/dev/null 2>&1 && _svc_selinux_loaded "${module}"; then
+		log_command semodule -r "${module}" ||
+			die "${LSS_MODULE:-lss}: SELinux keeps the policy module ${module}; see the log."
+		files_note_change "removed SELinux module ${module}"
+	fi
+	file_remove "${SVC_SELINUX_DIR}/${module}.cil"
+	return
 }
 
 # svc_scanner_sandbox full|strict [PATH...]: [Service] lines that confine lss's own scanner units. They read the whole

@@ -67,14 +67,17 @@ load_module() {
 @test "the Postfix sandbox keeps /dev and opens only the queue, the state and what the module adds" {
 	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
 	svc_sandbox() { printf '%s\n' "$@"; }
+	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
+	svc_selinux_spawner() { printf 'spawner %s\n' "$*" >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
+	postconf() { printf '/usr/lib/postfix/sbin\n'; }
 	run mail_postfix_sandbox ReadWritePaths=/var/mail
 	[ "${lines[0]}" = 'postfix@.service' ]
 	[[ ${output} == *$'PrivateDevices=no\nReadWritePaths=/var/spool/postfix\nReadWritePaths=/var/lib/postfix\nReadWritePaths=/var/mail'* ]]
+	# NoNewPrivileges stays as svc_sandbox sets it; under SELinux the master starts its daemons in their own domains
+	# through a policy module.
 	run ! grep -q NoNewPrivileges <<<"${output}"
-	# Under SELinux the master must start qmgr, pickup and smtpd in their own domains.
-	export STUB_EXIT_selinuxenabled=0
-	run mail_postfix_sandbox ReadWritePaths=/var/mail
-	[[ ${output} == *$'ReadWritePaths=/var/lib/postfix\nNoNewPrivileges=no\nReadWritePaths=/var/mail'* ]]
+	grep -qxF 'spawner postfix /usr/lib/postfix/sbin/master /usr/lib/postfix/sbin' "${STUB_LOG}"
 }
 
 @test "Postfix starts once, restarts only after a change and stops the run on a configuration it rejects" {

@@ -656,15 +656,65 @@ EOF
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
-@test "svc_spawner_directives lets a master start its workers in their SELinux domains" {
+@test "svc_selinux_spawner allows the domains of a master's workers with NoNewPrivileges, once, and removes them" {
+	export SVC_SELINUX_DIR=${BATS_TEST_TMPDIR}/selinux
+	local dir=${BATS_TEST_TMPDIR}/libexec modules='' program
+	mkdir -p "${dir}"
+	for program in master qmgr smtpd trivial-rewrite; do
+		printf '#!/bin/sh
+' >"${dir}/${program}"
+		chmod 0755 "${dir}/${program}"
+	done
+	install -m 0644 /dev/null "${dir}/qmgr.conf"
+	eval "_lss_file_write() $(declare -f file_write | tail -n +2)"
+	# shellcheck disable=SC2329 # called by the function under test
+	file_write() { _lss_file_write "$1" "${OWNER}" "$3"; }
+	# shellcheck disable=SC2329 # called by the function under test
+	selinuxexeccon() {
+		case ${1##*/}:$2 in
+		master:*:init_t:*) printf 'system_u:system_r:postfix_master_t:s0\n' ;;
+		qmgr:*:postfix_master_t:* | qmgr.conf:*) printf 'system_u:system_r:postfix_qmgr_t:s0\n' ;;
+		smtpd:*:postfix_master_t:*) printf 'system_u:system_r:postfix_smtpd_t:s0\n' ;;
+		unknown:*) return 1 ;;
+		*) printf '%s\n' "$2" ;;
+		esac
+	}
+	# shellcheck disable=SC2329
+	semodule() {
+		if [[ $1 == -l ]]; then
+			printf '%s\n' "${modules}"
+		else
+			printf 'semodule %s %s\n' "$1" "${2##*/}" >>"${STUB_LOG}"
+		fi
+	}
+	# Without SELinux there is nothing to allow.
 	export STUB_EXIT_selinuxenabled=1
-	run svc_spawner_directives
-	[ "${status}" -eq 0 ]
-	[ -z "${output}" ]
+	svc_selinux_spawner postfix "${dir}/master" "${dir}"
+	run ! grep -q semodule "${STUB_LOG}"
+	[ ! -e "${SVC_SELINUX_DIR}" ]
+	# Only the workers that change their domain, from executable files; the master's own programs stay out.
 	export STUB_EXIT_selinuxenabled=0
-	run svc_spawner_directives
-	[ "${status}" -eq 0 ]
-	[ "${output}" = NoNewPrivileges=no ]
+	svc_selinux_spawner postfix "${dir}/master" "${dir}" "${BATS_TEST_TMPDIR}/missing"
+	grep -qxF 'semodule -i lss_nnp_postfix.cil' "${STUB_LOG}"
+	[ "$(cat "${SVC_SELINUX_DIR}/lss_nnp_postfix.cil")" = "$(printf '%s\n' \
+		'(allow postfix_master_t postfix_qmgr_t (process2 (nnp_transition nosuid_transition)))' \
+		'(allow postfix_master_t postfix_smtpd_t (process2 (nnp_transition nosuid_transition)))')" ]
+	# Loaded and unchanged: nothing to do. Gone from the policy: loaded again.
+	: >"${STUB_LOG}"
+	modules=lss_nnp_postfix
+	svc_selinux_spawner postfix "${dir}/master" "${dir}"
+	run ! grep -q semodule "${STUB_LOG}"
+	modules=''
+	svc_selinux_spawner postfix "${dir}/master" "${dir}"
+	grep -qxF 'semodule -i lss_nnp_postfix.cil' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	modules=lss_nnp_postfix
+	svc_selinux_spawner_remove postfix
+	grep -qxF 'semodule -r lss_nnp_postfix' "${STUB_LOG}"
+	[ ! -e "${SVC_SELINUX_DIR}/lss_nnp_postfix.cil" ]
+	# A master that SELinux does not know stops the run.
+	run svc_selinux_spawner postfix "${BATS_TEST_TMPDIR}/unknown" "${dir}"
+	[ "${status}" -ne 0 ]
 }
 
 @test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {

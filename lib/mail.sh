@@ -116,13 +116,15 @@ EOF
 }
 
 # mail_postfix_sandbox [DIRECTIVE...]: the systemd sandbox of the Postfix master and its daemons. They write the queue,
-# their state and the local mailboxes only. Postfix needs /dev/log of the host for syslog, so /dev stays; the master
-# starts its daemons in their own SELinux domains (svc_spawner_directives).
+# their state and the local mailboxes only. Postfix needs /dev/log of the host for syslog, so /dev stays. Under SELinux
+# the master starts its daemons in their own domains with NoNewPrivileges (svc_selinux_spawner).
 mail_postfix_sandbox() {
-	local -a spawner
-	mapfile -t spawner < <(svc_spawner_directives)
+	local daemons
+	daemons=$(postconf -h daemon_directory 2>/dev/null) || true
+	daemons=${daemons:-/usr/libexec/postfix}
+	svc_selinux_spawner postfix "${daemons}/master" "${daemons}"
 	svc_sandbox "$(mail_postfix_template)" PrivateDevices=no ReadWritePaths=/var/spool/postfix ReadWritePaths=/var/lib/postfix \
-		"${spawner[@]}" "$@"
+		"$@"
 	return
 }
 
