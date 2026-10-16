@@ -68,7 +68,8 @@ _tls_hook() {
 	cat <<EOF
 #!/bin/sh
 # Managed by lss (module tls). Installs a certificate certbot issued or renewed for the web server: the directory of
-# the same name below ${WEB_TLS_DIR} (fullchain.pem, privkey.pem, combined.pem for HAProxy), then a reload.
+# the same name below ${WEB_TLS_DIR} (fullchain.pem, privkey.pem, combined.pem for HAProxy), then a reload of the
+# services that use it (web servers, HAProxy, the mail server).
 set -eu
 lineage=\${RENEWED_LINEAGE:?}
 dir=${WEB_TLS_DIR}/\${lineage##*/}
@@ -82,7 +83,7 @@ chmod 0640 "\${dir}/combined.pem.new"
 for file in privkey.pem fullchain.pem combined.pem; do
 	mv -f "\${dir}/\${file}.new" "\${dir}/\${file}"
 done
-for unit in nginx apache2 httpd haproxy; do
+for unit in nginx apache2 httpd haproxy postfix postfix@- dovecot; do
 	if systemctl is-active --quiet "\${unit}"; then
 		systemctl reload "\${unit}"
 	fi

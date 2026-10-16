@@ -443,6 +443,9 @@ EOF
 	[[ ${output} == *"root ${WEB_ACME_ROOT};"* ]]
 	[[ ${output} == *'http2 on;'* ]]
 	[[ ${output} == *"fastcgi_pass unix:${WEB_PHP_SOCKET};"* ]]
+	# PATH_INFO after the script name (/static.php/skins/...), as Roundcube and Nextcloud use it.
+	[[ ${output} == *'location ~ [^/]\.php(/|$) {'* ]]
+	[[ ${output} == *'fastcgi_param PATH_INFO $fastcgi_path_info;'* ]]
 	[[ ${output} == *'location ~ /\.(?!well-known)'* ]]
 	[[ ${output} == *'Strict-Transport-Security "max-age=63072000" always;'* ]]
 }

@@ -8,7 +8,7 @@ MOD_DESCRIPTION="Keeps the server at the level lss set up: daily verify and repa
 MOD_REQUIRES="system"
 MOD_OPTIONS="autofix|true|Configure modules again that fail verify or were changed outside lss
 time|07:00|Time of the daily check (HH:MM)
-email||Send findings to this address (needs the mail-relay module or another sendmail)
+email||Send findings to this address, through the mail-relay or mailserver module (or another sendmail)
 webhook||Send findings to this HTTPS webhook (Slack, Teams, Mattermost, Discord or ntfy)
 disk_threshold|90|Report file systems that are fuller than this (percent)
 lynis_min|0|Report a Lynis hardening index below this (needs the lynis module)
@@ -92,7 +92,17 @@ EOF
 	return
 }
 
+# _guard_mail_check: the e-mail alerts need a sendmail command (mail-relay or mailserver); without one they would be
+# lost without a trace.
+_guard_mail_check() {
+	[[ -n $(opt email) ]] || return 0
+	command -v sendmail >/dev/null 2>&1 && return 0
+	log_warn "guard: LSS_GUARD_EMAIL is set, but this server cannot send mail yet; install mail-relay (lss install mail-relay)."
+	return
+}
+
 mod_verify() {
+	_guard_mail_check
 	[[ -x ${GUARD_SCRIPT} ]] || die "guard: ${GUARD_SCRIPT} is missing."
 	bash -n "${GUARD_SCRIPT}" || die "guard: ${GUARD_SCRIPT} is not a valid script."
 	[[ $(stat -c '%a' "${GUARD_CONF}") == 600 ]] || die "guard: ${GUARD_CONF} must be mode 600."

@@ -339,10 +339,12 @@ EOF
 	location / {
 		try_files \$uri \$uri/ /index.php?\$query_string;
 	}
-	location ~ \\.php\$ {
+	location ~ [^/]\\.php(/|\$) {
+		fastcgi_split_path_info ^(.+?\\.php)(/.*)\$;
 		try_files \$fastcgi_script_name =404;
 		include fastcgi_params;
 		fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
+		fastcgi_param PATH_INFO \$fastcgi_path_info;
 		fastcgi_param HTTPS on;
 		fastcgi_pass unix:${WEB_PHP_SOCKET};
 	}
@@ -666,6 +668,46 @@ web_admin_remove() {
 	server=$(web_server)
 	[[ -n ${server} ]] || return 0
 	file_remove "$(web_conf_dir "${server}")/admin/${name}.$(_web_ext "${server}")"
+	return
+}
+
+# web_php_fpm_units: the PHP-FPM units of the php module (php8.x-fpm on Debian and Ubuntu, php-fpm on the RHEL family).
+web_php_fpm_units() {
+	systemctl list-units --type=service --all --no-legend --plain '*php*fpm*' 2>/dev/null | awk '{ print $1 }'
+	return
+}
+
+# _web_php_pool_value KEY: a setting (user, group) of the PHP-FPM pool on WEB_PHP_SOCKET, the php module's pool.
+_web_php_pool_value() {
+	local key=$1 file
+	for file in /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf; do
+		[[ -f ${file} ]] || continue
+		grep -qE "^[[:space:]]*listen[[:space:]]*=[[:space:]]*${WEB_PHP_SOCKET}[[:space:]]*\$" "${file}" || continue
+		sed -nE "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([A-Za-z0-9_.-]+).*/\\1/p" "${file}" | head -n 1
+		return 0
+	done
+	return 0
+}
+
+# web_php_pool_user: the user the PHP-FPM workers of the php module's pool run as, or nothing.
+web_php_pool_user() {
+	_web_php_pool_value user
+	return
+}
+
+# web_php_pool_group: the group of the PHP-FPM pool on WEB_PHP_SOCKET, which reads the configuration of PHP
+# applications; WEB_GROUP when the pool configuration does not name one.
+web_php_pool_group() {
+	local pool_user pool_group
+	pool_user=$(_web_php_pool_value user)
+	pool_group=$(_web_php_pool_value group)
+	if [[ -z ${pool_group} && -n ${pool_user} ]]; then
+		pool_group=$(id -gn "${pool_user}" 2>/dev/null || true)
+	fi
+	if [[ -z ${pool_group} ]] || ! getent group "${pool_group}" >/dev/null; then
+		pool_group=${WEB_GROUP}
+	fi
+	printf '%s' "${pool_group}"
 	return
 }
 

@@ -85,9 +85,12 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `wireguard`        | 15 s               | 260 MiB                   | 100 MiB | – (kernel)                                          |
 | `dns-resolver`     | 45 s               | 180 MiB                   | 40 MiB  | Unbound about 20 MiB                                |
 | `ntp-server`       | 15 s               | 195 MiB                   | 10 MiB  | – (the chronyd of `time`, about 10 MiB)             |
+| `mail-relay`       | 35 s               | 250 MiB                   | 180 MiB (dnf), else 135 MiB | Postfix (master, queue manager, pickup)  |
+| `mailserver`       | 90 s               | 800 MiB (dnf), else 225 MiB | 235 MiB (dnf), else 120 MiB | Postfix, Dovecot and Rspamd, up to 180 MiB |
+| `webmail`          | 135 s with nginx, php and mailserver | 390 MiB together | 265 MiB together | Roundcube in PHP-FPM; with nginx and the mail server up to 290 MiB |
 
 Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
-for `wireguard`); those outliers are left out.
+for `wireguard`); those outliers are left out, like one Rocky 9 container run of `mail-relay` that took six minutes.
 
 Web, runtime and database modules, measured the same way. Modules that only work together are tested together; their
 row is the cost of the whole set, including the web server or PHP it needs.
@@ -213,7 +216,7 @@ first password with `lss secrets show pgadmin-admin-password`), all on the admin
 together with `docker`). See [Containers](#containers).
 
 The [hardening guide](docs/hardening.md) lists what each security module changes, the CIS Benchmark areas it covers
-and where lss deliberately deviates. Mail follows as a further module group.
+and where lss deliberately deviates.
 
 **Backup:** `restic` (daily, encrypted backups to a local path, SFTP or S3) and `db-dumps` (dumps of the databases
 before each backup). See [Backup](#backup).
@@ -223,6 +226,9 @@ before each backup). See [Backup](#backup).
 
 **Network:** `wireguard` (VPN server), `dns-resolver` (Unbound with DNSSEC), `ntp-server` (chrony serves the time).
 See [WireGuard, DNS and NTP](#wireguard-dns-and-ntp).
+
+**Mail:** `mail-relay` (the server sends its own mail, through a smarthost or directly) or `mailserver` (Postfix,
+Dovecot and Rspamd for your domains), `webmail` (Roundcube on the web server). See [Mail](#mail).
 
 ### Web sites
 
@@ -342,6 +348,58 @@ resolvers, over TLS with `LSS_DNS_RESOLVER_FORWARD_TLS=true`.
 `ntp-server` opens chrony of the `time` module to the WireGuard network (or to everyone with
 `LSS_NTP_SERVER_ACCESS=public`), with rate limiting.
 
+### Mail
+
+`mail-relay` is for servers that only send: mail from root, cron, the guard and applications goes out through
+`LSS_MAIL_RELAY_RELAYHOST` (STARTTLS on 587 or TLS on 465, the certificate checked, `LSS_MAIL_RELAY_USER` and the
+password in the lss secrets) or, without a smarthost, straight to the recipients' servers with opportunistic TLS
+(DANE when `dns-resolver` is installed; `mailserver` does the same, and `lss configure` picks up a
+resolver added later). Postfix listens on 127.0.0.1 and ::1 only. Mail for root stays in
+`/var/mail/root` unless `LSS_MAIL_RELAY_FORWARD` names an address. Most smarthosts accept only their own sender
+addresses; set `LSS_MAIL_RELAY_FROM`.
+
+```bash
+LSS_MAIL_RELAY_RELAYHOST=smtp.example.com:587
+LSS_MAIL_RELAY_USER=server1@example.com
+LSS_MAIL_RELAY_PASSWORD=...
+LSS_MAIL_RELAY_FROM=server1@example.com
+LSS_MAIL_RELAY_FORWARD=admin@example.com
+```
+
+`mailserver` receives and delivers mail for `LSS_MAILSERVER_DOMAINS`: Postfix on port 25, submission on 587
+(STARTTLS) and 465 (TLS) with login only, Dovecot with IMAPS on 993, Rspamd as spam filter (reject from score 15, a
+header from 6) that signs outgoing mail with DKIM and checks SPF, DKIM and DMARC of incoming mail. Mailboxes are
+`LSS_MAILSERVER_USERS`, aliases `LSS_MAILSERVER_ALIASES`; postmaster and abuse of every domain go to the first mailbox.
+A login sends only as its own address and the aliases that lead to it, in the envelope (Postfix) and in the From
+header (Rspamd); anything else is rejected. DKIM signs mail of a login with the key of the login's domain only, so an
+alias in another domain goes out unsigned. Mail the server sends itself (sendmail, cron, the guard) is signed when its
+From names a hosted domain. Each password is a secret:
+
+```bash
+LSS_MAILSERVER_DOMAINS=example.com example.org
+LSS_MAILSERVER_USERS=alice bob@example.org
+LSS_MAILSERVER_ALIASES=info:alice,bob@example.org
+sudo lss secrets show mailbox-alice_example.com
+```
+
+lss cannot set DNS records, so it prints the ones the domains need after every change and keeps them in
+`/etc/lss/mailserver-dns.txt`: MX, A and AAAA of the mail host (`mail.<first domain>` unless
+`LSS_MAILSERVER_HOSTNAME`), SPF, the DKIM key (selector `lss`), DMARC (`LSS_MAILSERVER_DMARC_POLICY`, quarantine)
+and the reverse DNS (PTR) the hosting provider has to set for the server's addresses. Without them other servers
+reject or file the mail as spam. The certificate is self-signed until `LSS_MAILSERVER_CERTIFICATE=default` takes the
+one of the `tls` module (with the mail host in `LSS_TLS_DOMAINS`); Postfix and Dovecot reload on every renewal.
+Many providers block outgoing port 25; ask for it to be opened or relay through a smarthost of your provider.
+
+`webmail` runs Roundcube as a site of the web server (`LSS_WEBMAIL_DOMAINS`, by default the mail host), with the
+certificate of the `tls` module when it is installed. It talks to Dovecot and Postfix on 127.0.0.1 only. The profile
+`office` installs `minimal-secure`, nginx with `tls` and `php`, `mailserver`, `webmail` and `restic`:
+
+```bash
+sudo lss install --profile office --set LSS_ADMIN_USER_NAME=alice --set LSS_ADMIN_USER_GITHUB_USER=alice-on-github   --set LSS_MAILSERVER_DOMAINS=example.com --set LSS_MAILSERVER_USERS=alice --set LSS_TLS_DOMAINS=mail.example.com
+```
+
+`restic` backs up the mailboxes (`/var/vmail`), the DKIM keys and the Roundcube database by default.
+
 ## Guard
 
 The `guard` module checks the server every day: it runs `lss verify`, repairs modules that fail or whose files were
@@ -350,7 +408,8 @@ falling Lynis index, vulnerable packages (debsecan on Debian, `dnf updateinfo` o
 images with HIGH or CRITICAL vulnerabilities (Trivy, with `docker` or `podman`). It passes on
 what the daily AIDE, rkhunter and ClamAV runs found, and reports more failed SSH logins than
 `LSS_GUARD_LOGIN_THRESHOLD` with their main sources. Successful SSH logins and active fail2ban or CrowdSec bans are
-listed as notes. Findings go to a webhook (Slack, Teams, Mattermost, Discord, ntfy) or by e-mail.
+listed as notes. Findings go to a webhook (Slack, Teams, Mattermost, Discord, ntfy) or by e-mail to
+`LSS_GUARD_EMAIL`, which needs `mail-relay` or `mailserver`; the guard warns when the server cannot send mail.
 
 With `restic` installed, the guard reports a last successful backup older than `LSS_GUARD_BACKUP_MAX_AGE` hours (30)
 and runs a restore test every week. With `node-exporter` installed, the number of findings goes to Prometheus as
