@@ -31,13 +31,18 @@ every module on each tested system.
 | Profile `minimal-secure`                | 1 GB; 2 GB on the RHEL family             | 4 GB      | 3 to 5 min plus AIDE    |
 | `minimal-secure` with `crowdsec`        | 1.5 GB; 2 GB on the RHEL family           | 4.5 GB    | about 30 s more         |
 | `minimal-secure` with `clamav`          | 2.5 GB                                    | 4.5 GB    | about 1 min more        |
-| Profile `office`                        | not measured yet                          | not measured yet | not measured yet |
-| Profile `devops`                        | not measured yet                          | not measured yet | not measured yet |
+| Profile `office`                        | 1.5 GB; 2 GB on the RHEL family           | 10 GB     | 9 to 16 min             |
+| Profile `devops`                        | 1 GB; 1.5 GB on the RHEL family           | 7 GB      | 6 to 11 min             |
 
 One CPU core is enough; more cores mainly shorten the first AIDE database build. The disk figure includes the swap
 file (`LSS_SWAP_SIZE`, 1 GB in the measurement), the journal (up to `LSS_LOGGING_MAX_USE`, 1 GB) and the audit logs
 (up to 10 × 32 MiB). The RHEL family needs more memory because dnf loads its repository metadata during every install,
 up to 0.7 GB.
+
+The `office` and `devops` profiles are measured in the CI VMs of Debian 13 and AlmaLinux 10. Their disk figure includes
+the container images of the apps. After the install, `office` keeps about 0.9 GiB resident (Nextcloud, Collabora
+Online, Vaultwarden, the mail server and the web server) and `devops` about 0.8 GiB; plan more for real use, since
+Collabora needs memory for every open document.
 
 The first AIDE run reads every file under the directories it watches, so its time depends on the server: 12 to 90
 seconds on a fresh system, 16 minutes on a CI machine full of preinstalled toolchains. It runs with the lowest CPU and
@@ -70,7 +75,7 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `lynis`            | 25 s               | 80 MiB                    | 5 MiB   | weekly audit                                        |
 | `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
 | `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
-| `docker`           | not measured yet   | not measured yet          | not measured yet | dockerd and containerd                     |
+| `docker`           | 90 s with the web server | 660 MiB with the web server | 940 MiB with the web server | dockerd and containerd, about 260 MiB with the web server |
 | `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
 | `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |
 | `k3s`              | not measured yet   | not measured yet          | not measured yet | k3s server, about 1 GiB with Traefik       |
@@ -90,20 +95,24 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `mail-relay`       | 35 s               | 250 MiB                   | 180 MiB (dnf), else 135 MiB | Postfix (master, queue manager, pickup)  |
 | `mailserver`       | 90 s               | 800 MiB (dnf), else 225 MiB | 235 MiB (dnf), else 120 MiB | Postfix, Dovecot and Rspamd, up to 180 MiB |
 | `webmail`          | 135 s with nginx, php and mailserver | 390 MiB together | 265 MiB together | Roundcube in PHP-FPM; with nginx and the mail server up to 290 MiB |
-| `nextcloud`        | not measured yet   | not measured yet          | not measured yet | Nextcloud (Apache) and PostgreSQL, up to 1.5 GiB |
-| `collabora`        | not measured yet   | not measured yet          | not measured yet | Collabora Online, up to 2 GiB |
-| `forgejo`          | not measured yet   | not measured yet          | not measured yet | Forgejo, up to 1 GiB |
-| `uptime-kuma`      | not measured yet   | not measured yet          | not measured yet | Uptime Kuma, up to 512 MiB |
-| `vaultwarden`      | not measured yet   | not measured yet          | not measured yet | Vaultwarden, up to 512 MiB |
-| `keycloak`         | not measured yet   | not measured yet          | not measured yet | Keycloak and PostgreSQL, up to 2 GiB |
-| `matomo`           | not measured yet   | not measured yet          | not measured yet | Matomo (Apache) and MariaDB, up to 1.5 GiB |
-| `wordpress`        | not measured yet   | not measured yet          | not measured yet | WordPress (Apache) and MariaDB, up to 1.3 GiB |
-| `n8n`              | not measured yet   | not measured yet          | not measured yet | n8n and PostgreSQL, up to 1.5 GiB |
-| `minio`            | not measured yet   | not measured yet          | not measured yet | Silo, up to 1 GiB in a container |
-| `self-updater`     | not measured yet   | not measured yet          | not measured yet | Self-Updater, about 60 MiB |
+| `nextcloud`        | 295 s              | 810 MiB (dnf), else 595 MiB | 2.8 GiB | Nextcloud (Apache) and PostgreSQL, about 420 MiB (limit 1.5 GiB) |
+| `collabora`        | 85 s               | 830 MiB                   | 1.4 GiB | Collabora Online, about 640 MiB (limit 2 GiB) |
+| `forgejo`          | 35 s               | 300 MiB                   | 195 MiB | Forgejo, about 300 MiB (limit 1 GiB) |
+| `uptime-kuma`      | 60 s               | 285 MiB                   | 665 MiB | Uptime Kuma, about 170 MiB (limit 512 MiB) |
+| `vaultwarden`      | 35 s               | 730 MiB (dnf), else 255 MiB | 380 MiB | Vaultwarden, about 125 MiB (limit 512 MiB) |
+| `keycloak`         | 85 s               | 960 MiB                   | 1.0 GiB | Keycloak and PostgreSQL, about 900 MiB (limit 2 GiB) |
+| `matomo`           | 75 s               | 450 MiB                   | 1.3 GiB | Matomo (Apache) and MariaDB, about 280 MiB (limit 1.5 GiB) |
+| `wordpress`        | 45 s               | 360 MiB                   | 580 MiB | WordPress (Apache) and MariaDB, about 260 MiB (limit 1.3 GiB) |
+| `n8n`              | 200 s              | 1.2 GiB (dnf), else 935 MiB | 1.8 GiB | n8n and PostgreSQL, about 680 MiB (limit 1.5 GiB) |
+| `minio`            | 30 s               | 235 MiB                   | 160 MiB | Silo, about 210 MiB (limit 1 GiB in a container) |
+| `self-updater`     | 65 s with node     | 475 MiB with node         | 440 MiB with node | Self-Updater (Node.js) |
 
 Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
 for `wireguard`); those outliers are left out, like one Rocky 9 container run of `mail-relay` that took six minutes.
+The apps run as Docker stacks in the x86_64 VMs of all seven systems and on an Ubuntu 24.04 arm64 runner; their disk
+figure includes the container images. `collabora` is measured with `nextcloud` already installed. `minio` in native
+mode and `self-updater` also run in the containers of all seven systems on both architectures. For an app, "while
+running" is what its stack holds after `lss verify`, and the limit is the memory limit lss sets for its containers.
 
 Web, runtime and database modules, measured the same way. Modules that only work together are tested together; their
 row is the cost of the whole set, including the web server or PHP it needs.
