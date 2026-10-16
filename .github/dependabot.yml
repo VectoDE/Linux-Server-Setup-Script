@@ -40,3 +40,16 @@ updates:
     groups:
       images:
         patterns: ['*']
+
+  # Python tools of the Ansible collection checks (tests/ansible/requirements.txt, pinned with hashes).
+  - package-ecosystem: pip
+    directory: /tests/ansible
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    labels: [dependencies, ci]
+    groups:
+      ansible:
+        patterns: ['*']

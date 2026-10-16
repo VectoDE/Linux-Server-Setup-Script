@@ -10,8 +10,8 @@
 modules you need, and come back later to add, change or remove one. Every module checks its settings before it
 touches the system, restores its files when something fails, and can prove with `lss verify` that it still works.
 
-> Version 2.0 is in development on this branch. The 1.x install script (`install-configure-script.bash`) still works
-> and is replaced when 2.0.0 is released.
+> Version 2.0 is in development on this branch. It replaces the 1.x install script `install-configure-script.bash`;
+> see [upgrading from 1.x](docs/upgrading.md#from-1x).
 
 ## Supported systems
 
@@ -129,17 +129,20 @@ The integration jobs print these figures as `RESOURCES` lines, so every new modu
 ## Quick start
 
 ```bash
-git clone https://github.com/VectoDE/Linux-Server-Setup-Script.git /opt/lss
-sudo ln -s /opt/lss/lss /usr/local/sbin/lss
+gh release download -R VectoDE/Linux-Server-Setup-Script --pattern bootstrap.sh
+gh attestation verify bootstrap.sh --repo VectoDE/Linux-Server-Setup-Script \
+  --cert-identity https://github.com/VectoDE/Linux-Server-Setup-Script/.github/workflows/release.yml@refs/heads/main
+sudo bash bootstrap.sh
 
 sudo lss install --profile minimal-secure \
   --set LSS_ADMIN_USER_NAME=alice \
   --set LSS_ADMIN_USER_GITHUB_USER=alice-on-github
 ```
 
-That creates the administrator `alice` with the SSH keys of the GitHub account, switches SSH to keys only, turns on
-the firewall, fail2ban, kernel hardening, AppArmor or SELinux, auditing, automatic security updates, integrity checks
-and the daily guard. Keep a second SSH session open the first time.
+`bootstrap.sh` installs the latest release to `/opt/lss/<version>` once its checksum and its signed build
+attestation verify ([installing and upgrading](docs/upgrading.md)). Then `lss install` creates the administrator
+`alice` with the SSH keys of the GitHub account, switches SSH to keys only, turns on the firewall, fail2ban, kernel
+hardening, AppArmor or SELinux, auditing, automatic security updates, integrity checks and the daily guard. Keep a second SSH session open the first time.
 
 Without a command, `sudo lss` opens a menu. On the RHEL family, sudo looks for commands only in `/usr/sbin` and
 `/usr/bin` until the `admin-user` module has added `/usr/local/sbin`; call `sudo /usr/local/sbin/lss` until then.
@@ -158,6 +161,8 @@ Without a command, `sudo lss` opens a menu. On the RHEL family, sudo looks for c
 | `lss remove MODULE... [--purge]`     | Remove modules; `--purge` also deletes their data                                |
 | `lss audit`                          | Lynis audit with the hardening index                                             |
 | `lss secrets show NAME`              | Print a generated secret, such as `admin-user-password`                          |
+| `lss update [VERSION]`               | Install the latest (or the named) release of lss after checking its signature    |
+| `lss update --rollback`              | Switch back to the version of lss that was active before                         |
 
 Options: `--set KEY=VALUE` for one setting, `--config FILE` for another settings file, `--dry-run` to see what
 would happen, `--yes` for scripts, `--verbose` for more output.
@@ -422,6 +427,9 @@ well, where an alert rule picks it up.
 - [Troubleshooting](docs/troubleshooting.md): locked out, failed modules, common messages
 - [Assurance case](docs/assurance.md): threat model, trust boundaries and how lss counters common weaknesses
 - [Writing a module](docs/module-guide.md)
+- [Installing and upgrading](docs/upgrading.md): `bootstrap.sh`, `lss update`, rollback, upgrading from 1.x
+- [Ansible collection](ansible/README.md): the role and module `vectode.lss.lss`
+- [Releasing](docs/releasing.md): the release workflow, signatures and the SBOM
 - [Changelog](CHANGELOG.md)
 
 ## Contributing and security

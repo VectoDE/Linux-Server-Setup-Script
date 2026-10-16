@@ -37,6 +37,8 @@ Commands:
   remove MODULE... [--purge]     remove modules (--purge also deletes their data)
   audit                          Lynis audit with hardening index
   secrets show NAME              print a generated secret
+  update [VERSION]               install the latest (or the named) verified release of lss
+  update --rollback              switch back to the version of lss that was active before
   profiles                       list profiles
   version                        print the version
 
@@ -56,6 +58,7 @@ EOF
 LSS_DRY_RUN=0
 LSS_YES=0
 LSS_PURGE=0
+LSS_ROLLBACK=0
 LSS_PROFILE=''
 CONFIG_FILE=''
 COMMAND=''
@@ -94,6 +97,10 @@ parse_args() {
 			;;
 		--purge)
 			LSS_PURGE=1
+			shift
+			;;
+		--rollback)
+			LSS_ROLLBACK=1
 			shift
 			;;
 		-v | --verbose)
@@ -149,7 +156,8 @@ start_run() {
 	export LSS_LOG_FILE
 	local lock=/run/lss.lock
 	exec 9>"${lock}"
-	flock -n 9 || die "Another lss run is in progress."
+	# A few seconds of patience: a helper of the run before may still be exiting with the lock inherited.
+	flock -w 5 9 || die "Another lss run is in progress."
 	log_info "lss ${LSS_VERSION} on ${OS_NAME} (${OS_ARCH}), run ${LSS_RUN_ID}"
 	return
 }
@@ -330,6 +338,22 @@ cmd_secrets() {
 	return
 }
 
+# lss update [VERSION] | --rollback: bootstrap.sh of the running version downloads the release, checks its checksum
+# and build attestation, and switches /opt/lss/current to it (see docs/upgrading.md). This run holds the lock.
+cmd_update() {
+	local -a args=()
+	[[ ${#ARGS[@]} -le 1 ]] || die "Usage: lss update [VERSION] | lss update --rollback"
+	if [[ ${LSS_ROLLBACK} == 1 ]]; then
+		args+=(--rollback)
+	fi
+	if [[ ${LSS_DRY_RUN} == 1 ]]; then
+		args+=(--dry-run)
+	fi
+	args+=("${ARGS[@]}")
+	LSS_LOCK_HELD=1 bash "${LSS_ROOT}/bootstrap.sh" "${args[@]}"
+	return
+}
+
 cmd_profiles() {
 	local file
 	for file in "${LSS_ROOT}"/profiles/*.conf; do
@@ -373,8 +397,12 @@ main() {
 	remove) cmd_remove ;;
 	audit) cmd_audit ;;
 	secrets) cmd_secrets ;;
+	update) cmd_update ;;
 	*) die "Unknown command '${COMMAND}'. See 'lss --help'." ;;
 	esac
 }
 
-main "$@"
+# Sourcing lss (the unit tests do) defines its functions without running it.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi

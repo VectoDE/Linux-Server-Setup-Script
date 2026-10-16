@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# The collection vectode.lss. scripts/release/build.sh builds it with every release, at the version of lss it
+# installs; the release workflow raises "version" here together with VERSION.
+---
+namespace: vectode
+name: lss
+version: "2.0.0-dev"
+readme: README.md
+authors:
+  - VectoDE <157636760+VectoDE@users.noreply.github.com>
+description: Installs lss from a verified release and sets up hardened Linux servers with its modules.
+license:
+  - MIT
+tags:
+  - linux
+  - security
+  - hardening
+  - server
+  - infrastructure
+dependencies: {}
+repository: https://github.com/VectoDE/Linux-Server-Setup-Script
+documentation: https://github.com/VectoDE/Linux-Server-Setup-Script/blob/main/ansible/README.md
+homepage: https://github.com/VectoDE/Linux-Server-Setup-Script
+issues: https://github.com/VectoDE/Linux-Server-Setup-Script/issues
+build_ignore:
+  - .ansible
+  - .ansible-lint
+  - "*.pyc"
+  - __pycache__

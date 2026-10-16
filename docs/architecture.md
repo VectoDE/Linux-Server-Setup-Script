@@ -28,7 +28,13 @@ data/repos data/keys    vendor repositories and their public keys
 profiles/               module sets with settings
 libexec/lss-guard       the daily check of the guard module
 libexec/lss-container-firewall   nftables rules for published container ports
+bootstrap.sh            installs, updates and rolls back lss from verified releases (`lss update` runs it)
+ansible/                the Ansible collection vectode.lss
+scripts/release/        version, build, SBOM and checksums of a release (used by the release workflow)
 ```
+
+lss itself is installed in `/opt/lss/<version>`, with `/opt/lss/current` pointing to the active version and
+`/usr/local/sbin/lss` to `/opt/lss/current/lss` ([installing and upgrading](upgrading.md#where-lss-lives)).
 
 ## A run
 
@@ -104,5 +110,7 @@ refused.
 - As root, lss refuses symbolic links where it writes, and runs commands inside home directories as that user.
 - Vendor repositories are added only when the key matches a fingerprint pinned in the repository; downloads only
   when their SHA-256 matches.
+- lss itself is installed and updated only from releases whose SHA-256 and signed build attestation verify; the code
+  in `/opt/lss` belongs to root and nobody else can write it.
 - Secrets are generated with the kernel's random source, stored with mode 0600, masked in logs, and passed to
   programs through files or standard input, never on the command line.
