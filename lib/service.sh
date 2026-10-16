@@ -195,7 +195,7 @@ svc_selinux_spawner() {
 		return 0
 	fi
 	install -d -m 0755 "${SVC_SELINUX_DIR}"
-	file_write 0644 root:root "${SVC_SELINUX_DIR}/${module}.cil" < <(printf '%s\n' "${rules[@]}" | sort -u)
+	file_write 0644 root:root "${SVC_SELINUX_DIR}/${module}.cil" < <(printf '%s\n' "${rules[@]}" | LC_ALL=C sort -u)
 	if [[ ${LSS_FILE_CHANGED} == 0 ]] && _svc_selinux_loaded "${module}"; then
 		return 0
 	fi

@@ -741,6 +741,7 @@ EOF
 		ExecStartPre) printf '%s\n' '{ path=/usr/sbin/restorecon ; argv[]=/usr/sbin/restorecon -R /var/spool/postfix/pid ; ignore_errors=yes }' \
 			'{ path=/usr/libexec/postfix/aliasesdb ; argv[]=/usr/libexec/postfix/aliasesdb ; ignore_errors=no }' ;;
 		ExecStart) printf '%s\n' '{ path=/usr/sbin/postfix ; argv[]=/usr/sbin/postfix start ; ignore_errors=no }' ;;
+		*) ;;
 		esac
 	}
 	run svc_exec_programs postfix.service
