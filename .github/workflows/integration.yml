@@ -179,6 +179,8 @@ jobs:
           LSS_VM_MEMORY: ${{ matrix.memory || 4096 }}
           LSS_VM_CPUS: ${{ matrix.cpus || 2 }}
           LSS_VM_DISK: ${{ matrix.disk || '20G' }}
+          # Every module at once (profile all) takes close to 40 minutes; the limit of one run is 70 minutes there.
+          LSS_TEST_TIMEOUT: ${{ matrix.run == 'profile all' && 4200 || 2400 }}
         run: |
           if [[ $RUN == kernel ]]; then
             tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard wireguard

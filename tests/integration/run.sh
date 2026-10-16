@@ -25,8 +25,9 @@ shift
 }
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
-# A run that hangs ends after 40 minutes, so the diagnostics below still show what it waited for.
-LSS_RUN="timeout --kill-after=60 2400 lss"
+# A run that hangs ends after 40 minutes (LSS_TEST_TIMEOUT seconds), so the diagnostics below still show what it waited
+# for. The profile with every module takes almost that long on its own.
+LSS_RUN="timeout --kill-after=60 ${LSS_TEST_TIMEOUT:-2400} lss"
 # shellcheck source=tests/integration/vm.sh
 source tests/integration/vm.sh
 # shellcheck source=tests/integration/pebble.sh
