@@ -451,14 +451,26 @@ ctr_compose_check() {
 	return 1
 }
 
+# Attempts and the pause in seconds between them for pulling the images of a Compose project. Registries answer
+# 500 or 429 now and then; one such answer should not undo an installation.
+CTR_PULL_TRIES=3
+CTR_PULL_DELAY=15
+
 # ctr_compose_up PROJECT FILE [OPTION...]: starts a Compose project after ctr_compose_check passed (Docker only). The
-# OPTIONs go to "docker compose up" (--force-recreate after a mounted file changed).
+# images that are missing are pulled first, with retries. The OPTIONs go to "docker compose up" (--force-recreate
+# after a mounted file changed).
 ctr_compose_up() {
-	local project=$1 file=$2
+	local project=$1 file=$2 try=1
 	shift 2
 	[[ $(ctr_engine) == docker ]] || die "container: Compose projects need the docker module."
 	[[ ${project} =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "container: '${project}' is not a valid Compose project name."
 	ctr_compose_check "${file}" "${project}" || die "container: ${file} breaks the container rules; see above."
+	until log_command docker compose --project-name "${project}" -f "${file}" pull --quiet --policy missing; do
+		((try < CTR_PULL_TRIES)) || die "container: the images of ${project} cannot be pulled; see the log."
+		log_warn "container: pulling the images of ${project} failed (attempt ${try} of ${CTR_PULL_TRIES}); retrying in ${CTR_PULL_DELAY} s."
+		sleep "${CTR_PULL_DELAY}"
+		try=$((try + 1))
+	done
 	log_command docker compose --project-name "${project}" -f "${file}" up --detach --remove-orphans --quiet-pull "$@" ||
 		die "container: docker compose cannot start ${project}; see the log."
 	return

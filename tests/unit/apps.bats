@@ -15,6 +15,7 @@ setup() {
 	MOD_OPTIONS="domains||Host names
 port|8081|Port on 127.0.0.1"
 	CTR_CONFIG_DIR=${BATS_TEST_TMPDIR}/containers
+	CTR_PULL_DELAY=0
 	APP_DOCKER_CONFIG=${BATS_TEST_TMPDIR}/daemon.json
 	APP_SUBUID=${BATS_TEST_TMPDIR}/subuid
 	APP_SUBGID=${BATS_TEST_TMPDIR}/subgid
