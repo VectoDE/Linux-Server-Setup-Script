@@ -5,3 +5,6 @@
 
 # Local Claude Code data (worktrees, settings)
 .claude/
+
+# Website build output (scripts/build-site.sh)
+_site/

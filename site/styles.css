@@ -1,0 +1,788 @@
+/*
+ * SPDX-FileCopyrightText: 2025-2026 VectoDE
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/*
+ * The page is a sequence of full-screen frames, readable as it is. With motion allowed, scripting on and a screen tall
+ * enough, every scene becomes longer than the screen, its frame sticks, and film.js plays it while it scrolls past
+ * (the block at the end). Colour code: yellow marks what lss is doing right now, red what it refuses or what failed.
+ * Fonts are the system's own; the page loads nothing from other servers.
+ */
+
+:root {
+	color-scheme: light dark;
+	--bg: #f3f5f8;
+	--ink: #0f2747;
+	--muted: #475b7a;
+	--line: #c3cddb;
+	--mark: #ffd84d;
+	--on-mark: #0f2747;
+	--deny: #b3261e;
+	--hud: 3rem;
+	--gut: clamp(1rem, 4vw, 3.5rem);
+	--sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+	--mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0b1a30;
+		--ink: #e6ecf5;
+		--muted: #9fb1ca;
+		--line: #2a4266;
+		--mark: #f5c842;
+		--on-mark: #0b1a30;
+		--deny: #ff8f85;
+	}
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--ink);
+	font: 400 1.0625rem/1.55 var(--sans);
+	overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3,
+p,
+pre {
+	margin: 0;
+}
+
+a {
+	color: inherit;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.2em;
+}
+
+a:hover {
+	text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+	outline: 3px solid var(--ink);
+	outline-offset: 2px;
+}
+
+a:focus-visible,
+summary:focus-visible {
+	background: var(--mark);
+	color: var(--on-mark);
+}
+
+code {
+	font-family: var(--mono);
+	font-size: 0.92em;
+}
+
+::selection {
+	background: var(--mark);
+	color: var(--on-mark);
+}
+
+.skip {
+	position: absolute;
+	top: -10rem;
+	left: var(--gut);
+	z-index: 3;
+	padding: 0.6rem 1ch;
+	background: var(--mark);
+	color: var(--on-mark);
+	font-family: var(--mono);
+}
+
+.skip:focus {
+	top: 0.5rem;
+}
+
+/* Head-up display: the chapters and the scene that is playing. */
+
+.hud {
+	position: fixed;
+	inset: 0 0 auto;
+	z-index: 2;
+	display: flex;
+	gap: 2.5ch;
+	align-items: center;
+	height: var(--hud);
+	/* Lines up with the frames, which stop growing at 96rem. */
+	padding: 0 max(var(--gut), calc((100% - 96rem) / 2 + var(--gut)));
+	border-bottom: 1px solid var(--line);
+	background: var(--bg);
+	font: 500 0.875rem/1 var(--mono);
+}
+
+.hud-mark {
+	padding: 0.6rem 0;
+	font-size: 1.125rem;
+	font-weight: 800;
+	letter-spacing: -0.04em;
+	text-decoration: none;
+}
+
+.hud-nav {
+	position: relative;
+}
+
+.hud-nav summary {
+	padding: 0.85rem 0;
+	cursor: pointer;
+	list-style: none;
+}
+
+.hud-nav summary::-webkit-details-marker {
+	display: none;
+}
+
+.hud-nav summary::after {
+	content: " +";
+	color: var(--muted);
+}
+
+.hud-nav details[open] summary::after {
+	content: " \2212";
+}
+
+.hud-nav ol {
+	position: absolute;
+	top: calc(100% + 0.25rem);
+	left: 0;
+	width: min(20rem, calc(100vw - 2 * var(--gut)));
+	max-height: calc(100svh - var(--hud) - 1.5rem);
+	margin: 0;
+	padding: 0.5rem 0;
+	overflow-y: auto;
+	border: 2px solid var(--ink);
+	background: var(--bg);
+	list-style: none;
+	counter-reset: chapter;
+}
+
+.hud-nav li {
+	counter-increment: chapter;
+}
+
+.hud-nav a {
+	display: flex;
+	gap: 1.5ch;
+	padding: 0.5rem 1rem;
+	text-decoration: none;
+}
+
+.hud-nav a::before {
+	content: counter(chapter, decimal-leading-zero);
+	color: var(--muted);
+}
+
+.hud-nav a:focus-visible::before {
+	color: inherit;
+}
+
+.hud-tc {
+	display: flex;
+	gap: 1ch;
+	min-width: 0;
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+.hud-of {
+	margin-left: -1ch;
+	color: var(--muted);
+}
+
+#tc-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.bar {
+	position: fixed;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 2;
+	height: 4px;
+	background: var(--mark);
+	transform: scaleX(0);
+	transform-origin: 0 50%;
+}
+
+/* A frame: the splice line with the scene number, the title, the stage and the caption. */
+
+/* Scenes below the first are laid out when they come near the screen, which keeps the first layout small. */
+.scene + .scene {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 100svh;
+}
+
+.frame {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	max-width: 96rem;
+	min-height: 100svh;
+	margin: 0 auto;
+	padding: calc(var(--hud) + 1.25rem) var(--gut) 1.75rem;
+}
+
+.splice {
+	display: flex;
+	gap: 2ch;
+	padding-top: 0.6rem;
+	border-top: 2px solid var(--ink);
+	color: var(--muted);
+	font: 500 0.8125rem/1 var(--mono);
+}
+
+.splice span:first-child {
+	color: var(--ink);
+	font-weight: 700;
+}
+
+h2 {
+	font: 700 clamp(1.75rem, 0.9rem + 5vw, 6rem)/1.02 var(--mono);
+	letter-spacing: -0.045em;
+	text-wrap: balance;
+	overflow-wrap: anywhere;
+}
+
+h2 .path {
+	color: var(--muted);
+	font-weight: 400;
+}
+
+.meta {
+	color: var(--muted);
+	font: 500 0.9375rem/1 var(--mono);
+}
+
+.win {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.stage {
+	position: relative;
+}
+
+.cap {
+	max-width: 52ch;
+	margin: auto auto 0;
+	padding-top: 1rem;
+	font-size: clamp(1rem, 0.9rem + 0.45vw, 1.25rem);
+	font-weight: 500;
+	line-height: 1.45;
+	text-align: center;
+	text-wrap: balance;
+}
+
+.lead,
+.note {
+	max-width: 62ch;
+	text-wrap: pretty;
+}
+
+.lead {
+	margin-top: 1.25rem;
+	font-size: clamp(1.0625rem, 1rem + 0.4vw, 1.3125rem);
+}
+
+.note {
+	margin-top: 1.5rem;
+}
+
+/* Opening scene */
+
+h1 {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 2ch;
+	align-items: baseline;
+	margin-top: auto;
+}
+
+.h1-word {
+	margin-left: -0.05em;
+	font: 800 clamp(6rem, 36vw, 22rem)/0.8 var(--mono);
+	letter-spacing: -0.07em;
+}
+
+.h1-sub {
+	color: var(--muted);
+	font: 500 clamp(1rem, 0.8rem + 1vw, 1.5rem)/1.2 var(--mono);
+}
+
+#top .win {
+	flex: 0 0 auto;
+}
+
+#top .cap {
+	margin-top: 2rem;
+}
+
+/* The command is sized so that its 43 characters fit one line from 352 px up; narrower screens wrap it. */
+.cmd {
+	width: fit-content;
+	max-width: 100%;
+	padding: 0.35em 0.6ch;
+	background: var(--mark);
+	color: var(--on-mark);
+	font: 600 clamp(0.75rem, 3.2vw, 1.75rem)/1.35 var(--mono);
+	overflow-wrap: anywhere;
+}
+
+@media (width >= 22rem) {
+	.cmd {
+		white-space: nowrap;
+	}
+}
+
+.t-hero {
+	display: inline-block;
+}
+
+/* Logs in the format of lss: level, then the message */
+
+.log {
+	max-width: 110ch;
+	margin: 0;
+	padding: 0;
+	font: 400 clamp(0.8125rem, 0.75rem + 0.35vw, 1.125rem)/1.6 var(--mono);
+	list-style: none;
+}
+
+.log li {
+	display: grid;
+	grid-template-columns: 6ch minmax(0, 1fr);
+	column-gap: 1ch;
+	padding: 0 0.5ch;
+	overflow-wrap: anywhere;
+}
+
+.lv {
+	color: var(--muted);
+}
+
+.log .ok .lv {
+	color: var(--ink);
+	font-weight: 700;
+}
+
+.log .cmdline {
+	margin-top: 0.35rem;
+	font-weight: 600;
+}
+
+.log .deny,
+.log .deny .lv {
+	color: var(--deny);
+	font-weight: 600;
+}
+
+.log-head {
+	margin: 1.75rem 0 0.35rem;
+	color: var(--muted);
+	font: 600 0.9375rem/1.2 var(--sans);
+}
+
+.report {
+	margin-top: 0.5rem;
+}
+
+.report li {
+	grid-template-columns: 7ch minmax(0, 1fr);
+}
+
+.unit {
+	margin-bottom: 1.5rem;
+	padding-left: 2ch;
+	border-left: 2px solid var(--ink);
+	font: 400 clamp(0.8125rem, 0.75rem + 0.35vw, 1.0625rem)/1.6 var(--mono);
+	white-space: pre-wrap;
+}
+
+.u-c {
+	color: var(--muted);
+}
+
+.help {
+	font: 400 clamp(0.75rem, 0.6rem + 0.45vw, 1rem)/1.5 var(--mono);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* Modules of a group */
+
+.mods {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.m {
+	display: grid;
+	grid-template-columns: clamp(11rem, 24vw, 14rem) minmax(0, 1fr);
+	column-gap: 3ch;
+	padding: 0.9rem 0;
+	border-top: 1px solid var(--line);
+}
+
+.m-name {
+	grid-row: span 3;
+	align-self: start;
+	justify-self: start;
+	font: 700 clamp(1rem, 0.9rem + 0.5vw, 1.375rem)/1.3 var(--mono);
+}
+
+.m-desc {
+	max-width: 70ch;
+}
+
+.m-alt {
+	color: var(--muted);
+	font-size: 0.9375rem;
+}
+
+.m-opt {
+	color: var(--muted);
+	font: 400 0.8125rem/1.6 var(--mono);
+	overflow-wrap: anywhere;
+}
+
+.m-opt code {
+	margin-right: 1.5ch;
+	font-size: 1em;
+}
+
+/* Profiles: in the film one at a time, otherwise one after the other */
+
+.sw-names {
+	display: none;
+}
+
+.sw-items .o {
+	padding: 1rem 0;
+	border-top: 1px solid var(--line);
+}
+
+.o h3 {
+	margin-bottom: 0.35rem;
+	font: 700 clamp(1.25rem, 1rem + 1.2vw, 2rem)/1.2 var(--mono);
+	letter-spacing: -0.02em;
+}
+
+.o-desc {
+	max-width: 62ch;
+	margin-bottom: 0.5rem;
+}
+
+.o-count {
+	margin-bottom: 0.35rem;
+	color: var(--muted);
+	font-size: 0.9375rem;
+}
+
+.o-mods {
+	max-width: 92ch;
+	font: 400 clamp(0.8125rem, 0.75rem + 0.3vw, 1rem)/1.65 var(--mono);
+	word-spacing: 0.6ch;
+}
+
+.o-mods span {
+	white-space: nowrap;
+}
+
+/* The menu, drawn like whiptail draws it */
+
+.tui {
+	max-width: 46rem;
+	padding-bottom: 1.25rem;
+	border: 2px solid var(--ink);
+	box-shadow: 0.6rem 0.6rem 0 var(--line);
+	font: 400 clamp(0.875rem, 0.8rem + 0.3vw, 1.0625rem)/1.4 var(--mono);
+}
+
+.tui-title {
+	padding: 0.4rem 1ch;
+	background: var(--ink);
+	color: var(--bg);
+	font-weight: 700;
+	text-align: center;
+}
+
+.tui-prompt {
+	margin: 1rem 2ch 0.75rem;
+}
+
+.tui-items {
+	margin: 0 2ch;
+	padding: 0;
+	list-style: none;
+}
+
+.tui-items li {
+	display: grid;
+	grid-template-columns: 8ch minmax(0, 1fr);
+	gap: 1ch;
+	padding: 0.3rem 1ch;
+}
+
+.tui-tag {
+	font-weight: 700;
+}
+
+.tui-buttons {
+	display: flex;
+	gap: 6ch;
+	justify-content: center;
+	margin-top: 1.25rem;
+}
+
+/* Tables: firewall rules and systems */
+
+table {
+	width: 100%;
+	max-width: 72rem;
+	border-collapse: collapse;
+}
+
+caption {
+	padding-bottom: 0.6rem;
+	color: var(--muted);
+	font: 600 0.9375rem/1.3 var(--sans);
+	text-align: left;
+}
+
+th,
+td {
+	padding: 0.55rem 2ch 0.55rem 0;
+	border-top: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+
+th {
+	border-top: 0;
+	color: var(--muted);
+	font: 600 0.8125rem/1.2 var(--sans);
+}
+
+.rules td:first-child,
+.rules td:nth-child(2) {
+	font-family: var(--mono);
+}
+
+.rules td:nth-child(2) {
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.rules .deny td {
+	color: var(--deny);
+	font-weight: 600;
+}
+
+.sys {
+	margin-bottom: 1.5rem;
+}
+
+.sys + .note {
+	margin: -0.5rem 0 2rem;
+}
+
+.sys td:first-child {
+	font-weight: 600;
+}
+
+/* Help */
+
+.links {
+	max-width: 60rem;
+	margin: 1.5rem 0 0;
+	padding: 0;
+	list-style: none;
+}
+
+.links li {
+	padding: 0.45rem 0;
+	border-top: 1px solid var(--line);
+	color: var(--muted);
+}
+
+.links a {
+	display: inline-block;
+	margin-right: 1.5ch;
+	padding: 0.2rem 0;
+	color: var(--ink);
+	font: 600 1.0625rem/1.4 var(--mono);
+}
+
+.foot {
+	max-width: 96rem;
+	margin: 0 auto;
+	padding: 2.5rem var(--gut) 3.5rem;
+	border-top: 2px solid var(--ink);
+	color: var(--muted);
+	font-size: 0.9375rem;
+}
+
+.foot p {
+	max-width: 70ch;
+	margin-bottom: 0.5rem;
+}
+
+.foot a {
+	color: var(--ink);
+}
+
+@media (width <= 40rem) {
+	.m {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.m-name {
+		grid-row: auto;
+	}
+
+	.hud {
+		gap: 1.5ch;
+	}
+}
+
+/* The film. film.js uses the same media query. */
+
+@media (prefers-reduced-motion: no-preference) and (scripting: enabled) and (height >= 30rem) {
+	.l2 {
+		height: 200svh;
+	}
+
+	.l3 {
+		height: 300svh;
+	}
+
+	.l4 {
+		height: 400svh;
+	}
+
+	.l5 {
+		height: 500svh;
+	}
+
+	.l6 {
+		height: 600svh;
+	}
+
+	/* A scene of one screen (l1) is not played: it scrolls past like a page. */
+	.scene:not(.l1) .frame {
+		position: sticky;
+		top: 0;
+		height: 100svh;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.scene:not(.l1) .win {
+		overflow: hidden;
+	}
+
+	.s {
+		opacity: 0;
+	}
+
+	.s.on {
+		opacity: 1;
+	}
+
+	.log .now,
+	.log .now .lv,
+	.m.cur .m-name,
+	.sw-names .on,
+	.tui-items .on {
+		background: var(--mark);
+		color: var(--on-mark);
+	}
+
+	.m-name {
+		margin-left: -0.5ch;
+		padding: 0 0.5ch;
+	}
+
+	.sw {
+		display: grid;
+		grid-template-columns: minmax(12ch, 18ch) minmax(0, 1fr);
+		column-gap: 4ch;
+		align-items: start;
+	}
+
+	.sw-names {
+		display: block;
+		margin: 0;
+		padding: 0;
+		color: var(--muted);
+		font: 600 1rem/1 var(--mono);
+		list-style: none;
+	}
+
+	.sw-names li {
+		padding: 0.55rem 0.75ch;
+	}
+
+	.sw-items {
+		display: grid;
+	}
+
+	.sw-items .o {
+		grid-area: 1 / 1;
+		padding-top: 0;
+		border-top: 0;
+		opacity: 0;
+	}
+
+	.sw-items .o.on {
+		opacity: 1;
+	}
+
+	/* 41 characters, typed once when the page opens */
+	.t-hero {
+		animation: type 1.1s steps(41, end) 0.2s both;
+	}
+
+	@keyframes type {
+		from {
+			clip-path: inset(0 100% 0 0);
+		}
+
+		to {
+			clip-path: inset(0);
+		}
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) and (scripting: enabled) and (height >= 30rem) and (width <= 40rem) {
+	/* One column: the heading of each profile names it, the index would only push it down. */
+	.sw {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.sw-names {
+		display: none;
+	}
+}
