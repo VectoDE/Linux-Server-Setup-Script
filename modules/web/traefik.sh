@@ -6,7 +6,7 @@ MOD_NAME="traefik"
 MOD_GROUP="web"
 MOD_DESCRIPTION="Traefik 3.7 edge proxy in front of the web server and the applications: HTTPS with HTTP/3, security headers, OWASP Coraza WAF, JSON access log, dashboard on localhost"
 MOD_REQUIRES="system"
-MOD_OPTIONS="waf|coraza|Web application firewall: coraza (OWASP Coraza with the Core Rule Set in Traefik, for every route; on amd64 held back until Traefik ships wazero 1.9, ModSecurity in the web server stands in when installed), modsecurity (the modsecurity module in the backend web server, for what goes through it), both, or off
+MOD_OPTIONS="waf|coraza|Web application firewall: coraza (OWASP Coraza with the Core Rule Set in Traefik, for every route; on amd64 held back until Traefik ships wazero 1.9: lss then installs modsecurity for nginx or Apache and routes the applications through it), modsecurity (the modsecurity module in the backend web server, for what goes through it), both, or off
 paranoia|1|Paranoia level of the Core Rule Set in Coraza, 1 to 4: higher levels catch more attacks and also block more legitimate requests
 routes||Routes Traefik serves, separated by spaces: NAME:DOMAIN[,DOMAIN...]:HOST:PORT, for example app:app.example.com:127.0.0.1:3000 (Traefik forwards to http://HOST:PORT)
 admin_host||Host name under which Traefik publishes the admin interfaces of the web server (phpMyAdmin, Adminer, pgAdmin) over HTTPS with a password (user admin, lss secrets show web-admin-password); empty keeps them on the admin port only
@@ -38,6 +38,8 @@ TRAEFIK_ACME_CA=${TRAEFIK_DIR}/acme-ca.pem
 TRAEFIK_LOGROTATE=/etc/logrotate.d/lss-traefik
 # The probe route: Traefik's own ping behind the HTTPS entry point with its middlewares, for verify.
 TRAEFIK_PROBE_HOST=lss-probe.invalid
+# The SQL injection verify sends through the WAF (1' OR '1'='1, URL-encoded); the WAF must answer 403.
+TRAEFIK_SQLI='1%27%20OR%20%271%27%3D%271'
 # Socket proxy for the Docker provider (opt-in): Traefik gets a socket that answers only a few read-only calls.
 TRAEFIK_PROXY_NAME=lss-traefik-docker
 # wollomatic/socket-proxy 1.13.1, the multi-architecture index (amd64 and arm64) on GHCR, checked 2026-10-15.
@@ -98,27 +100,9 @@ _traefik_route_parse() {
 	return
 }
 
-# Coraza runs in Traefik's WebAssembly runtime (wazero). Every Traefik release up to 3.7.15 and 3.6.25 ships wazero
-# 1.8.0, whose amd64 compiler calls runtime.memmove without saving the DX register that Go 1.24 and later clobber
-# there (fixed in wazero 1.9.0, wazero/wazero#2378); Traefik then dies at random with "unsafe.Slice: len out of
-# range" or "split stack overflow" below memmove. On amd64 the plugin waits for a Traefik release with wazero 1.9 or
-# later; arm64 is unaffected. Set to true here together with the Traefik version that carries the fix.
-TRAEFIK_CORAZA_AMD64=false
-
-# _traefik_coraza_runs: Traefik can load the Coraza plugin on this architecture.
-_traefik_coraza_runs() {
-	[[ $(_traefik_arch) == arm64 || ${TRAEFIK_CORAZA_AMD64} == true ]]
-	return
-}
-
-# _traefik_coraza_wanted: LSS_TRAEFIK_WAF asks for Coraza.
-_traefik_coraza_wanted() {
-	[[ $(opt waf) == coraza || $(opt waf) == both ]]
-	return
-}
-
+# Coraza in Traefik where it runs (traefik_coraza_runs in lib/traefik.sh: arm64, amd64 once Traefik ships wazero 1.9).
 _traefik_coraza() {
-	_traefik_coraza_wanted && _traefik_coraza_runs
+	traefik_coraza_wanted && traefik_coraza_runs
 	return
 }
 
@@ -127,20 +111,61 @@ _traefik_modsecurity() {
 	if [[ $(opt waf) == modsecurity || $(opt waf) == both ]]; then
 		return 0
 	fi
-	_traefik_coraza_wanted && ! _traefik_coraza_runs && state_installed modsecurity
+	traefik_waf_fallback && state_installed modsecurity
 	return
 }
 
-# The warning when Coraza is asked for on an architecture where Traefik cannot load it.
-_traefik_coraza_note() {
-	if ! _traefik_coraza_wanted || _traefik_coraza_runs; then
-		return 0
+# _traefik_wait: waits until Traefik answers its ping (after a start or a restart).
+_traefik_wait() {
+	local port
+	port=$(opt_int dashboard_port)
+	for _ in {1..30}; do
+		curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${port}/ping" && return 0
+		sleep 1
+	done
+	_traefik_die "the ping on 127.0.0.1:${port} does not answer."
+	return 1
+}
+
+# _traefik_waf_fallback: where Coraza is asked for and cannot run (amd64, see lib/traefik.sh), ModSecurity in the web
+# server takes its place: lss installs the modsecurity module (once, and removes it again with Traefik) and
+# traefik_waf_backend sends the routes of the applications through the web server, so every request passes a WAF.
+# Caddy has no ModSecurity connector; without a web server there is nothing to filter in.
+_traefik_waf_fallback() {
+	local server reason='traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64'
+	traefik_waf_fallback || return 0
+	server=$(web_server)
+	case ${server} in
+	nginx | apache)
+		if state_installed modsecurity; then
+			log_warn "${reason}; ModSecurity in ${server} filters every request, and the routes of applications pass through ${server} for it."
+		else
+			log_warn "${reason}; lss installs modsecurity so that ${server} filters every request, the routes of applications included."
+			_traefik_wait
+			module_run modsecurity check || die "traefik: the settings of modsecurity do not pass its check."
+			LSS_WEB_BACKEND=on module_apply modsecurity
+			state_set traefik waf_dependency modsecurity
+		fi
+		;;
+	caddy)
+		log_warn "${reason}, and Caddy has no ModSecurity connector; requests reach Caddy and the applications unfiltered (with nginx or Apache in place of Caddy, lss adds ModSecurity)."
+		;;
+	*)
+		log_warn "${reason}; requests reach the applications unfiltered until nginx or Apache is installed (then lss configure traefik adds ModSecurity)."
+		;;
+	esac
+	if opt_bool docker; then
+		log_warn "traefik: containers of the Docker provider are routed to directly, without ModSecurity in front of them."
 	fi
-	if _traefik_modsecurity; then
-		log_warn "traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64; ModSecurity in the web server filters the requests that go through it."
-	else
-		log_warn "traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64; requests reach the backends unfiltered until then (lss install modsecurity filters what goes through the web server)."
-	fi
+	return
+}
+
+# _traefik_waf_fallback_remove: the modsecurity module goes when lss installed it in place of Coraza.
+_traefik_waf_fallback_remove() {
+	[[ $(state_get traefik waf_dependency) == modsecurity ]] || return 0
+	state_installed modsecurity || return 0
+	log_info "traefik: removing modsecurity, which lss installed in place of Coraza."
+	module_remove modsecurity
 	return
 }
 
@@ -570,7 +595,6 @@ mod_configure() {
 	else
 		_traefik_plugin_remove
 	fi
-	_traefik_coraza_note
 	[[ $(files_changes_of traefik) == 0 ]] || changed=1
 	bundle=$(opt acme_ca_bundle)
 	if [[ -n ${bundle} ]]; then
@@ -607,6 +631,7 @@ mod_configure() {
 		svc_restart "${TRAEFIK_UNIT}" || die "traefik: ${TRAEFIK_UNIT} does not start; see journalctl -u ${TRAEFIK_UNIT}."
 	fi
 	svc_enable "${TRAEFIK_UNIT}"
+	_traefik_waf_fallback
 	# Routes of the applications move from the web server to Traefik; then the routes of this module.
 	web_routes_apply
 	_traefik_routes
@@ -641,14 +666,14 @@ _traefik_listen_local() {
 _traefik_verify_waf() {
 	local answer
 	if _traefik_coraza; then
-		answer=$(_traefik_https "${TRAEFIK_PROBE_HOST}" "?id=1%27%20OR%20%271%27%3D%271")
+		answer=$(_traefik_https "${TRAEFIK_PROBE_HOST}" "?id=${TRAEFIK_SQLI}")
 		[[ $(_traefik_status "${answer}") == 403 ]] ||
 			die "traefik: Coraza let an SQL injection through (status $(_traefik_status "${answer}"), not 403)."
 		answer=$(_traefik_https "${TRAEFIK_PROBE_HOST}" "?file=../../../../etc/passwd")
 		[[ $(_traefik_status "${answer}") == 403 ]] ||
 			die "traefik: Coraza let a path traversal to /etc/passwd through (status $(_traefik_status "${answer}"), not 403)."
 	else
-		answer=$(_traefik_https "${TRAEFIK_PROBE_HOST}" "?id=1%27%20OR%20%271%27%3D%271")
+		answer=$(_traefik_https "${TRAEFIK_PROBE_HOST}" "?id=${TRAEFIK_SQLI}")
 		[[ $(_traefik_status "${answer}") == 200 ]] ||
 			die "traefik: without Coraza the probe route answers $(_traefik_status "${answer}"), not 200."
 	fi
@@ -657,7 +682,7 @@ _traefik_verify_waf() {
 			die "traefik: LSS_TRAEFIK_WAF=$(opt waf) needs the modsecurity module in the web server (lss install modsecurity), or choose coraza."
 		# Through Traefik to the backend web server, where ModSecurity decides.
 		answer=$(curl -s --max-time 15 -o /dev/null -w '%{http_code}' -H 'Host: localhost' \
-			"http://127.0.0.1/.well-known/acme-challenge/lss-probe?id=1%27%20OR%20%271%27%3D%271" || true)
+			"http://127.0.0.1/.well-known/acme-challenge/lss-probe?id=${TRAEFIK_SQLI}" || true)
 		[[ ${answer} == 403 ]] || die "traefik: ModSecurity behind Traefik let an SQL injection through (status ${answer}, not 403)."
 	fi
 	return
@@ -675,6 +700,11 @@ _traefik_verify_sites() {
 			die "traefik: the site https://${domain}/ does not answer through Traefik."
 		grep -qi '^strict-transport-security: max-age=63072000' <<<"${answer}" ||
 			die "traefik: https://${domain}/ has no Strict-Transport-Security header."
+		if _traefik_coraza || _traefik_modsecurity; then
+			answer=$(_traefik_https "${domain}" "?id=${TRAEFIK_SQLI}")
+			[[ $(_traefik_status "${answer}") == 403 ]] ||
+				die "traefik: the WAF let an SQL injection to https://${domain}/ through (status $(_traefik_status "${answer}"), not 403)."
+		fi
 	done
 	return
 }
@@ -695,6 +725,12 @@ _traefik_verify_routes() {
 		done
 		[[ $(_traefik_status "${answer}") =~ ^[1-5][0-9][0-9]$ && $(_traefik_status "${answer}") != 404 ]] ||
 			die "traefik: the route ${name} (https://${domain}/) does not answer through Traefik."
+		# Coraza at the edge, or ModSecurity in the web server the route passes through (traefik_waf_backend).
+		if _traefik_coraza || traefik_waf_backend; then
+			answer=$(_traefik_https "${domain}" "?id=${TRAEFIK_SQLI}")
+			[[ $(_traefik_status "${answer}") == 403 ]] ||
+				die "traefik: the WAF let an SQL injection to the route ${name} through (status $(_traefik_status "${answer}"), not 403)."
+		fi
 		opt_bool acme || continue
 		for ((i = 0; i < 90; i++)); do
 			served=$(openssl s_client -connect 127.0.0.1:443 -servername "${domain}" </dev/null 2>/dev/null |
@@ -809,6 +845,7 @@ mod_verify() {
 mod_remove() {
 	local server name
 	# Everything goes back to the web server: routes, ports 80 and 443.
+	_traefik_waf_fallback_remove
 	export LSS_WEB_BACKEND=off
 	for name in $(web_route_names traefik); do
 		web_proxy_route_remove "${name}"

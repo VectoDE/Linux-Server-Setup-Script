@@ -46,6 +46,52 @@ traefik_active() {
 	return
 }
 
+# Coraza runs in Traefik's WebAssembly runtime (wazero). Every Traefik release up to 3.7.15 and 3.6.25 ships wazero
+# 1.8.0, whose amd64 compiler calls runtime.memmove without saving the DX register that Go 1.24 and later clobber
+# there (fixed in wazero 1.9.0, wazero/wazero#2378); Traefik then dies at random with "unsafe.Slice: len out of
+# range" or "split stack overflow" below memmove. On amd64 Coraza waits for a Traefik release with wazero 1.9 or
+# later, and ModSecurity in the web server takes its place (traefik_waf_backend); arm64 is unaffected. Set to true
+# together with the Traefik version that carries the fix: Coraza and direct routes then return on amd64.
+TRAEFIK_CORAZA_AMD64=false
+
+# traefik_coraza_runs: Traefik can load the Coraza plugin on this architecture.
+traefik_coraza_runs() {
+	case ${OS_ARCH:-$(uname -m)} in
+	aarch64 | arm64) return 0 ;;
+	*) ;;
+	esac
+	[[ ${TRAEFIK_CORAZA_AMD64} == true ]]
+	return
+}
+
+# traefik_coraza_wanted: LSS_TRAEFIK_WAF asks for Coraza (coraza, the default, or both).
+traefik_coraza_wanted() {
+	case $(config_option traefik waf coraza) in
+	coraza | both) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# traefik_waf_fallback: Coraza is asked for and cannot run here.
+traefik_waf_fallback() {
+	traefik_coraza_wanted && ! traefik_coraza_runs
+	return
+}
+
+# traefik_waf_backend: the routes of applications pass through the web server, whose ModSecurity stands in for Coraza
+# (Traefik -> nginx or Apache with ModSecurity -> application). Caddy has no ModSecurity, so routes stay direct there.
+# TRAEFIK_BACKEND_GONE is set while the web server is being removed.
+traefik_waf_backend() {
+	[[ -z ${TRAEFIK_BACKEND_GONE:-} ]] || return 1
+	if ! traefik_active || ! traefik_waf_fallback; then
+		return 1
+	fi
+	case $(web_server) in
+	nginx | apache) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
 # _traefik_ready: Traefik's dynamic directory exists, so derived files can be written.
 _traefik_ready() {
 	traefik_active && [[ -d ${TRAEFIK_DYNAMIC} ]]
@@ -159,6 +205,8 @@ traefik_backend_sync() {
 	if [[ -n ${server} ]]; then
 		traefik_backend_conf | _traefik_write "${TRAEFIK_DYNAMIC}/backend.yml"
 	else
+		# Routes that passed through the web server (traefik_waf_backend) go straight to their applications again.
+		TRAEFIK_BACKEND_GONE=1 web_routes_apply
 		_traefik_drop "${TRAEFIK_DYNAMIC}/backend.yml"
 	fi
 	return
@@ -182,7 +230,12 @@ traefik_route_conf() {
 	if _traefik_acme; then
 		printf '      tls:\n        certResolver: lss\n'
 	fi
-	printf '  services:\n    route-%s:\n      loadBalancer:\n        servers:\n          - url: %s\n' "${name}" "${url}"
+	printf '  services:\n    route-%s:\n      loadBalancer:\n' "${name}"
+	# The web server in backend mode presents the site's certificate, not one for 127.0.0.1 (see backend.yml).
+	if [[ ${url} == "https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT}" ]]; then
+		printf '        serversTransport: lss-backend\n'
+	fi
+	printf '        servers:\n          - url: %s\n' "${url}"
 	return
 }
 

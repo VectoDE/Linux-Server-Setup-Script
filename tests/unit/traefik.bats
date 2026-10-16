@@ -310,7 +310,7 @@ use_module() {
 	[[ ${output} != *coraza* ]]
 }
 
-@test "Coraza stays out on amd64 (wazero 1.8.0 in Traefik); ModSecurity takes its place where it is installed" {
+@test "Coraza stays out on amd64 (wazero 1.8.0 in Traefik); ModSecurity takes its place" {
 	load_module
 	OS_ARCH=x86_64
 	run _traefik_static
@@ -318,20 +318,109 @@ use_module() {
 	[[ ${output} != *localPlugins* ]]
 	run _traefik_dynamic
 	[[ ${output} != *coraza* ]]
+	traefik_waf_fallback
 	run ! _traefik_modsecurity
-	run _traefik_coraza_note
-	[[ ${output} == *'Coraza waits for a Traefik release with wazero 1.9 on amd64; requests reach the backends unfiltered'* ]]
 	state_set modsecurity status installed
 	_traefik_modsecurity
-	run _traefik_coraza_note
-	[[ ${output} == *'ModSecurity in the web server filters the requests'* ]]
+	export LSS_TRAEFIK_WAF=both
+	traefik_waf_fallback
+	export LSS_TRAEFIK_WAF=modsecurity
+	run ! traefik_waf_fallback
 	export LSS_TRAEFIK_WAF=off
+	run ! traefik_waf_fallback
 	run ! _traefik_modsecurity
-	run _traefik_coraza_note
-	[ -z "${output}" ]
-	OS_ARCH=aarch64 LSS_TRAEFIK_WAF=coraza
+	export LSS_TRAEFIK_WAF=coraza
+	TRAEFIK_CORAZA_AMD64=true
+	run ! traefik_waf_fallback
 	_traefik_coraza
-	run ! _traefik_modsecurity
+	TRAEFIK_CORAZA_AMD64=false OS_ARCH=aarch64
+	_traefik_coraza
+	run ! traefik_waf_fallback
+}
+
+@test "routes pass through the web server for ModSecurity only where Coraza cannot run and nginx or Apache serves" {
+	load_module
+	OS_ARCH=x86_64
+	run ! traefik_waf_backend
+	state_set nginx status installed
+	traefik_waf_backend
+	TRAEFIK_BACKEND_GONE=1
+	run ! traefik_waf_backend
+	unset TRAEFIK_BACKEND_GONE
+	LSS_WEB_BACKEND=off
+	run ! traefik_waf_backend
+	unset LSS_WEB_BACKEND
+	state_forget nginx
+	state_set caddy status installed
+	run ! traefik_waf_backend
+	state_forget caddy
+	state_set apache status installed
+	traefik_waf_backend
+	OS_ARCH=aarch64
+	run ! traefik_waf_backend
+	OS_ARCH=x86_64
+	export LSS_TRAEFIK_WAF=modsecurity
+	run ! traefik_waf_backend
+}
+
+@test "a route through the web server points Traefik at the backend with its transport" {
+	load_module
+	run traefik_route_conf app "https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT}" app.example.com
+	[[ ${output} == *$'      loadBalancer:\n        serversTransport: lss-backend\n        servers:\n          - url: https://127.0.0.1:8443'* ]]
+	run traefik_route_conf app http://127.0.0.1:3000 app.example.com
+	[[ ${output} != *serversTransport* ]]
+	[[ ${output} == *'- url: http://127.0.0.1:3000'* ]]
+}
+
+@test "in place of Coraza lss installs modsecurity once, says why, and removes it with Traefik" {
+	load_module
+	OS_ARCH=x86_64
+	# shellcheck disable=SC2329 # called by the functions under test
+	_traefik_wait() { return; }
+	# shellcheck disable=SC2329 # called by the functions under test
+	module_run() {
+		printf 'module_run %s\n' "$*" >>"${STUB_LOG}"
+		return
+	}
+	# shellcheck disable=SC2329 # called by the functions under test
+	module_apply() {
+		printf 'module_apply %s LSS_WEB_BACKEND=%s\n' "$*" "${LSS_WEB_BACKEND:-}" >>"${STUB_LOG}"
+		state_set "$1" status installed
+		return
+	}
+	# shellcheck disable=SC2329 # called by the functions under test
+	module_remove() {
+		printf 'module_remove %s\n' "$*" >>"${STUB_LOG}"
+		state_forget "$1"
+		return
+	}
+	run _traefik_waf_fallback
+	[[ ${output} == *'traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64; requests reach the applications unfiltered until nginx or Apache is installed'* ]]
+	state_set caddy status installed
+	run _traefik_waf_fallback
+	[[ ${output} == *'Caddy has no ModSecurity connector'* ]]
+	state_forget caddy
+	state_set nginx status installed
+	_traefik_waf_fallback
+	grep -qxF 'module_run modsecurity check' "${STUB_LOG}"
+	grep -qxF 'module_apply modsecurity LSS_WEB_BACKEND=on' "${STUB_LOG}"
+	[ "$(state_get traefik waf_dependency)" = modsecurity ]
+	: >"${STUB_LOG}"
+	run _traefik_waf_fallback
+	[[ ${output} == *'ModSecurity in nginx filters every request, and the routes of applications pass through nginx for it.'* ]]
+	[[ ! -s ${STUB_LOG} ]]
+	_traefik_waf_fallback_remove
+	grep -qxF 'module_remove modsecurity' "${STUB_LOG}"
+	# A modsecurity of its own, installed by the user, stays.
+	state_set modsecurity status installed
+	state_set traefik waf_dependency ''
+	: >"${STUB_LOG}"
+	_traefik_waf_fallback_remove
+	[[ ! -s ${STUB_LOG} ]]
+	# With Coraza at work nothing happens.
+	OS_ARCH=aarch64
+	run _traefik_waf_fallback
+	[ -z "${output}" ]
 }
 
 @test "the unit runs as its own user with CAP_NET_BIND_SERVICE as its only capability" {

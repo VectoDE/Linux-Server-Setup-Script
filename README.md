@@ -257,8 +257,19 @@ of `vhost`, PHP and the admin tools. It takes the client address from Traefik's 
 the client. Removing `traefik` gives ports 80 and 443 back to the web server.
 
 On amd64 Coraza stays switched off for now: every current Traefik release ships wazero 1.8.0, which crashes Traefik at
-random on amd64 with Go 1.24 or later (fixed in wazero 1.9.0). lss then uses ModSecurity in the web server behind
-Traefik if the `modsecurity` module is installed, and warns if it is not. arm64 is unaffected.
+random on amd64 with Go 1.24 or later (fixed in wazero 1.9.0). arm64 is unaffected. With `LSS_TRAEFIK_WAF=coraza`
+(the default) or `both`, lss puts ModSecurity in Coraza's place on amd64:
+
+- with nginx or Apache, lss installs the `modsecurity` module itself (once; removing `traefik` removes it again, unless
+  you installed it yourself) and sends the routes of applications through the web server too, so every request passes
+  the WAF: Traefik, then nginx or Apache with ModSecurity, then the application on 127.0.0.1. Run `lss configure traefik`
+  after installing nginx or Apache later, so it adds ModSecurity then.
+- Caddy has no ModSecurity connector. Requests reach Caddy and the applications unfiltered, and lss says so on every
+  run; put nginx or Apache in Caddy's place for a WAF.
+- Containers of the Docker provider are routed to directly, without a WAF in front of them.
+
+Once a Traefik release carries wazero 1.9, lss switches back to Coraza in Traefik and direct routes on amd64.
+`LSS_TRAEFIK_WAF=modsecurity`, `both` on arm64 and `off` keep their meaning.
 
 Applications get a host name of their own through a route: `LSS_TRAEFIK_ROUTES=app:app.example.com:127.0.0.1:3000`,
 or from a module with `web_proxy_route NAME DOMAIN 127.0.0.1:PORT`. Without Traefik the same route becomes a

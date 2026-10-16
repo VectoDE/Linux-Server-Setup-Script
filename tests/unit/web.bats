@@ -913,6 +913,8 @@ stub_traefik_routes() {
 	stub_traefik_routes
 	use_server nginx
 	use_server traefik
+	# Coraza at work (arm64): the route goes straight to the application.
+	OS_ARCH=aarch64
 	LSS_MODULE=app
 	local site=${BATS_TEST_TMPDIR}/conf/nginx/sites/app.conf
 	web_proxy_route app app.example.com http://127.0.0.1:8080/
@@ -927,6 +929,29 @@ stub_traefik_routes() {
 	[ ! -e "${site}" ]
 	[ ! -e "${LSS_STATE_DIR}/web-routes/app" ]
 	[ -z "$(web_route_names)" ]
+}
+
+@test "where Coraza cannot run a route passes through the web server's ModSecurity, and goes direct when it leaves" {
+	as_test_user
+	stub_traefik_routes
+	use_server nginx
+	use_server traefik
+	OS_ARCH=x86_64
+	LSS_MODULE=app
+	local site=${BATS_TEST_TMPDIR}/conf/nginx/sites/app.conf
+	web_proxy_route app app.example.com 127.0.0.1:3000
+	grep -qxF "traefik_route_write app https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT} app.example.com" "${STUB_LOG}"
+	grep -qxF $'\t\tproxy_pass http://127.0.0.1:3000;' "${site}"
+	# The web server goes away: Traefik routes to the application itself.
+	: >"${STUB_LOG}"
+	TRAEFIK_BACKEND_GONE=1 LSS_MODULE=nginx web_routes_apply
+	grep -qxF 'traefik_route_write app http://127.0.0.1:3000 app.example.com' "${STUB_LOG}"
+	[ ! -e "${site}" ]
+	# ModSecurity asked for explicitly keeps its meaning: what goes through the web server, routes direct.
+	: >"${STUB_LOG}"
+	export LSS_TRAEFIK_WAF=modsecurity
+	LSS_MODULE=nginx web_routes_apply
+	grep -qxF 'traefik_route_write app http://127.0.0.1:3000 app.example.com' "${STUB_LOG}"
 }
 
 @test "a route needs host names, an upstream with a port and something to serve it" {

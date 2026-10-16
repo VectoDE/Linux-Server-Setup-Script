@@ -35,7 +35,9 @@ now or later.
   access log, fail2ban or CrowdSec, and the OWASP Coraza WAF (or ModSecurity behind it). nginx, Apache or Caddy move
   to 127.0.0.1 behind it and keep their sites, PHP and admin tools. Applications get routes through
   `web_proxy_route`, which falls back to a reverse-proxy site without Traefik; the Docker provider is opt-in and goes
-  through a read-only socket proxy.
+  through a read-only socket proxy. On amd64 Coraza waits for a Traefik release with wazero 1.9 (wazero 1.8.0 crashes
+  Traefik there); until then lss installs `modsecurity` for nginx or Apache and routes the applications through the
+  web server, so every request still passes a WAF.
 - `modsecurity`: the ModSecurity web application firewall with the OWASP Core Rule Set for nginx and Apache on every
   supported system, with a module built from verified sources where the distribution has none.
 - Database modules: `mariadb`, `mysql`, `postgresql`, `redis`, `valkey` and `mongodb`, on localhost with hardened

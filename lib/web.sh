@@ -705,6 +705,8 @@ web_site_remove() {
 # is recorded below LSS_STATE_DIR/web-routes and applied for whatever is in front:
 #   Traefik installed   a file-provider route (/etc/traefik/dynamic/route-NAME.yml) with the security headers and
 #                       the WAF of the HTTPS entry point
+#   Traefik, Coraza out a Traefik route to the web server and its reverse-proxy site, so the web server's ModSecurity
+#                       filters the route where Coraza cannot run (traefik_waf_backend in lib/traefik.sh)
 #   otherwise           a reverse-proxy site of the installed web server (web_site_write NAME proxy)
 # Either way the route gets a certificate: the placeholder at first, then one from the tls module when it is
 # installed (or Traefik's own ACME client, LSS_TRAEFIK_ACME). When Traefik is installed or removed later, it applies
@@ -763,7 +765,10 @@ _web_route_write() {
 	shift 3
 	before=$(files_changes_of "${owner}")
 	[[ ! -s ${WEB_TLS_DIR}/default/fullchain.pem ]] || web_cert_placeholder "${name}"
-	if traefik_active; then
+	if traefik_waf_backend; then
+		web_site_write "${name}" proxy "${url}" "$@"
+		traefik_route_write "${name}" "https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT}" "$@"
+	elif traefik_active; then
 		web_site_remove "${name}"
 		traefik_route_write "${name}" "${url}" "$@"
 	else
