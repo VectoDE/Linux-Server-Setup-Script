@@ -4,7 +4,7 @@
 
 # Web layer shared by the web server modules (nginx, apache, caddy) and everything that publishes something through
 # them (tls, vhost, php, phpmyadmin, adminer, pgadmin, apps). One web server owns ports 80 and 443; the others
-# conflict with it.
+# conflict with it. With Traefik in front (lib/traefik.sh) it moves to 127.0.0.1 (web_backend) and Traefik owns them.
 #
 # Conventions:
 #   WEB_GROUP        group of every web server user; PHP-FPM's socket and the TLS keys are readable by it
@@ -27,6 +27,10 @@ WEB_ACME_ROOT=/var/www/lss-acme
 WEB_DEFAULT_ROOT=/var/www/lss-default
 # shellcheck disable=SC2034 # read by the web server and admin interface modules
 WEB_ADMIN_PORT=8090
+# Behind Traefik (backend mode) the web server listens on these ports of 127.0.0.1 only, as Traefik owns 80 and 443.
+# Both carry the SELinux type http_port_t, so every web server may bind them without a port label of their own.
+WEB_BACKEND_HTTP_PORT=8008
+WEB_BACKEND_HTTPS_PORT=8443
 WEB_ADMIN_HTPASSWD=/etc/lss/web/admin.htpasswd
 WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
 # Mozilla "intermediate" (TLS 1.2 and 1.3) without the DHE suites, which would need a DH parameter file.
@@ -52,6 +56,30 @@ web_server() {
 		fi
 	done
 	return 0
+}
+
+# web_backend: the web server runs behind Traefik (backend mode): on 127.0.0.1 only, on WEB_BACKEND_HTTP_PORT and
+# WEB_BACKEND_HTTPS_PORT. The traefik module sets LSS_WEB_BACKEND=on or off while it switches the web server; at any
+# other time an installed Traefik decides.
+web_backend() {
+	case ${LSS_WEB_BACKEND:-} in
+	on) return 0 ;;
+	off) return 1 ;;
+	*) ;;
+	esac
+	state_installed traefik
+	return
+}
+
+# web_http_port / web_https_port: where the web server serves HTTP and HTTPS in its current mode.
+web_http_port() {
+	if web_backend; then printf '%s' "${WEB_BACKEND_HTTP_PORT}"; else printf '80'; fi
+	return
+}
+
+web_https_port() {
+	if web_backend; then printf '%s' "${WEB_BACKEND_HTTPS_PORT}"; else printf '443'; fi
+	return
 }
 
 # web_unit SERVER: systemd unit of a web server.
@@ -261,10 +289,13 @@ web_reload() {
 	if svc_is_active "$(web_unit "${server}")"; then
 		svc_reload "$(web_unit "${server}")"
 	fi
+	# A new site brings a certificate directory, which Traefik has to load as well.
+	traefik_tls_sync
 	return
 }
 
-# web_headers SERVER: the security headers every HTTPS site sends.
+# web_headers SERVER: the security headers every HTTPS site sends (SERVER traefik: the customResponseHeaders entries
+# of Traefik's headers middleware).
 web_headers() {
 	local server=$1 header
 	local -a headers=(
@@ -279,6 +310,7 @@ web_headers() {
 		case ${server} in
 		nginx) printf '\tadd_header %s always;\n' "${header}" ;;
 		apache) printf '\tHeader always set %s\n' "${header}" ;;
+		traefik) printf '          %s: %s\n' "${header%% *}" "${header#* }" ;;
 		*) printf '\t\t%s\n' "${header}" ;;
 		esac
 	done
@@ -306,6 +338,25 @@ _web_listen_nginx() {
 	printf '\tlisten %s%s;\n' "${port}" "${flags:+ ${flags}}"
 	if web_ipv6; then
 		printf '\tlisten [::]:%s%s;\n' "${port}" "${flags:+ ${flags}}"
+	fi
+	return
+}
+
+# web_nginx_listen http|https [FLAGS]: the listen lines of the HTTP or HTTPS port in the current mode: every address
+# on 80 and 443, or only 127.0.0.1 on the backend ports behind Traefik. The nginx module writes them to
+# listen-http.conf and listen-https.conf, which every site includes, so a switch of the mode leaves the sites alone.
+web_nginx_listen() {
+	local kind=$1 flags=${2:-} port
+	if [[ ${kind} == https ]]; then
+		flags="${flags:+${flags} }$(web_nginx_ssl_flags)"
+		port=$(web_https_port)
+	else
+		port=$(web_http_port)
+	fi
+	if web_backend; then
+		printf '\tlisten 127.0.0.1:%s%s;\n' "${port}" "${flags:+ ${flags}}"
+	else
+		_web_listen_nginx "${port}" "${flags}"
 	fi
 	return
 }
@@ -373,18 +424,15 @@ EOF
 _web_site_nginx() {
 	local name=$1 kind=$2 target=$3
 	shift 3
-	local domains="$*" cert
+	local domains="$*" cert dir
 	cert=$(web_cert_dir "${name}")
-	printf '# Managed by lss (site %s).\nserver {\n' "${name}"
-	_web_listen_nginx 80
+	dir=$(web_conf_dir nginx)
+	printf '# Managed by lss (site %s).\nserver {\n\tinclude %s/listen-http.conf;\n' "${name}" "${dir}"
 	printf '\tserver_name %s;\n' "${domains}"
 	printf '\tlocation /.well-known/acme-challenge/ {\n\t\troot %s;\n\t}\n' "${WEB_ACME_ROOT}"
 	# shellcheck disable=SC2016 # $host and $request_uri are nginx variables
 	printf '\tlocation / {\n\t\treturn 301 https://$host$request_uri;\n\t}\n}\n\nserver {\n'
-	_web_listen_nginx 443 "$(web_nginx_ssl_flags)"
-	if web_nginx_http2_directive; then
-		printf '\thttp2 on;\n'
-	fi
+	printf '\tinclude %s/listen-https.conf;\n' "${dir}"
 	printf '\tserver_name %s;\n' "${domains}"
 	_web_tls_nginx "${cert}"
 	web_headers nginx
@@ -480,7 +528,7 @@ _web_site_apache() {
 	cert=$(web_cert_dir "${name}")
 	cat <<EOF
 # Managed by lss (site ${name}).
-<VirtualHost *:80>
+<VirtualHost *:\${LSS_HTTP_PORT}>
 	ServerName ${first}
 ${aliases:+	ServerAlias ${aliases}
 }	Alias /.well-known/acme-challenge/ ${WEB_ACME_ROOT}/.well-known/acme-challenge/
@@ -489,7 +537,7 @@ ${aliases:+	ServerAlias ${aliases}
 	RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
-<VirtualHost *:443>
+<VirtualHost *:\${LSS_HTTPS_PORT}>
 	ServerName ${first}
 ${aliases:+	ServerAlias ${aliases}
 }	Protocols h2 http/1.1
@@ -501,7 +549,7 @@ EOF
 		printf '\tSSLUseStapling on\n'
 	fi
 	web_headers apache
-	printf '\tErrorLog %s\n\tCustomLog %s combined\n' "$(web_log_file apache error)" "$(web_log_file apache access)"
+	printf '\tErrorLog %s\n\tCustomLog %s lss_combined\n' "$(web_log_file apache error)" "$(web_log_file apache access)"
 	_web_body_apache "${kind}" "${target}"
 	printf '</VirtualHost>\n'
 	return
@@ -554,9 +602,11 @@ _web_site_caddy() {
 		http_names+="http://${domain} "
 		https_names+="https://${domain} "
 	done
-	printf '# Managed by lss (site %s).\n%s{\n' "${name}" "${http_names}"
+	# lss_bind (Caddyfile of the caddy module) keeps the listeners on 127.0.0.1 behind Traefik; http_port and
+	# https_port there move them to the backend ports.
+	printf '# Managed by lss (site %s).\n%s{\n\timport lss_bind\n' "${name}" "${http_names}"
 	printf '\thandle /.well-known/acme-challenge/* {\n\t\troot * %s\n\t\tfile_server\n\t}\n' "${WEB_ACME_ROOT}"
-	printf '\thandle {\n\t\tredir https://{host}{uri} permanent\n\t}\n}\n\n%s{\n' "${https_names}"
+	printf '\thandle {\n\t\tredir https://{host}{uri} permanent\n\t}\n}\n\n%s{\n\timport lss_bind\n' "${https_names}"
 	printf '\ttls %s/fullchain.pem %s/privkey.pem\n\timport lss_tls_headers\n\timport lss_hidden\n\tlog\n' \
 		"${cert}" "${cert}"
 	case ${kind} in
@@ -648,6 +698,137 @@ web_site_remove() {
 	return
 }
 
+# --- Routes of applications -------------------------------------------------------------------------------------
+#
+# web_proxy_route NAME DOMAIN UPSTREAM is how a module publishes an application under a host name. DOMAIN is one host
+# name or several separated by commas; UPSTREAM is HOST:PORT (normally 127.0.0.1:PORT) or an http(s):// URL. The route
+# is recorded below LSS_STATE_DIR/web-routes and applied for whatever is in front:
+#   Traefik installed   a file-provider route (/etc/traefik/dynamic/route-NAME.yml) with the security headers and
+#                       the WAF of the HTTPS entry point
+#   Traefik, Coraza out a Traefik route to the web server and its reverse-proxy site, so the web server's ModSecurity
+#                       filters the route where Coraza cannot run (traefik_waf_backend in lib/traefik.sh)
+#   otherwise           a reverse-proxy site of the installed web server (web_site_write NAME proxy)
+# Either way the route gets a certificate: the placeholder at first, then one from the tls module when it is
+# installed (or Traefik's own ACME client, LSS_TRAEFIK_ACME). When Traefik is installed or removed later, it applies
+# every recorded route again in the new place. web_proxy_route_remove NAME takes a route away.
+
+_web_routes_dir() {
+	printf '%s/web-routes' "${LSS_STATE_DIR:-/var/lib/lss}"
+	return
+}
+
+# _web_route_parse NAME DOMAIN UPSTREAM: checks the arguments and sets WEB_ROUTE_DOMAINS (array) and WEB_ROUTE_URL.
+_web_route_parse() {
+	local name=$1 domains=$2 given=$3 upstream=$3 domain
+	_web_name_check "${name}"
+	IFS=', ' read -ra WEB_ROUTE_DOMAINS <<<"${domains}"
+	((${#WEB_ROUTE_DOMAINS[@]} > 0)) || die "web: the route ${name} has no host name."
+	for domain in "${WEB_ROUTE_DOMAINS[@]}"; do
+		[[ ${domain} =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9]$ ]] ||
+			die "web: '${domain}' of the route ${name} is not a host name like app.example.com."
+	done
+	[[ ${upstream} == http://* || ${upstream} == https://* ]] || upstream="http://${upstream}"
+	[[ ${upstream} =~ ^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]{1,5}(/[A-Za-z0-9._~/-]*)?$ ]] ||
+		die "web: the upstream '${given}' of the route ${name} is not HOST:PORT or an http(s):// URL with a port."
+	WEB_ROUTE_URL=${upstream}
+	return
+}
+
+# web_proxy_route NAME DOMAIN UPSTREAM: publishes UPSTREAM under DOMAIN over HTTPS (see above). Idempotent.
+web_proxy_route() {
+	local name=$1 file
+	_web_route_parse "$@"
+	file="$(_web_routes_dir)/${name}"
+	mkdir -p "$(_web_routes_dir)"
+	if [[ $(cat "${file}" 2>/dev/null) != "${LSS_MODULE:-lss} ${WEB_ROUTE_DOMAINS[*]} ${WEB_ROUTE_URL}" ]]; then
+		printf '%s %s %s\n' "${LSS_MODULE:-lss}" "${WEB_ROUTE_DOMAINS[*]}" "${WEB_ROUTE_URL}" >"${file}"
+		files_note_change "route ${name}"
+	fi
+	_web_route_apply "${name}"
+	return
+}
+
+# _web_route_apply NAME: writes the recorded route NAME for Traefik or the web server, in the name of the module that
+# recorded it (its managed files and change notes).
+_web_route_apply() {
+	local name=$1 owner url
+	local -a domains=()
+	read -r owner url < <(awk '{ print $1, $NF }' "$(_web_routes_dir)/${name}")
+	read -ra domains < <(awk '{ $1 = ""; $NF = ""; print }' "$(_web_routes_dir)/${name}")
+	LSS_MODULE=${owner} _web_route_write "${name}" "${owner}" "${url}" "${domains[@]}"
+	return
+}
+
+# _web_route_write NAME OWNER URL DOMAIN...: the work of _web_route_apply, run with LSS_MODULE set to OWNER.
+_web_route_write() {
+	local name=$1 owner=$2 url=$3 before
+	shift 3
+	before=$(files_changes_of "${owner}")
+	[[ ! -s ${WEB_TLS_DIR}/default/fullchain.pem ]] || web_cert_placeholder "${name}"
+	if traefik_waf_backend; then
+		web_site_write "${name}" proxy "${url}" "$@"
+		traefik_route_write "${name}" "https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT}" "$@"
+	elif traefik_active; then
+		web_site_remove "${name}"
+		traefik_route_write "${name}" "${url}" "$@"
+	else
+		[[ -n $(web_server) ]] || die "web: the route ${name} needs Traefik or a web server (nginx, apache or caddy)."
+		traefik_route_remove "${name}"
+		web_site_write "${name}" proxy "${url}" "$@"
+	fi
+	if [[ $(files_changes_of "${owner}") != "${before}" ]]; then
+		web_reload
+		traefik_tls_sync
+	fi
+	if state_installed tls; then
+		web_cert_issue "${name}" "$@"
+	fi
+	return
+}
+
+# web_routes_apply: applies every recorded route again (after Traefik was installed or removed).
+web_routes_apply() {
+	local file
+	for file in "$(_web_routes_dir)"/*; do
+		[[ -f ${file} ]] || continue
+		_web_route_apply "${file##*/}"
+	done
+	return
+}
+
+# web_route_names [OWNER]: the recorded routes, of one module or of all.
+web_route_names() {
+	local owner=${1:-} file
+	for file in "$(_web_routes_dir)"/*; do
+		[[ -f ${file} ]] || continue
+		if [[ -z ${owner} || $(cut -d ' ' -f 1 "${file}") == "${owner}" ]]; then
+			printf '%s\n' "${file##*/}"
+		fi
+	done
+	return
+}
+
+# web_proxy_route_remove NAME: takes the route away from Traefik and the web server, with its certificate.
+web_proxy_route_remove() {
+	local name=$1
+	_web_name_check "${name}"
+	traefik_route_remove "${name}"
+	web_site_remove "${name}"
+	file_remove "${WEB_TLS_DIR}/${name}"
+	if [[ -d ${WEB_CERT_LIVE}/${name} ]] && command -v certbot >/dev/null 2>&1; then
+		log_command certbot delete --non-interactive --cert-name "${name}" ||
+			die "web: certbot could not delete the certificate ${name}."
+		files_note_change "certificate ${name} deleted"
+	fi
+	if [[ -f $(_web_routes_dir)/${name} ]]; then
+		rm -f -- "$(_web_routes_dir)/${name}"
+		files_note_change "removed route ${name}"
+	fi
+	web_reload
+	traefik_tls_sync
+	return
+}
+
 # web_admin_write NAME PATH php|proxy|strip TARGET: publishes an admin interface below /PATH/ on the admin server
 # (WEB_ADMIN_PORT). TARGET is a directory with PHP files or an upstream URL. proxy passes the whole path on (the
 # upstream serves below /PATH/), strip removes /PATH first (for upstreams that only serve their root, such as Netdata).
@@ -735,6 +916,8 @@ web_admin_htpasswd() {
 # installed, because its state is recorded only after it.
 web_ids_configure() {
 	local server logs
+	# Traefik's access log as well, when it is in front.
+	traefik_ids_configure
 	server=$(web_server)
 	case ${LSS_MODULE:-} in
 	nginx | apache | caddy) server=${LSS_MODULE} ;;
@@ -814,9 +997,10 @@ EOF
 		;;
 	*)
 		file_write 0644 root:root "${WEB_FAIL2BAN_FILTER}" <<'EOF'
-# Managed by lss (web server caddy). Caddy logs JSON; a 401 answer is a failed basic-auth login.
+# Managed by lss (web server caddy). Caddy logs JSON; a 401 answer is a failed basic-auth login. client_ip is the
+# client behind Traefik as well (trusted_proxies), remote_ip would be Traefik itself.
 [Definition]
-failregex = ^.*"remote_ip":"<HOST>".*"status":401\b
+failregex = ^.*"client_ip":"<HOST>".*"status":401\b
 ignoreregex =
 datepattern = "ts":{EPOCH}
 EOF

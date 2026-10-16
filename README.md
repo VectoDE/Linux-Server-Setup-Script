@@ -68,6 +68,7 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `lynis`            | 25 s               | 80 MiB                    | 5 MiB   | weekly audit                                        |
 | `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
 | `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
+| `traefik`          | 35 s               | 300 MiB; 1.8 GiB with Coraza (arm64) | 330 MiB | Traefik, 100 MiB; 1.75 GiB with Coraza |
 | `docker`           | not measured yet   | not measured yet          | not measured yet | dockerd and containerd                     |
 | `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
 | `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |
@@ -198,7 +199,8 @@ change, run `lss configure MODULE`.
 `usbguard`, `guard`.
 
 **Web:** `nginx`, `apache` or `caddy`, `tls` (certificates from Let's Encrypt), `vhost` (sites), `haproxy`,
-`modsecurity` (web application firewall with the OWASP Core Rule Set for nginx or Apache).
+`modsecurity` (web application firewall with the OWASP Core Rule Set for nginx or Apache), `traefik` (edge proxy in
+front of the web server and the applications). See [Traefik](#traefik).
 
 **Runtimes:** `php` (PHP-FPM with a hardened pool for the web server), `composer`, `node` (Node.js 22, 24 or 26 from
 NodeSource), `python` (venv, pip, pipx), `ruby` (Bundler), `java` (OpenJDK 21, Temurin where the distribution has
@@ -232,8 +234,9 @@ Dovecot and Rspamd for your domains), `webmail` (Roundcube on the web server). S
 
 ### Web sites
 
-One web server owns ports 80 and 443. It answers only for the sites you set up; requests for any other host name get
-no answer, and port 80 serves nothing but ACME challenges and redirects to HTTPS. A site is one entry in
+One web server owns ports 80 and 443, unless `traefik` sits in front of it (see [Traefik](#traefik)). It answers
+only for the sites you set up; requests for any other host name get no answer, and port 80 serves nothing but ACME
+challenges and redirects to HTTPS. A site is one entry in
 `LSS_VHOST_SITES`: a name, `static`, `php` or `proxy`, its host names and, if needed, a document root or backend URL.
 With the `tls` module each site gets its own certificate from Let's Encrypt; until it arrives, and without `tls`, the
 site uses a self-signed certificate. The names must point to the server and port 80 must be reachable from the
@@ -243,6 +246,47 @@ Admin interfaces such as phpMyAdmin listen on `127.0.0.1:8090`. Reach them throu
 (`ssh -L 8090:127.0.0.1:8090 server`, then `http://localhost:8090/phpmyadmin/`) or set
 `LSS_<SERVER>_ADMIN_PUBLIC=true` to publish port 8090 with TLS and the password from
 `lss secrets show web-admin-password`.
+
+### Traefik
+
+`traefik` puts Traefik in front of everything that speaks HTTP. It takes ports 80/tcp, 443/tcp and 443/udp (HTTP/3),
+redirects port 80 to HTTPS, adds the same security headers and HSTS as the web servers, writes a JSON access log
+and filters every request through the OWASP Coraza WAF with the Core Rule Set (on arm64; on amd64 see below). The
+web server stays: nginx, Apache or Caddy moves to `127.0.0.1:8008` and `127.0.0.1:8443` and keeps serving the sites
+of `vhost`, PHP and the admin tools. It takes the client address from Traefik's `X-Forwarded-For`, so its logs, fail2ban and ModSecurity still see
+the client. Removing `traefik` gives ports 80 and 443 back to the web server.
+
+On amd64 Coraza stays switched off for now: every current Traefik release ships wazero 1.8.0, which crashes Traefik at
+random on amd64 with Go 1.24 or later (fixed in wazero 1.9.0). arm64 is unaffected. With `LSS_TRAEFIK_WAF=coraza`
+(the default) or `both`, lss puts ModSecurity in Coraza's place on amd64:
+
+- with nginx or Apache, lss installs the `modsecurity` module itself (once; removing `traefik` removes it again, unless
+  you installed it yourself) and sends the routes of applications through the web server too, so every request passes
+  the WAF: Traefik, then nginx or Apache with ModSecurity, then the application on 127.0.0.1. Run `lss configure traefik`
+  after installing nginx or Apache later, so it adds ModSecurity then.
+- Caddy has no ModSecurity connector. Requests reach Caddy and the applications unfiltered, and lss says so on every
+  run; put nginx or Apache in Caddy's place for a WAF.
+- Containers of the Docker provider are routed to directly, without a WAF in front of them.
+
+Once a Traefik release carries wazero 1.9, lss switches back to Coraza in Traefik and direct routes on amd64.
+`LSS_TRAEFIK_WAF=modsecurity`, `both` on arm64 and `off` keep their meaning.
+
+Applications get a host name of their own through a route: `LSS_TRAEFIK_ROUTES=app:app.example.com:127.0.0.1:3000`,
+or from a module with `web_proxy_route NAME DOMAIN 127.0.0.1:PORT`. Without Traefik the same route becomes a
+reverse-proxy site of the web server. Certificates come from the `tls` module, or from Traefik itself with
+`LSS_TRAEFIK_ACME=true` (TLS-ALPN challenge on port 443).
+
+| Setting                      | Default  | Meaning                                                                                 |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `LSS_TRAEFIK_WAF`            | `coraza` | `coraza` in Traefik (arm64), `modsecurity` in the web server behind it, `both`, or `off` |
+| `LSS_TRAEFIK_PARANOIA`       | `1`      | Paranoia level of the Core Rule Set in Coraza (1 to 4)                                   |
+| `LSS_TRAEFIK_ADMIN_HOST`     | empty    | Publishes the admin port (phpMyAdmin, Adminer, pgAdmin) under this name with a password  |
+| `LSS_TRAEFIK_DOCKER`         | `false`  | Routes containers labelled `traefik.enable=true`, through a read-only socket proxy       |
+| `LSS_TRAEFIK_DASHBOARD_PORT` | `8099`   | Dashboard and read-only API on 127.0.0.1 only (`ssh -L 8099:127.0.0.1:8099 server`)     |
+
+The Docker provider never sees the engine's socket. A small proxy container
+([wollomatic/socket-proxy](https://github.com/wollomatic/socket-proxy), pinned by digest) holds it, runs without a
+network and without capabilities, and answers only the calls Traefik needs to list and inspect containers.
 
 ### Containers
 

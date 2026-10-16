@@ -441,7 +441,9 @@ EOF
 	[[ ${output} == *'server_name shop.example.com www.shop.example.com;'* ]]
 	[[ ${output} == *'return 301 https://$host$request_uri;'* ]]
 	[[ ${output} == *"root ${WEB_ACME_ROOT};"* ]]
-	[[ ${output} == *'http2 on;'* ]]
+	[[ ${output} == *"include /etc/nginx/lss/listen-http.conf;"* ]]
+	[[ ${output} == *"include /etc/nginx/lss/listen-https.conf;"* ]]
+	[[ ${output} != *listen\ * ]]
 	[[ ${output} == *"fastcgi_pass unix:${WEB_PHP_SOCKET};"* ]]
 	# PATH_INFO after the script name (/static.php/skins/...), as Roundcube and Nextcloud use it.
 	[[ ${output} == *'location ~ [^/]\.php(/|$) {'* ]]
@@ -473,29 +475,69 @@ EOF
 	[[ ${output} == *$'\tSSLUseStapling on'* ]]
 }
 
-@test "nginx sites are written once per change for static files and proxies, on IPv4 and IPv6" {
-	as_test_user
-	use_server nginx
+@test "nginx listens on every address on 80 and 443, or on 127.0.0.1 on the backend ports behind Traefik" {
 	# shellcheck disable=SC2329 # called by the functions under test
 	web_ipv6() { return 0; }
+	run web_nginx_listen http
+	[ "${output}" = $'\tlisten 80;\n\tlisten [::]:80;' ]
+	run web_nginx_listen https default_server
+	[ "${output}" = $'\tlisten 443 default_server ssl;\n\tlisten [::]:443 default_server ssl;' ]
+	NGINX_VERSION=1.22.1
+	run web_nginx_listen https
+	[ "${output}" = $'\tlisten 443 ssl http2;\n\tlisten [::]:443 ssl http2;' ]
+	use_server traefik
+	run web_nginx_listen http default_server
+	[ "${output}" = $'\tlisten 127.0.0.1:8008 default_server;' ]
+	run web_nginx_listen https
+	[ "${output}" = $'\tlisten 127.0.0.1:8443 ssl http2;' ]
+	# While the traefik module hands the ports back, LSS_WEB_BACKEND wins over its state.
+	LSS_WEB_BACKEND=off
+	run web_nginx_listen http
+	[ "${output}" = $'\tlisten 80;\n\tlisten [::]:80;' ]
+}
+
+@test "the backend mode follows Traefik's state unless LSS_WEB_BACKEND says otherwise" {
+	run ! web_backend
+	[ "$(web_http_port)" = 80 ]
+	[ "$(web_https_port)" = 443 ]
+	LSS_WEB_BACKEND=on
+	web_backend
+	[ "$(web_http_port)" = 8008 ]
+	[ "$(web_https_port)" = 8443 ]
+	unset LSS_WEB_BACKEND
+	use_server traefik
+	web_backend
+	LSS_WEB_BACKEND=off
+	run ! web_backend
+	[ "$(web_https_port)" = 443 ]
+}
+
+@test "Traefik gets the same security headers as entries of its headers middleware" {
+	run web_headers traefik
+	[ "${#lines[@]}" -eq 6 ]
+	[ "${lines[0]}" = '          Strict-Transport-Security: "max-age=63072000"' ]
+	[ "${lines[1]}" = '          X-Content-Type-Options: "nosniff"' ]
+}
+
+@test "nginx sites are written once per change for static files and proxies, with the shared listeners" {
+	as_test_user
+	use_server nginx
 	local conf=${BATS_TEST_TMPDIR}/conf/nginx/sites
 	web_site_write blog static /var/www/blog blog.example.com
 	[ "${LSS_FILE_CHANGED}" = 1 ]
 	grep -qxF "== 0644 root:root ${conf}/blog.conf" "${WRITES}"
 	grep -qxF '# Managed by lss (site blog).' "${conf}/blog.conf"
-	grep -qxF $'\tlisten [::]:80;' "${conf}/blog.conf"
-	grep -qxF $'\tlisten [::]:443 ssl;' "${conf}/blog.conf"
+	grep -qxF $'\tinclude '"${BATS_TEST_TMPDIR}"'/conf/nginx/listen-http.conf;' "${conf}/blog.conf"
+	grep -qxF $'\tinclude '"${BATS_TEST_TMPDIR}"'/conf/nginx/listen-https.conf;' "${conf}/blog.conf"
 	grep -qxF $'\troot /var/www/blog;' "${conf}/blog.conf"
 	grep -qxF $'\tindex index.html;' "${conf}/blog.conf"
 	grep -qxF $'\t\ttry_files $uri $uri/ =404;' "${conf}/blog.conf"
 	grep -qxF $'\taccess_log /var/log/nginx/access.log;' "${conf}/blog.conf"
 	web_site_write blog static /var/www/blog blog.example.com
 	[ "${LSS_FILE_CHANGED}" = 0 ]
-	NGINX_VERSION=1.22.1
 	web_site_write app proxy http://127.0.0.1:3000 app.example.com
 	[ "${LSS_FILE_CHANGED}" = 1 ]
-	grep -qxF $'\tlisten 443 ssl http2;' "${conf}/app.conf"
-	run ! grep -q 'http2 on;' "${conf}/app.conf"
+	run ! grep -qE '^[[:space:]]+listen |http2' "${conf}/app.conf"
 	grep -qxF $'\t\tproxy_pass http://127.0.0.1:3000;' "${conf}/app.conf"
 	grep -qxF $'\t\tinclude /etc/nginx/lss/proxy.conf;' "${conf}/app.conf"
 	[ "$(files_changes_of core)" = 2 ]
@@ -513,7 +555,11 @@ EOF
 	grep -qxF $'\tDocumentRoot /var/www/blog' "${conf}/blog.conf"
 	grep -qxF $'\t\tOptions -Indexes +FollowSymLinks' "${conf}/blog.conf"
 	grep -qxF $'\tErrorLog /var/log/httpd/error_log' "${conf}/blog.conf"
-	grep -qxF $'\tCustomLog /var/log/httpd/access_log combined' "${conf}/blog.conf"
+	# lss_combined logs the client address that mod_remoteip takes from Traefik's X-Forwarded-For.
+	grep -qxF $'\tCustomLog /var/log/httpd/access_log lss_combined' "${conf}/blog.conf"
+	# The ports come from the Define lines of the global configuration, so the backend mode leaves the sites alone.
+	grep -qxF '<VirtualHost *:${LSS_HTTP_PORT}>' "${conf}/blog.conf"
+	grep -qxF '<VirtualHost *:${LSS_HTTPS_PORT}>' "${conf}/blog.conf"
 	grep -qxF $'\tSSLCertificateFile '"${WEB_TLS_DIR}/default/fullchain.pem" "${conf}/blog.conf"
 	run ! grep -q SetHandler "${conf}/blog.conf"
 	web_site_write shop php /var/www/shop shop.example.com www.shop.example.com
@@ -546,6 +592,8 @@ EOF
 	[[ ${output} == *"tls ${WEB_TLS_DIR}/default/fullchain.pem ${WEB_TLS_DIR}/default/privkey.pem"* ]]
 	[[ ${output} == *'import lss_hidden'* ]]
 	[[ ${output} == *'redir https://{host}{uri} permanent'* ]]
+	# lss_bind keeps both listeners on 127.0.0.1 behind Traefik.
+	[ "$(grep -c $'^\timport lss_bind$' <<<"${output}")" = 2 ]
 }
 
 @test "Caddy sites serve static files, PHP and proxies for every name" {
@@ -819,6 +867,110 @@ EOF
 	[[ ${output} == *'web: caddy could not hash the admin password.'* ]]
 }
 
+# --- routes of applications -------------------------------------------------------------------------------------
+
+# Records what the Traefik side of a route would do; lib/traefik.sh has its own tests.
+stub_traefik_routes() {
+	# shellcheck disable=SC2329 # called by the functions under test
+	traefik_route_write() {
+		printf 'traefik_route_write %s\n' "$*" >>"${STUB_LOG}"
+		files_note_change "route-$1.yml"
+		return
+	}
+	# shellcheck disable=SC2329 # called by the functions under test
+	traefik_route_remove() {
+		printf 'traefik_route_remove %s\n' "$*" >>"${STUB_LOG}"
+		return
+	}
+	return
+}
+
+@test "without Traefik a route becomes a proxy site of the web server, written and reloaded once per change" {
+	as_test_user
+	stub_traefik_routes
+	use_server nginx
+	LSS_MODULE=gitea
+	local site=${BATS_TEST_TMPDIR}/conf/nginx/sites/gitea.conf before
+	web_proxy_route gitea 'git.example.com, www.git.example.com' 127.0.0.1:3000
+	[ "$(<"${LSS_STATE_DIR}/web-routes/gitea")" = 'gitea git.example.com www.git.example.com http://127.0.0.1:3000' ]
+	grep -qxF $'\tserver_name git.example.com www.git.example.com;' "${site}"
+	grep -qxF $'\t\tproxy_pass http://127.0.0.1:3000;' "${site}"
+	grep -qxF 'traefik_route_remove gitea' "${STUB_LOG}"
+	grep -q '^nginx -t' "${STUB_LOG}"
+	run ! grep -q traefik_route_write "${STUB_LOG}"
+	before=$(files_changes_of gitea)
+	: >"${STUB_LOG}"
+	web_proxy_route gitea 'git.example.com, www.git.example.com' 127.0.0.1:3000
+	[ "$(files_changes_of gitea)" = "${before}" ]
+	run ! grep -q '^nginx -t' "${STUB_LOG}"
+	[ "$(web_route_names gitea)" = gitea ]
+	[ "$(web_route_names)" = gitea ]
+	[ -z "$(web_route_names other)" ]
+}
+
+@test "with Traefik a route goes to its file provider and comes back to the web server when Traefik leaves" {
+	as_test_user
+	stub_traefik_routes
+	use_server nginx
+	use_server traefik
+	# Coraza at work (arm64): the route goes straight to the application.
+	OS_ARCH=aarch64
+	LSS_MODULE=app
+	local site=${BATS_TEST_TMPDIR}/conf/nginx/sites/app.conf
+	web_proxy_route app app.example.com http://127.0.0.1:8080/
+	grep -qxF 'traefik_route_write app http://127.0.0.1:8080/ app.example.com' "${STUB_LOG}"
+	[ ! -e "${site}" ]
+	# The traefik module re-applies every route in the name of its owner, with the ports handed back.
+	LSS_MODULE=traefik LSS_WEB_BACKEND=off web_routes_apply
+	grep -qxF 'traefik_route_remove app' "${STUB_LOG}"
+	grep -qxF $'\t\tproxy_pass http://127.0.0.1:8080/;' "${site}"
+	[ "$(files_changes_of traefik)" = 0 ]
+	web_proxy_route_remove app
+	[ ! -e "${site}" ]
+	[ ! -e "${LSS_STATE_DIR}/web-routes/app" ]
+	[ -z "$(web_route_names)" ]
+}
+
+@test "where Coraza cannot run a route passes through the web server's ModSecurity, and goes direct when it leaves" {
+	as_test_user
+	stub_traefik_routes
+	use_server nginx
+	use_server traefik
+	OS_ARCH=x86_64
+	LSS_MODULE=app
+	local site=${BATS_TEST_TMPDIR}/conf/nginx/sites/app.conf
+	web_proxy_route app app.example.com 127.0.0.1:3000
+	grep -qxF "traefik_route_write app https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT} app.example.com" "${STUB_LOG}"
+	grep -qxF $'\t\tproxy_pass http://127.0.0.1:3000;' "${site}"
+	# The web server goes away: Traefik routes to the application itself.
+	: >"${STUB_LOG}"
+	TRAEFIK_BACKEND_GONE=1 LSS_MODULE=nginx web_routes_apply
+	grep -qxF 'traefik_route_write app http://127.0.0.1:3000 app.example.com' "${STUB_LOG}"
+	[ ! -e "${site}" ]
+	# ModSecurity asked for explicitly keeps its meaning: what goes through the web server, routes direct.
+	: >"${STUB_LOG}"
+	export LSS_TRAEFIK_WAF=modsecurity
+	LSS_MODULE=nginx web_routes_apply
+	grep -qxF 'traefik_route_write app http://127.0.0.1:3000 app.example.com' "${STUB_LOG}"
+}
+
+@test "a route needs host names, an upstream with a port and something to serve it" {
+	as_test_user
+	run web_proxy_route app 'app.example.com localhost' 127.0.0.1:3000
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"web: 'localhost' of the route app is not a host name like app.example.com."* ]]
+	run web_proxy_route app app.example.com 3000
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"web: the upstream '3000' of the route app is not HOST:PORT or an http(s):// URL with a port."* ]]
+	run web_proxy_route app app.example.com 'http://127.0.0.1:3000/;return'
+	[ "${status}" -eq 1 ]
+	run web_proxy_route ../app app.example.com 127.0.0.1:3000
+	[ "${status}" -eq 1 ]
+	run web_proxy_route app app.example.com 127.0.0.1:3000
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'web: the route app needs Traefik or a web server (nginx, apache or caddy).'* ]]
+}
+
 # --- fail2ban and CrowdSec --------------------------------------------------------------------------------------
 
 @test "without a web server the jails and the log acquisition are removed" {
@@ -888,6 +1040,8 @@ EOF
 	web_ids_configure
 	grep -qxF "== 0644 root:root ${WEB_FAIL2BAN_FILTER}" "${WRITES}"
 	grep -qF '"status":401' "${WEB_FAIL2BAN_FILTER}"
+	# client_ip is the client behind Traefik as well (remote_ip would be Traefik itself).
+	grep -qF '"client_ip":"<HOST>"' "${WEB_FAIL2BAN_FILTER}"
 	grep -qxF '[lss-caddy-auth]' "${WEB_FAIL2BAN_JAIL}"
 	grep -qxF 'filter = lss-caddy-auth' "${WEB_FAIL2BAN_JAIL}"
 	grep -qxF "logpath = ${BATS_TEST_TMPDIR}/log/caddy/access.log" "${WEB_FAIL2BAN_JAIL}"
