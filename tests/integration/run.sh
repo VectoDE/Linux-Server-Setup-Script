@@ -69,9 +69,11 @@ start_target() {
 		docker build -q -f "tests/integration/images/${system}/Containerfile" -t "lss-test:${system}" \
 			"tests/integration/images/${system}" >/dev/null
 		docker rm -f "${container}" >/dev/null 2>&1 || true
+		# The storage of Podman and of Docker inside the container is on volumes: overlayfs does not stack on the
+		# overlayfs of the container itself.
 		docker run -d --name "${container}" --hostname lss-test --privileged --cgroupns=host \
 			-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec \
-			-v /var/lib/containers \
+			-v /var/lib/containers -v /var/lib/docker -v /var/lib/containerd \
 			-v "${PWD}:/src:ro" "lss-test:${system}" >/dev/null
 		in_target 'for i in $(seq 60); do s=$(systemctl is-system-running 2>/dev/null || true); [[ $s == running || $s == degraded ]] && exit 0; sleep 1; done; exit 1'
 		in_target 'cp -a /src /opt/lss-src'

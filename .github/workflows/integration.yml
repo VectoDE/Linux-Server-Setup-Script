@@ -51,7 +51,8 @@ jobs:
           - group: database-alt
             modules: mysql valkey mongodb
           # Podman runs inside a test container (its storage on a volume, not on overlayfs). Docker, Portainer and
-          # k3s need a kernel of their own (bridges, iptables, cgroups) and run in the VM jobs below.
+          # k3s run in the VM jobs below with a kernel of their own; on arm64 (no KVM) the app jobs run Docker inside
+          # these containers.
           - group: container
             modules: podman
           # restic alone (local repository), then the database dumps of every engine; the conflicting engines in a job
@@ -144,10 +145,10 @@ jobs:
         # then k3s (after Docker is removed; they conflict) on every supported system, in a clean VM because the runner
         # already has Docker; minimal-secure on the newest Ubuntu release; the Kubernetes node profile with a Lynis audit;
         # Docker with the monitoring stack and Forgejo, as on a DevOps server; mail, Nextcloud with Collabora Online and
-        # Vaultwarden, as on an office server. With the apps, profile all needs most of the memory and processors of
-        # the runner.
+        # Vaultwarden, as on an office server, also on Rocky Linux 9 (the SELinux policy of the RHEL family 9 and 10).
+        # With the apps, profile all needs most of the memory and processors of the runner.
         include: >-
-          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"},{"system":"debian-13","run":"profile office","memory":8192},{"system":"almalinux-10","run":"profile office","memory":8192}',
+          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"},{"system":"debian-13","run":"profile office","memory":8192},{"system":"rocky-9","run":"profile office","memory":8192},{"system":"almalinux-10","run":"profile office","memory":8192}',
           (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
           && '{"system":"debian-12","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"debian-13","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"rocky-9","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"almalinux-10","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-22.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-24.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-26.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"}'
           || '{"system":"debian-13","run":"profile all","memory":12288,"cpus":4,"disk":"40G"}')) }}
@@ -246,16 +247,18 @@ jobs:
           read -ra modules <<<"$MODULES"
           tests/integration/run.sh "$SYSTEM" --base "$BASE" "${modules[@]}"
 
-  # The app stacks on arm64. The arm64 runners have no KVM, so the stacks run on the runner itself (host), Ubuntu
-  # 24.04: the multi-architecture images, the database containers and the web servers on aarch64. The runner's own
-  # Docker goes first, so the docker module sets Docker up as on a fresh server.
+  # The app stacks on arm64. The arm64 runners have no KVM, so Ubuntu 24.04 runs them on the runner itself (host); the
+  # runner's own Docker goes first, so the docker module sets Docker up as on a fresh server. The other systems run in
+  # the privileged systemd containers of the container jobs, with Docker inside (its storage on a volume) and the
+  # runner's kernel: its netfilter modules load on the runner, as a container cannot load them.
   apps-arm64:
-    name: ubuntu-24.04 arm64 / apps ${{ matrix.set }}
+    name: ${{ matrix.system == 'host' && 'ubuntu-24.04 arm64' || format('{0} arm64 container', matrix.system) }} / apps ${{ matrix.set }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
+        system: [host, debian-12, debian-13, ubuntu-22.04, ubuntu-26.04, rocky-9, almalinux-10]
         set: [office, dev, web]
         include:
           - set: office
@@ -276,16 +279,21 @@ jobs:
         with:
           persist-credentials: false
       - name: Remove the runner's Docker
+        if: matrix.system == 'host'
         run: |
           sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
           mapfile -t packages < <(dpkg-query -W -f "\${Package}\n" 'moby-*' 'docker-*' containerd 'containerd.io' 2>/dev/null)
           [ "${#packages[@]}" -eq 0 ] || sudo NEEDRESTART_SUSPEND=1 apt-get -qq purge -y "${packages[@]}" >/dev/null
           sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+      - name: Load the netfilter modules of Docker
+        if: matrix.system != 'host'
+        run: sudo modprobe -a br_netfilter xt_addrtype
       - name: Install, verify, reinstall, remove
         env:
+          SYSTEM: ${{ matrix.system }}
           BASE: ${{ matrix.base }}
           MODULES: ${{ matrix.modules }}
           LSS_TEST_SETTINGS: ${{ matrix.settings }}
         run: |
           read -ra modules <<<"$MODULES"
-          tests/integration/run.sh host --base "$BASE" "${modules[@]}"
+          tests/integration/run.sh "$SYSTEM" --base "$BASE" "${modules[@]}"
