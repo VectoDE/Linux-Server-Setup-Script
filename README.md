@@ -75,7 +75,7 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `lynis`            | 25 s               | 80 MiB                    | 5 MiB   | weekly audit                                        |
 | `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
 | `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
-| `docker`           | 90 s with the web server | 660 MiB with the web server | 940 MiB with the web server | dockerd and containerd, about 260 MiB with the web server |
+| `docker`           | 105 s with the web server | 660 MiB with the web server | 940 MiB with the web server | dockerd and containerd, about 260 MiB with the web server |
 | `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
 | `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |
 | `k3s`              | not measured yet   | not measured yet          | not measured yet | k3s server, about 1 GiB with Traefik       |
@@ -95,16 +95,16 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `mail-relay`       | 35 s               | 250 MiB                   | 180 MiB (dnf), else 135 MiB | Postfix (master, queue manager, pickup)  |
 | `mailserver`       | 90 s               | 800 MiB (dnf), else 225 MiB | 235 MiB (dnf), else 120 MiB | Postfix, Dovecot and Rspamd, up to 180 MiB |
 | `webmail`          | 135 s with nginx, php and mailserver | 390 MiB together | 265 MiB together | Roundcube in PHP-FPM; with nginx and the mail server up to 290 MiB |
-| `nextcloud`        | 295 s              | 810 MiB (dnf), else 595 MiB | 2.8 GiB | Nextcloud (Apache) and PostgreSQL, about 420 MiB (limit 1.5 GiB) |
-| `collabora`        | 85 s               | 830 MiB                   | 1.4 GiB | Collabora Online, about 640 MiB (limit 2 GiB) |
-| `forgejo`          | 35 s               | 300 MiB                   | 195 MiB | Forgejo, about 300 MiB (limit 1 GiB) |
-| `uptime-kuma`      | 60 s               | 285 MiB                   | 665 MiB | Uptime Kuma, about 170 MiB (limit 512 MiB) |
-| `vaultwarden`      | 35 s               | 730 MiB (dnf), else 255 MiB | 380 MiB | Vaultwarden, about 125 MiB (limit 512 MiB) |
+| `nextcloud`        | 295 s              | 810 MiB (dnf), else 745 MiB | 2.8 GiB | Nextcloud (Apache) and PostgreSQL, about 420 MiB (limit 1.5 GiB) |
+| `collabora`        | 90 s               | 830 MiB                   | 1.4 GiB | Collabora Online, about 640 MiB (limit 2 GiB) |
+| `forgejo`          | 55 s               | 370 MiB                   | 195 MiB | Forgejo, about 300 MiB (limit 1 GiB) |
+| `uptime-kuma`      | 60 s               | 295 MiB                   | 665 MiB | Uptime Kuma, about 170 MiB (limit 512 MiB) |
+| `vaultwarden`      | 45 s               | 750 MiB (dnf), else 260 MiB | 380 MiB | Vaultwarden, about 125 MiB (limit 512 MiB) |
 | `keycloak`         | 85 s               | 960 MiB                   | 1.0 GiB | Keycloak and PostgreSQL, about 900 MiB (limit 2 GiB) |
-| `matomo`           | 75 s               | 450 MiB                   | 1.3 GiB | Matomo (Apache) and MariaDB, about 280 MiB (limit 1.5 GiB) |
-| `wordpress`        | 45 s               | 360 MiB                   | 580 MiB | WordPress (Apache) and MariaDB, about 260 MiB (limit 1.3 GiB) |
-| `n8n`              | 200 s              | 1.2 GiB (dnf), else 935 MiB | 1.8 GiB | n8n and PostgreSQL, about 680 MiB (limit 1.5 GiB) |
-| `minio`            | 30 s               | 235 MiB                   | 160 MiB | Silo, about 210 MiB (limit 1 GiB in a container) |
+| `matomo`           | 75 s               | 540 MiB                   | 1.3 GiB | Matomo (Apache) and MariaDB, about 280 MiB (limit 1.5 GiB) |
+| `wordpress`        | 85 s               | 360 MiB                   | 580 MiB | WordPress (Apache) and MariaDB, about 260 MiB (limit 1.3 GiB) |
+| `n8n`              | 205 s              | 1.2 GiB (dnf), else 935 MiB | 1.8 GiB | n8n and PostgreSQL, about 680 MiB (limit 1.5 GiB) |
+| `minio`            | 30 s               | 250 MiB                   | 160 MiB | Silo, about 210 MiB (limit 1 GiB in a container) |
 | `self-updater`     | 65 s with node     | 475 MiB with node         | 440 MiB with node | Self-Updater (Node.js) |
 
 Modules the tests install together are measured together. The Rocky 9 VM in CI is slow throughout (eight minutes even
