@@ -222,7 +222,9 @@ EOF
 		printf '        - lss-waf@file\n'
 	fi
 	# api.insecure serves the dashboard and the read-only API on the entry point "traefik", which listens on
-	# 127.0.0.1 only; nothing of it is reachable from outside.
+	# 127.0.0.1 only; nothing of it is reachable from outside. Changes of the dynamic configuration are applied at most
+	# every 10 seconds: each one starts the Coraza plugin anew (about a second for the Core Rule Set), and Traefik
+	# 3.7.15 crashed in the plugin's WebAssembly runtime right after its start while changes arrived in quick succession.
 	cat <<EOF
   traefik:
     address: "127.0.0.1:$(opt_int dashboard_port)"
@@ -233,6 +235,7 @@ api:
 ping:
   entryPoint: traefik
 providers:
+  providersThrottleDuration: 10s
   file:
     directory: ${TRAEFIK_DYNAMIC}
     watch: true
@@ -461,7 +464,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 LimitNOFILE=65536
 UMask=0077
 Restart=on-failure
-RestartSec=5
+RestartSec=2
 TimeoutStartSec=120
 
 [Install]
@@ -635,7 +638,7 @@ _traefik_verify_routes() {
 		domain=$(awk '{ print $2 }' "$(_web_routes_dir)/${name}")
 		[[ -f ${TRAEFIK_DYNAMIC}/route-${name}.yml ]] || die "traefik: the route ${name} has no Traefik configuration."
 		answer=''
-		for ((i = 0; i < 15; i++)); do
+		for ((i = 0; i < 30; i++)); do
 			answer=$(_traefik_https "${domain}" '')
 			[[ $(_traefik_status "${answer}") == 404 ]] || break
 			sleep 1
@@ -698,7 +701,7 @@ _traefik_die() {
 	local line
 	while IFS= read -r line; do
 		log_warn "traefik: journal: ${line}"
-	done < <(journalctl -u "${TRAEFIK_UNIT}" -n 25 --no-pager -o cat 2>/dev/null || true)
+	done < <(journalctl -u "${TRAEFIK_UNIT}" -n 80 --no-pager -o cat 2>/dev/null || true)
 	die "traefik: $1"
 	return 1
 }
