@@ -345,7 +345,9 @@ app_nextcloud_office() {
 app_timer() {
 	local name=$1 interval=$2 description=$3 service=$4 docker
 	shift 4
+	# The real path: with /bin a link to /usr/bin, command -v answers either, depending on PATH, and the unit would change.
 	docker=$(command -v docker) || die "${LSS_MODULE}: docker is missing."
+	[[ ${docker} != /* ]] || docker=$(readlink -f "${docker}")
 	svc_unit "lss-${name}.service" <<EOF
 # Managed by lss (module ${LSS_MODULE}).
 [Unit]

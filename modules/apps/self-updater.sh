@@ -131,8 +131,11 @@ _su_env() {
 }
 
 _su_unit() {
-	local path nnp=yes
+	local path nnp=yes bin
 	path=$(opt path)
+	# The directory as its real path: with /bin a link to /usr/bin, command -v answers either, depending on PATH.
+	bin=$(command -v self-updater || printf '/usr/bin/self-updater')
+	bin=$(readlink -f "$(dirname "${bin}")")/self-updater
 	# sudo for the restart of a systemd unit needs new privileges.
 	[[ $(opt service) == none ]] || nnp=no
 	cat <<EOF
@@ -148,7 +151,7 @@ User=${SU_USER}
 Group=${SU_USER}
 WorkingDirectory=${SU_CONFIG_DIR}
 Environment=SELF_UPDATER_CONFIG=${SU_CONFIG} HOME=${SU_HOME}
-ExecStart=$(command -v self-updater || printf '/usr/bin/self-updater') start --immediate
+ExecStart=${bin} start --immediate
 Restart=on-failure
 RestartSec=10
 # A running deployment finishes before the service stops.
