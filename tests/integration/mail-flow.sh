@@ -90,6 +90,19 @@ fetch_subject() {
 	return
 }
 
+# rejects: how many messages Postfix refused because Rspamd's header-From check rejected them.
+rejects() {
+	journalctl --no-pager -q -o cat SYSLOG_FACILITY=2 | grep -c 'milter-reject.*belongs to another login' || true
+	return
+}
+
+# signed MESSAGE DOMAIN: MESSAGE carries a DKIM signature of DOMAIN (folded headers joined).
+signed() {
+	local mail=$1 domain=$2
+	grep -qiE "^DKIM-Signature:.*d=${domain//./\\.};" <<<"$(sed -e ':a' -e 'N;$!ba' -e 's/\n[ \t]\+/ /g' <<<"${mail}")"
+	return
+}
+
 # txt NAME: the value of a TXT record in the DNS records lss printed, its strings joined.
 txt() {
 	local name=$1
@@ -132,7 +145,7 @@ full_curl() {
 }
 
 server() {
-	local alice bob domain selector token mail result output ip i symbol
+	local alice bob domain selector token mail result output ip i symbol forged seen
 	local -a mailboxes=()
 	full_curl
 	HOSTNAME_MAIL=$(state mailserver hostname)
@@ -161,6 +174,42 @@ server() {
 	say "Rspamd signed it with the DKIM key of ${domain}"
 	fetch_subject "${alice}" "lss flow 465 ${token}" >/dev/null
 	say "the reply arrived in the inbox of ${alice}"
+
+	# The From header must name an address of the login: another mailbox and an unowned address of another hosted
+	# domain are rejected even though the envelope sender is the login's own; an alias the login owns passes and is
+	# signed.
+	seen=$(rejects)
+	for forged in "${bob}" "ceo@${bob#*@}"; do
+		message "${forged}" "${alice}" "lss flow forged ${token}"
+		output=$(smtp "smtp://${HOSTNAME_MAIL}:587" "${alice}" "${alice}" "${alice}" --ssl-reqd) &&
+			fail "${alice} sent with the From address ${forged}."
+		# Postfix logs the reason; curl only reports that the message was refused.
+		for ((i = 0; i < 10; i++)); do
+			(($(rejects) > seen)) && break
+			sleep 1
+		done
+		(($(rejects) > seen)) ||
+			fail "the From address ${forged} was refused for another reason: ${output} $(journalctl --no-pager -q -n 15 SYSLOG_FACILITY=2)"
+		seen=$(rejects)
+	done
+	say "${alice} cannot send with the From address ${bob} or ceo@${bob#*@} (rejected by Rspamd)"
+	message "info@${domain}" "${bob}" "lss flow alias ${token}"
+	output=$(smtp "smtp://${HOSTNAME_MAIL}:587" "${alice}" "${bob}" "${alice}" --ssl-reqd) ||
+		fail "${alice} could not send as its alias info@${domain}: ${output}"
+	signed "$(fetch_subject "${bob}" "lss flow alias ${token}")" "${domain}" ||
+		fail "the mail of the alias info@${domain} carries no DKIM signature of ${domain}."
+	say "${alice} sends as its alias info@${domain}, signed with the key of ${domain}"
+
+	# Mail of this server itself (sendmail): signed when its From names a hosted domain, unsigned for any other domain.
+	message "root@${HOSTNAME_MAIL}" "${bob}" "lss flow local ${token}"
+	sendmail -i -f "root@${HOSTNAME_MAIL}" -- "${bob}" <"${WORK}/message" || fail "sendmail refused a local message."
+	signed "$(fetch_subject "${bob}" "lss flow local ${token}")" "${domain}" ||
+		fail "local mail from root@${HOSTNAME_MAIL} carries no DKIM signature of ${domain}."
+	message "someone@unhosted.example.net" "${bob}" "lss flow unhosted ${token}"
+	sendmail -i -f "root@${HOSTNAME_MAIL}" -- "${bob}" <"${WORK}/message" || fail "sendmail refused a local message."
+	! grep -qi '^DKIM-Signature:' <<<"$(fetch_subject "${bob}" "lss flow unhosted ${token}")" ||
+		fail "local mail with a From of a domain this server does not host was signed."
+	say "local mail is signed for root@${HOSTNAME_MAIL} and left unsigned for a domain this server does not host"
 
 	# DKIM, SPF and DMARC of the delivered message, checked with the printed records as DNS.
 	fake_dns "${domain}" "${selector}"

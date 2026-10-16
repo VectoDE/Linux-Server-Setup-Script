@@ -326,6 +326,50 @@ load_module() {
 	[ "${output}" = 2 ]
 }
 
+@test "Rspamd checks the From header of logged-in senders against the same sender map as Postfix" {
+	load_module mailserver
+	config_set LSS_MAILSERVER_DOMAINS 'example.com example.org'
+	config_set LSS_MAILSERVER_USERS 'alice bob@example.org'
+	config_set LSS_MAILSERVER_ALIASES 'info:alice,bob@example.org'
+	_ms_parse
+	MS_RSPAMD_LUA=${BATS_TEST_TMPDIR}/lua.local.d/lss-sender.lua
+	_ms_sender_filter
+	[ -d "${BATS_TEST_TMPDIR}/lua.local.d" ]
+	# The Rspamd copy of the map is the Postfix map, readable by Rspamd only.
+	run sed -n '/^== 0640 root:_rspamd \/etc\/rspamd\/lss-senders.map$/,/^== /p' "${WRITES}"
+	[[ ${output} == *$'\nalice@example.com alice@example.com\n'* ]]
+	[[ ${output} == *$'\ninfo@example.com alice@example.com,bob@example.org\n'* ]]
+	[[ ${output} == *$'\npostmaster@example.org alice@example.com'* ]]
+	[ "$(sed -n '2,$p' <<<"${output}" | grep -v '^== ')" = "$(_ms_senders)" ]
+	# The Lua prefilter reads that map, needs exactly one From address the login owns and rejects everything else.
+	run sed -n "/^== 0644 root:root ${MS_RSPAMD_LUA//\//\\/}$/,\$p" "${WRITES}"
+	[[ ${output} == *'local map_path = "/etc/rspamd/lss-senders.map"'* ]]
+	[[ ${output} == *'type = "prefilter"'* ]]
+	[[ ${output} == *'task:get_user()'* && ${output} == *'#headers == 1 and #from == 1'* ]]
+	[[ ${output} == *'task:set_pre_result("reject", reply, "lss")'* ]]
+	[[ ${output} == *'local reply = "From header address belongs to another login"'* ]]
+	[[ ${output} != *'"Not'* && ${output} != *'"No'* ]]
+}
+
+@test "DKIM signs only the domain of the login, and mail of this server only with a key of a hosted domain" {
+	load_module mailserver
+	config_set LSS_MAILSERVER_DOMAINS example.com
+	_ms_parse
+	# shellcheck disable=SC2329 # called by _ms_rspamd
+	rspamadm() { :; }
+	# shellcheck disable=SC2329 # called by _ms_rspamd
+	svc_sandbox() { :; }
+	MS_RSPAMD=${BATS_TEST_TMPDIR}/local.d
+	MS_RSPAMD_LUA=${BATS_TEST_TMPDIR}/lua.local.d/lss-sender.lua
+	_ms_rspamd
+	run sed -n "/dkim_signing.conf$/,/^== /p" "${WRITES}"
+	[[ ${output} == *$'\nallow_username_mismatch = false;\n'* ]]
+	[[ ${output} == *$'\nuse_domain = "header";\nuse_esld = true;\n'* ]]
+	[[ ${output} == *$'\nsign_local = true;\n'* ]]
+	[[ ${output} == *'path = "/var/lib/rspamd/dkim/$domain.$selector.key";'* ]]
+	grep -qxF '== 0640 root:_rspamd /etc/rspamd/lss-senders.map' "${WRITES}"
+}
+
 @test "main.cf filters every message through Rspamd and allows login only with TLS" {
 	load_module mailserver
 	config_set LSS_MAILSERVER_DOMAINS 'example.com example.org'
