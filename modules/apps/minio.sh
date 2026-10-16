@@ -206,7 +206,8 @@ _minio_s3() {
 
 # _minio_error PAGE: the S3 error code in the XML answer PAGE (such as SignatureDoesNotMatch).
 _minio_error() {
-	sed -n 's:.*<Code>\([A-Za-z]*\)</Code>.*:\1:p' <<<"$1" | head -n 1
+	local page=$1
+	sed -n 's:.*<Code>\([A-Za-z]*\)</Code>.*:\1:p' <<<"${page}" | head -n 1
 	return
 }
 
