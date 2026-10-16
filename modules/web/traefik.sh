@@ -6,7 +6,7 @@ MOD_NAME="traefik"
 MOD_GROUP="web"
 MOD_DESCRIPTION="Traefik 3.7 edge proxy in front of the web server and the applications: HTTPS with HTTP/3, security headers, OWASP Coraza WAF, JSON access log, dashboard on localhost"
 MOD_REQUIRES="system"
-MOD_OPTIONS="waf|coraza|Web application firewall: coraza (OWASP Coraza with the Core Rule Set in Traefik, for every route), modsecurity (the modsecurity module in the backend web server, for what goes through it), both, or off
+MOD_OPTIONS="waf|coraza|Web application firewall: coraza (OWASP Coraza with the Core Rule Set in Traefik, for every route; on amd64 held back until Traefik ships wazero 1.9, ModSecurity in the web server stands in when installed), modsecurity (the modsecurity module in the backend web server, for what goes through it), both, or off
 paranoia|1|Paranoia level of the Core Rule Set in Coraza, 1 to 4: higher levels catch more attacks and also block more legitimate requests
 routes||Routes Traefik serves, separated by spaces: NAME:DOMAIN[,DOMAIN...]:HOST:PORT, for example app:app.example.com:127.0.0.1:3000 (Traefik forwards to http://HOST:PORT)
 admin_host||Host name under which Traefik publishes the admin interfaces of the web server (phpMyAdmin, Adminer, pgAdmin) over HTTPS with a password (user admin, lss secrets show web-admin-password); empty keeps them on the admin port only
@@ -98,13 +98,49 @@ _traefik_route_parse() {
 	return
 }
 
-_traefik_coraza() {
+# Coraza runs in Traefik's WebAssembly runtime (wazero). Every Traefik release up to 3.7.15 and 3.6.25 ships wazero
+# 1.8.0, whose amd64 compiler calls runtime.memmove without saving the DX register that Go 1.24 and later clobber
+# there (fixed in wazero 1.9.0, wazero/wazero#2378); Traefik then dies at random with "unsafe.Slice: len out of
+# range" or "split stack overflow" below memmove. On amd64 the plugin waits for a Traefik release with wazero 1.9 or
+# later; arm64 is unaffected. Set to true here together with the Traefik version that carries the fix.
+TRAEFIK_CORAZA_AMD64=false
+
+# _traefik_coraza_runs: Traefik can load the Coraza plugin on this architecture.
+_traefik_coraza_runs() {
+	[[ $(_traefik_arch) == arm64 || ${TRAEFIK_CORAZA_AMD64} == true ]]
+	return
+}
+
+# _traefik_coraza_wanted: LSS_TRAEFIK_WAF asks for Coraza.
+_traefik_coraza_wanted() {
 	[[ $(opt waf) == coraza || $(opt waf) == both ]]
 	return
 }
 
+_traefik_coraza() {
+	_traefik_coraza_wanted && _traefik_coraza_runs
+	return
+}
+
+# ModSecurity in the backend web server when asked for, and in place of Coraza where Coraza cannot run.
 _traefik_modsecurity() {
-	[[ $(opt waf) == modsecurity || $(opt waf) == both ]]
+	if [[ $(opt waf) == modsecurity || $(opt waf) == both ]]; then
+		return 0
+	fi
+	_traefik_coraza_wanted && ! _traefik_coraza_runs && state_installed modsecurity
+	return
+}
+
+# The warning when Coraza is asked for on an architecture where Traefik cannot load it.
+_traefik_coraza_note() {
+	if ! _traefik_coraza_wanted || _traefik_coraza_runs; then
+		return 0
+	fi
+	if _traefik_modsecurity; then
+		log_warn "traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64; ModSecurity in the web server filters the requests that go through it."
+	else
+		log_warn "traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64; requests reach the backends unfiltered until then (lss install modsecurity filters what goes through the web server)."
+	fi
 	return
 }
 
@@ -521,6 +557,7 @@ mod_configure() {
 	else
 		_traefik_plugin_remove
 	fi
+	_traefik_coraza_note
 	[[ $(files_changes_of traefik) == 0 ]] || changed=1
 	bundle=$(opt acme_ca_bundle)
 	if [[ -n ${bundle} ]]; then

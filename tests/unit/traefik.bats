@@ -263,6 +263,7 @@ use_module() {
 
 @test "the static configuration: HTTP/3 on 443, the middlewares, the dashboard on 127.0.0.1 and a JSON access log" {
 	load_module
+	OS_ARCH=aarch64
 	run _traefik_static
 	[[ ${output} == *$'  web:\n    address: ":80"'* ]]
 	[[ ${output} == *$'    http3:\n      advertisedPort: 443'* ]]
@@ -294,6 +295,7 @@ use_module() {
 
 @test "the middlewares: the security headers, the redirect to HTTPS and Coraza with the Core Rule Set" {
 	load_module
+	OS_ARCH=aarch64
 	export LSS_TRAEFIK_PARANOIA=2
 	run _traefik_dynamic
 	[[ ${output} == *'          Strict-Transport-Security: "max-age=63072000"'* ]]
@@ -306,6 +308,30 @@ use_module() {
 	export LSS_TRAEFIK_WAF=off
 	run _traefik_dynamic
 	[[ ${output} != *coraza* ]]
+}
+
+@test "Coraza stays out on amd64 (wazero 1.8.0 in Traefik); ModSecurity takes its place where it is installed" {
+	load_module
+	OS_ARCH=x86_64
+	run _traefik_static
+	[[ ${output} != *lss-waf* ]]
+	[[ ${output} != *localPlugins* ]]
+	run _traefik_dynamic
+	[[ ${output} != *coraza* ]]
+	run ! _traefik_modsecurity
+	run _traefik_coraza_note
+	[[ ${output} == *'Coraza waits for a Traefik release with wazero 1.9 on amd64; requests reach the backends unfiltered'* ]]
+	state_set modsecurity status installed
+	_traefik_modsecurity
+	run _traefik_coraza_note
+	[[ ${output} == *'ModSecurity in the web server filters the requests'* ]]
+	export LSS_TRAEFIK_WAF=off
+	run ! _traefik_modsecurity
+	run _traefik_coraza_note
+	[ -z "${output}" ]
+	OS_ARCH=aarch64 LSS_TRAEFIK_WAF=coraza
+	_traefik_coraza
+	run ! _traefik_modsecurity
 }
 
 @test "the unit runs as its own user with CAP_NET_BIND_SERVICE as its only capability" {

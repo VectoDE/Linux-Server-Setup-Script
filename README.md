@@ -251,10 +251,14 @@ Admin interfaces such as phpMyAdmin listen on `127.0.0.1:8090`. Reach them throu
 
 `traefik` puts Traefik in front of everything that speaks HTTP. It takes ports 80/tcp, 443/tcp and 443/udp (HTTP/3),
 redirects port 80 to HTTPS, adds the same security headers and HSTS as the web servers, writes a JSON access log
-and filters every request through the OWASP Coraza WAF with the Core Rule Set. The web server stays: nginx, Apache or
-Caddy moves to `127.0.0.1:8008` and `127.0.0.1:8443` and keeps serving the sites of `vhost`, PHP and the admin
-tools. It takes the client address from Traefik's `X-Forwarded-For`, so its logs, fail2ban and ModSecurity still see
+and filters every request through the OWASP Coraza WAF with the Core Rule Set (on arm64; on amd64 see below). The
+web server stays: nginx, Apache or Caddy moves to `127.0.0.1:8008` and `127.0.0.1:8443` and keeps serving the sites
+of `vhost`, PHP and the admin tools. It takes the client address from Traefik's `X-Forwarded-For`, so its logs, fail2ban and ModSecurity still see
 the client. Removing `traefik` gives ports 80 and 443 back to the web server.
+
+On amd64 Coraza stays switched off for now: every current Traefik release ships wazero 1.8.0, which crashes Traefik at
+random on amd64 with Go 1.24 or later (fixed in wazero 1.9.0). lss then uses ModSecurity in the web server behind
+Traefik if the `modsecurity` module is installed, and warns if it is not. arm64 is unaffected.
 
 Applications get a host name of their own through a route: `LSS_TRAEFIK_ROUTES=app:app.example.com:127.0.0.1:3000`,
 or from a module with `web_proxy_route NAME DOMAIN 127.0.0.1:PORT`. Without Traefik the same route becomes a
@@ -263,7 +267,7 @@ reverse-proxy site of the web server. Certificates come from the `tls` module, o
 
 | Setting                      | Default  | Meaning                                                                                 |
 | ---------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `LSS_TRAEFIK_WAF`            | `coraza` | `coraza` in Traefik, `modsecurity` in the web server behind it, `both`, or `off`         |
+| `LSS_TRAEFIK_WAF`            | `coraza` | `coraza` in Traefik (arm64), `modsecurity` in the web server behind it, `both`, or `off` |
 | `LSS_TRAEFIK_PARANOIA`       | `1`      | Paranoia level of the Core Rule Set in Coraza (1 to 4)                                   |
 | `LSS_TRAEFIK_ADMIN_HOST`     | empty    | Publishes the admin port (phpMyAdmin, Adminer, pgAdmin) under this name with a password  |
 | `LSS_TRAEFIK_DOCKER`         | `false`  | Routes containers labelled `traefik.enable=true`, through a read-only socket proxy       |
