@@ -91,12 +91,14 @@ _mt_installed() {
 	return
 }
 
-# _mt_step JAR STEP [CURL OPTION...]: one step of the web installer; prints the body and the status.
+# _mt_step JAR STEP [CURL OPTION...]: one step of the web installer; prints the body and the status. Creating the
+# tables takes long on a busy server, so a step may take up to five minutes (the later --max-time wins in curl).
 _mt_step() {
-	local jar=$1 step=$2
+	local jar=$1 step=$2 code=0
 	shift 2
-	app_get "index.php?module=Installation&action=${step}" -b "${jar}" -c "${jar}" "$@"
-	return
+	app_get "index.php?module=Installation&action=${step}" -b "${jar}" -c "${jar}" --max-time 300 --show-error "$@" || code=$?
+	((code == 0)) || log_error "matomo: the installer step ${step:-welcome} gets no answer (curl exit status ${code})."
+	return "${code}"
 }
 
 # _mt_post JAR STEP FIELD...: posts the form of STEP; fails unless Matomo moves on (redirect) or shows a page without a
@@ -117,7 +119,7 @@ _mt_post() {
 # curl as files, so they never show up in the process list; "**********" makes the installer use the database
 # password from MATOMO_DATABASE_PASSWORD_FILE.
 _mt_install() {
-	local jar email site domain
+	local jar email site domain waf
 	_mt_installed && return 0
 	domain=$(app_domain)
 	email=$(opt admin_email)
@@ -142,7 +144,8 @@ _mt_install() {
 			_mt_post "${jar}" finished -d anonymise_ip=1
 	}; then
 		rm -f -- "${jar}"
-		die "matomo: the installation failed; see above."
+		waf=$(app_waf_hits)
+		die "matomo: the installation failed; see above${waf:+ (ModSecurity: ${waf})}."
 	fi
 	rm -f -- "${jar}"
 	_mt_installed || die "matomo: Matomo is not installed after the web installer."
