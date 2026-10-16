@@ -33,6 +33,8 @@ WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
 WEB_CERT_HOOK=/etc/letsencrypt/renewal-hooks/deploy/lss-deploy
 # CA certificate of a private ACME server (LSS_TLS_CA_BUNDLE, for example Pebble or step-ca); certbot trusts it.
 WEB_ACME_CA=/etc/letsencrypt/lss-acme-ca.pem
+# Rule exclusions of the routes for ModSecurity (web_waf_exclude), one file per route.
+WEB_WAF_DIR=/etc/lss/waf
 # certbot's certificate lineages (one directory per certificate name).
 WEB_CERT_LIVE=/etc/letsencrypt/live
 # The fail2ban jails and the CrowdSec log acquisition for the installed web server.
@@ -694,9 +696,10 @@ web_proxy_route() {
 	return
 }
 
-# web_proxy_route_remove NAME: removes the route of web_proxy_route with its certificates.
+# web_proxy_route_remove NAME: removes the route of web_proxy_route with its certificates and ModSecurity exclusions.
 web_proxy_route_remove() {
 	local name=$1
+	web_waf_exclude_remove "${name}"
 	if [[ -n $(web_server) ]]; then
 		web_site_remove "${name}"
 		web_reload
@@ -706,6 +709,72 @@ web_proxy_route_remove() {
 		log_command certbot delete --non-interactive --cert-name "${name}" ||
 			log_warn "${name}: certbot could not delete the certificate ${name}."
 	fi
+	return
+}
+
+# web_waf_exclude NAME "RULE_ID..." DOMAIN...: the Core Rule Set rules ModSecurity skips for the host names of the
+# route NAME, for an application whose normal pages a rule takes for an attack (the system check of the Matomo
+# installer shows PHP code, which rule 953110 reads as a leak). The exclusions are data in WEB_WAF_DIR, so they apply
+# whenever the modsecurity module is installed, before or after the route; web_waf_rules turns them into rules.
+web_waf_exclude() {
+	local name=$1 rules=$2 domain
+	shift 2
+	_web_name_check "${name}"
+	[[ ${rules} =~ ^[0-9]{6}( [0-9]{6})*$ ]] || die "web: '${rules}' are not rule IDs of the Core Rule Set."
+	[[ $# -gt 0 ]] || die "web: the ModSecurity exclusions of ${name} have no host names."
+	for domain in "$@"; do
+		[[ ${domain} =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "web: '${domain}' is not a host name."
+	done
+	install -d -m 0755 "${WEB_WAF_DIR}"
+	printf '# Managed by lss (route %s). ModSecurity skips these rules for these host names.\nRULES=%s\nDOMAINS=%s\n' \
+		"${name}" "${rules}" "$*" | file_write 0644 root:root "${WEB_WAF_DIR}/${name}.conf"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_waf_apply
+	return
+}
+
+# web_waf_exclude_remove NAME: drops the exclusions of the route NAME.
+web_waf_exclude_remove() {
+	local name=$1
+	[[ -e ${WEB_WAF_DIR}/${name}.conf ]] || return 0
+	file_remove "${WEB_WAF_DIR}/${name}.conf"
+	rmdir "${WEB_WAF_DIR}" 2>/dev/null || true
+	web_waf_apply
+	return
+}
+
+# web_waf_rules: the exclusions of every route as ModSecurity rules (phase 1, before the rules they switch off), with
+# IDs from 9500001 on in the order of the route names.
+web_waf_rules() {
+	local file id=9500000 rules domains pattern ctl rule
+	printf '# Managed by lss. Rule exclusions of the routes in %s (web_waf_exclude).\n' "${WEB_WAF_DIR}"
+	for file in "${WEB_WAF_DIR}"/*.conf; do
+		[[ -f ${file} ]] || continue
+		rules=$(sed -n 's/^RULES=//p' "${file}")
+		domains=$(sed -n 's/^DOMAINS=//p' "${file}")
+		[[ ${rules} =~ ^[0-9]{6}( [0-9]{6})*$ && ${domains} =~ ^[a-z0-9.\ -]+$ ]] || continue
+		pattern=$(sed 's/\./\\./g; s/ /|/g' <<<"${domains}")
+		ctl=''
+		for rule in ${rules}; do
+			ctl+=",ctl:ruleRemoveById=${rule}"
+		done
+		id=$((id + 1))
+		printf 'SecRule REQUEST_HEADERS:Host "@rx ^(?:%s)(?::[0-9]+)?$" "id:%s,phase:1,pass,nolog,t:none,t:lowercase%s"\n' \
+			"${pattern}" "${id}" "${ctl}"
+	done
+	return
+}
+
+# web_waf_apply: writes the exclusions (web_waf_rules) into the ModSecurity configuration of the modsecurity module
+# and reloads the web server when they changed; without ModSecurity there is nothing to do.
+web_waf_apply() {
+	local server dir
+	state_installed modsecurity || return 0
+	server=$(web_server)
+	[[ ${server} == nginx || ${server} == apache ]] || return 0
+	dir=$(web_conf_dir "${server}")/modsecurity
+	[[ -d ${dir} ]] || return 0
+	web_waf_rules | file_write 0644 root:root "${dir}/sites.conf"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_reload
 	return
 }
 

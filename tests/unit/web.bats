@@ -14,6 +14,7 @@ setup() {
 	shopt -s lastpipe
 	export TMPDIR=${BATS_TEST_TMPDIR}
 	WEB_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	WEB_WAF_DIR=${BATS_TEST_TMPDIR}/waf
 	mkdir -p "${WEB_TLS_DIR}/default"
 	WEB_ACME_ROOT=${BATS_TEST_TMPDIR}/www/acme
 	WEB_DEFAULT_ROOT=${BATS_TEST_TMPDIR}/www/default
@@ -1083,4 +1084,32 @@ EOF
 	run _modsecurity_engine_conf apache
 	[ "${status}" -eq 0 ]
 	grep -qF "SecRule MULTIPART_UNMATCHED_BOUNDARY \"!@eq 0\" \"id:'200004'," <<<"${output}"
+}
+
+@test "ModSecurity exclusions of a route become host rules and reach the configuration once ModSecurity is there" {
+	as_test_user
+	web_waf_exclude stats 953110 stats.example.com www.stats.example.com
+	grep -qxF 'RULES=953110' "${WEB_WAF_DIR}/stats.conf"
+	grep -qxF 'DOMAINS=stats.example.com www.stats.example.com' "${WEB_WAF_DIR}/stats.conf"
+	run web_waf_rules
+	[ "${status}" -eq 0 ]
+	[ "${lines[1]}" = 'SecRule REQUEST_HEADERS:Host "@rx ^(?:stats\.example\.com|www\.stats\.example\.com)(?::[0-9]+)?$" "id:9500001,phase:1,pass,nolog,t:none,t:lowercase,ctl:ruleRemoveById=953110"' ]
+	run web_waf_exclude stats '953110;evil' stats.example.com
+	[ "${status}" -eq 1 ]
+	run web_waf_exclude stats 953110 'stats.example.com"'
+	[ "${status}" -eq 1 ]
+	# With ModSecurity the rules land next to its configuration and the web server reloads.
+	state_set nginx status installed
+	state_set modsecurity status installed
+	local conf=${BATS_TEST_TMPDIR}/conf/nginx
+	# shellcheck disable=SC2329 # called by web_waf_apply
+	web_reload() { printf 'reload\n' >>"${STUB_LOG}"; }
+	mkdir -p "${conf}/modsecurity"
+	web_waf_apply
+	grep -qF 'ctl:ruleRemoveById=953110' "${conf}/modsecurity/sites.conf"
+	grep -qxF reload "${STUB_LOG}"
+	web_waf_exclude_remove stats
+	[ ! -e "${WEB_WAF_DIR}" ]
+	run grep -c SecRule "${conf}/modsecurity/sites.conf"
+	[ "${output}" = 0 ]
 }

@@ -604,6 +604,8 @@ _modsecurity_main_conf() {
 	printf 'Include %s\n' "${dir}/modsecurity.conf" "${dir}/crs-setup.conf"
 	_modsecurity_plugin_includes "${dir}" config
 	_modsecurity_plugin_includes "${dir}" before
+	# The exclusions of the routes (web_waf_exclude); the file exists, empty or not.
+	printf 'Include %s\n' "${dir}/sites.conf"
 	find "$(_modsecurity_crs_dir)/rules" -maxdepth 1 -type f -name '*.conf' | LC_ALL=C sort | sed 's/^/Include /'
 	_modsecurity_plugin_includes "${dir}" after
 	return
@@ -717,6 +719,7 @@ mod_configure() {
 	file_write 0644 root:root "${dir}/modsecurity.conf" < <(_modsecurity_engine_conf "${server}")
 	file_write 0644 root:root "${dir}/crs-setup.conf" < <(_modsecurity_crs_setup)
 	_modsecurity_plugins "${dir}"
+	file_write 0644 root:root "${dir}/sites.conf" < <(web_waf_rules)
 	file_write 0644 root:root "${dir}/main.conf" < <(_modsecurity_main_conf "${dir}")
 	file_write 0644 root:root /etc/logrotate.d/lss-modsecurity < <(_modsecurity_logrotate "${log}")
 	if [[ ${server} == apache ]]; then

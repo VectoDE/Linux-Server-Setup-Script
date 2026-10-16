@@ -395,6 +395,15 @@ app_site() {
 	return
 }
 
+# app_waf_exclude RULE_ID...: the Core Rule Set rules ModSecurity skips for the host names of the app
+# (web_waf_exclude); app_remove drops them with the route.
+app_waf_exclude() {
+	local -a domains
+	read -ra domains <<<"$(app_domains)"
+	web_waf_exclude "${LSS_MODULE}" "$*" "${domains[@]}"
+	return
+}
+
 # app_get PATH [CURL OPTION...]: the page at https://DOMAIN/PATH as the web server of this server serves it (the
 # first host name of the app, or APP_GET_DOMAIN, resolved to 127.0.0.1), followed by a line with the HTTP status.
 app_get() {

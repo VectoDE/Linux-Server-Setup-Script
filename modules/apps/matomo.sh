@@ -185,6 +185,9 @@ mod_configure() {
 	app_backup DB=mariadb LIVE=html
 	app_up
 	app_site "$(opt_int port)"
+	# The system check of the installer contains PHP code, which rule 953110 of the Core Rule Set takes for leaked
+	# source code; ModSecurity then cuts the answer off.
+	app_waf_exclude 953110
 	app_wait matomo.js 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.js does not answer."
 	_mt_install
 	_mt_set General force_ssl 1
