@@ -144,6 +144,18 @@ _svc_selinux_nnp() {
 	return
 }
 
+# svc_spawner_directives: sandbox directives (one per line) for a master process that starts its workers in SELinux
+# domains of their own (the Postfix master: postfix_qmgr_t, postfix_smtpd_t; Dovecot: dovecot_auth_t). NoNewPrivileges
+# forbids those changes (avc: nnp_transition) and the workers never start, so under SELinux it is off: the master runs
+# as root and drops its rights itself, and the policy confines every worker. Without SELinux it prints nothing.
+svc_spawner_directives() {
+	if _svc_selinux_on; then
+		printf '%s
+' NoNewPrivileges=no
+	fi
+	return 0
+}
+
 # svc_scanner_sandbox full|strict [PATH...]: [Service] lines that confine lss's own scanner units. They read the whole
 # system but write only to the PATHs (with strict) or below /var (with full). The real /tmp, /proc/kallsyms, the
 # kernel modules and the kernel log stay visible: a private /tmp would hide it from ClamAV and rkhunter, and rkhunter,

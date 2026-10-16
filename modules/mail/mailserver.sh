@@ -367,7 +367,7 @@ EOF
 }
 
 _ms_dovecot() {
-	local cert=$1 before config users output
+	local cert=$1 before config users output spawner
 	before=$(files_changes_of mailserver)
 	users=$(_ms_users_file)
 	file_write 0640 root:dovecot "${MS_USERS}" <<<"${users}"
@@ -380,8 +380,10 @@ _ms_dovecot() {
 	# Dovecot puts its sockets for Postfix there; Postfix 3.10 creates the directory only on its first start, which
 	# comes later, and the sandbox needs it to exist. Postfix's own owner and mode.
 	[[ -d /var/spool/postfix/private ]] || install -d -m 0700 -o postfix -g root /var/spool/postfix/private
+	# Dovecot starts its login, auth and delivery processes in their own SELinux domains (svc_spawner_directives).
+	mapfile -t spawner < <(svc_spawner_directives)
 	svc_sandbox dovecot.service "ReadWritePaths=${MS_VMAIL}" ReadWritePaths=-/var/lib/dovecot \
-		ReadWritePaths=/var/spool/postfix/private
+		ReadWritePaths=/var/spool/postfix/private "${spawner[@]}"
 	svc_enable dovecot
 	if [[ $(files_changes_of mailserver) != "${before}" ]]; then
 		svc_restart dovecot || die "mailserver: Dovecot does not start with the new configuration."

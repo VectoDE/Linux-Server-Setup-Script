@@ -70,6 +70,11 @@ load_module() {
 	run mail_postfix_sandbox ReadWritePaths=/var/mail
 	[ "${lines[0]}" = 'postfix@.service' ]
 	[[ ${output} == *$'PrivateDevices=no\nReadWritePaths=/var/spool/postfix\nReadWritePaths=/var/lib/postfix\nReadWritePaths=/var/mail'* ]]
+	run ! grep -q NoNewPrivileges <<<"${output}"
+	# Under SELinux the master must start qmgr, pickup and smtpd in their own domains.
+	export STUB_EXIT_selinuxenabled=0
+	run mail_postfix_sandbox ReadWritePaths=/var/mail
+	[[ ${output} == *$'ReadWritePaths=/var/lib/postfix\nNoNewPrivileges=no\nReadWritePaths=/var/mail'* ]]
 }
 
 @test "Postfix starts once, restarts only after a change and stops the run on a configuration it rejects" {

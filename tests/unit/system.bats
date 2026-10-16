@@ -656,6 +656,17 @@ EOF
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
+@test "svc_spawner_directives lets a master start its workers in their SELinux domains" {
+	export STUB_EXIT_selinuxenabled=1
+	run svc_spawner_directives
+	[ "${status}" -eq 0 ]
+	[ -z "${output}" ]
+	export STUB_EXIT_selinuxenabled=0
+	run svc_spawner_directives
+	[ "${status}" -eq 0 ]
+	[ "${output}" = NoNewPrivileges=no ]
+}
+
 @test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {
 	# shellcheck disable=SC2329 # called by the function under test
 	svc_dropin() {
