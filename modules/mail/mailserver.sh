@@ -32,6 +32,10 @@ MS_ALIASES=/etc/postfix/lss-aliases
 MS_HEADER='# Managed by lss (module mailserver).'
 MS_RECIPIENT_ACCESS=/etc/postfix/lss-recipient-access
 MS_RSPAMD=/etc/rspamd/local.d
+# The header-From check of Rspamd: its Lua rule and its copy of the sender map, below /etc/rspamd so that Rspamd may
+# read them under SELinux and AppArmor.
+MS_RSPAMD_LUA=/etc/rspamd/lua.local.d/lss-sender.lua
+MS_RSPAMD_SENDERS=/etc/rspamd/lss-senders.map
 MS_DKIM_DIR=/var/lib/rspamd/dkim
 MS_RSPAMD_USER=_rspamd
 MS_DNS_FILE=/etc/lss/mailserver-dns.txt
@@ -440,8 +444,14 @@ reject = $(opt_int spam_reject);
 add_header = $(opt_int spam_header);
 greylist = null;
 EOF
-	# Mail from logged-in users and from this server is signed with the key of its domain (or of the domain above a
-	# host name: root@mail.example.com signs as example.com).
+	# Mail from logged-in users and from this server is signed with the key of the domain in its From header (or of the
+	# domain above a host name: root@mail.example.com signs as example.com), and only when Rspamd has a key for that
+	# domain. A logged-in user gets a signature only for the domain of the login (allow_username_mismatch = false), and
+	# the header-From check (_ms_sender_filter) has already refused every From address the login does not own; an
+	# alias of another domain is delivered, but unsigned. sign_local covers mail that leaves this server itself
+	# (sendmail, cron, the guard, local SMTP without a login): whoever runs programs here can read and send as the
+	# server anyway, so it is trusted like the server; a From of a domain this server does not host gets no key and
+	# no signature.
 	file_write 0644 root:root "${MS_RSPAMD}/dkim_signing.conf" <<EOF
 # Managed by lss (module mailserver).
 enabled = true;
@@ -449,7 +459,7 @@ sign_authenticated = true;
 sign_local = true;
 use_domain = "header";
 use_esld = true;
-allow_username_mismatch = true;
+allow_username_mismatch = false;
 selector = "$(opt dkim_selector)";
 path = "${MS_DKIM_DIR}/\$domain.\$selector.key";
 EOF
@@ -466,6 +476,7 @@ EOF
 type = "syslog";
 level = "notice";
 EOF
+	_ms_sender_filter
 	rspamadm configtest >/dev/null 2>&1 || {
 		rspamadm configtest >&2 || true
 		die "mailserver: Rspamd rejects its configuration."
@@ -478,12 +489,91 @@ EOF
 	return
 }
 
+# _ms_sender_filter: Postfix ties only the envelope sender to the login (reject_sender_login_mismatch); this Rspamd
+# prefilter does the same for the From header, which recipients see and DKIM signs. A logged-in sender passes only with
+# exactly one From address that the login owns (its own address or an alias leading to it, from the sender map).
+_ms_sender_filter() {
+	install -d -m 0755 "${MS_RSPAMD_LUA%/*}"
+	_ms_senders | file_write 0640 "root:${MS_RSPAMD_USER}" "${MS_RSPAMD_SENDERS}"
+	file_write 0644 root:root "${MS_RSPAMD_LUA}" <<EOF
+-- ${MS_HEADER#\# } The From header of logged-in senders must name an address of their login.
+local rspamd_logger = require "rspamd_logger"
+
+local map_path = "${MS_RSPAMD_SENDERS}"
+local reply = "From header address belongs to another login"
+local senders = {}
+local loaded = false
+
+local file = io.open(map_path, "r")
+if file then
+  for line in file:lines() do
+    local address, logins = line:match("^([^#%s]%S*)%s+(%S+)%s*$")
+    if address then
+      local owners = {}
+      for login in logins:gmatch("[^,]+") do
+        owners[login:lower()] = true
+      end
+      senders[address:lower()] = owners
+    end
+  end
+  file:close()
+  loaded = true
+else
+  rspamd_logger.errx(rspamd_config, "lss: %s is missing; mail of logged-in senders is rejected", map_path)
+end
+
+rspamd_config:register_symbol({
+  name = "LSS_FROM_LOGIN_MISMATCH",
+  type = "prefilter",
+  callback = function(task)
+    local user = task:get_user()
+    if not user then
+      return false
+    end
+    local login = user:lower()
+    local headers = task:get_header_full("From") or {}
+    local from = task:get_from("mime") or {}
+    local address = (#headers == 1 and #from == 1 and from[1].addr or ""):lower()
+    local owners = loaded and senders[address]
+    if owners and owners[login] then
+      return false
+    end
+    rspamd_logger.infox(task, "lss: login %s may not send as From <%s>", login, address)
+    task:set_pre_result("reject", reply, "lss")
+    return true
+  end,
+})
+EOF
+	return
+}
+
 # --- Postfix ---------------------------------------------------------------------------------------------------------
 
 # _ms_tables: the mailboxes, the aliases, which login may send as which address, and the local aliases of root.
-_ms_tables() {
-	local address source target verify
+# _ms_senders: the sender map, ADDRESS LOGIN[,LOGIN...] per line. A login sends as its own address and as the aliases
+# that lead to it. Postfix checks the envelope sender with it, Rspamd the address in the From header.
+_ms_senders() {
+	local address source target
 	local -a owners=()
+	printf '%s\n' "${MS_HEADER}"
+	for address in "${MS_ADDRESSES[@]}"; do
+		printf '%s %s\n' "${address}" "${address}"
+	done
+	for source in $(printf '%s\n' "${!MS_ALIAS[@]}" | sort); do
+		owners=()
+		for target in ${MS_ALIAS[${source}]//,/ }; do
+			[[ " ${MS_ADDRESSES[*]} " != *" ${target} "* ]] || owners+=("${target}")
+		done
+		((${#owners[@]} == 0)) || printf '%s %s\n' "${source}" "$(
+			IFS=,
+			printf '%s' "${owners[*]}"
+		)"
+	done
+	return
+}
+
+_ms_tables() {
+	local address source verify
 	verify="${MAIL_VERIFY_LOCALPART}@${MS_DOMAINS[0]}"
 	{
 		printf '%s\n' "${MS_HEADER}"
@@ -497,23 +587,7 @@ _ms_tables() {
 			printf '%s %s\n' "${source}" "${MS_ALIAS[${source}]}"
 		done
 	} | file_write 0644 root:root "${MS_VIRTUAL}"
-	# A login sends as its own address and as the aliases that lead to it.
-	{
-		printf '%s\n' "${MS_HEADER}"
-		for address in "${MS_ADDRESSES[@]}"; do
-			printf '%s %s\n' "${address}" "${address}"
-		done
-		for source in $(printf '%s\n' "${!MS_ALIAS[@]}" | sort); do
-			owners=()
-			for target in ${MS_ALIAS[${source}]//,/ }; do
-				[[ " ${MS_ADDRESSES[*]} " != *" ${target} "* ]] || owners+=("${target}")
-			done
-			((${#owners[@]} == 0)) || printf '%s %s\n' "${source}" "$(
-				IFS=,
-				printf '%s' "${owners[*]}"
-			)"
-		done
-	} | file_write 0644 root:root "${MS_SENDERS}"
+	_ms_senders | file_write 0644 root:root "${MS_SENDERS}"
 	# Nobody outside reaches the verify mailbox; lss verify delivers to it with sendmail.
 	printf '# Managed by lss (module mailserver).\n%s REJECT\n' "${verify}" |
 		file_write 0644 root:root "${MS_RECIPIENT_ACCESS}"
@@ -743,6 +817,13 @@ mod_configure() {
 
 # --- Verify ----------------------------------------------------------------------------------------------------------
 
+# _ms_from_test LOGIN FROM: Rspamd's verdict on a message of LOGIN with FROM in its From header.
+_ms_from_test() {
+	printf 'From: %s\nTo: %s\nSubject: lss sender test\nMessage-ID: <lss-from@%s>\n\nlss verify\n' \
+		"$2" "$1" "${MS_DOMAINS[0]}" | rspamc -h "${MS_SCANNER}" --user "$1" symbols 2>/dev/null || true
+	return
+}
+
 # _ms_gtube: the GTUBE test message, which every spam filter rejects.
 _ms_gtube() {
 	printf 'From: lss@%s\nTo: %s@%s\nSubject: lss spam filter test\nMessage-ID: <lss-gtube@%s>\n\n' \
@@ -798,6 +879,16 @@ mod_verify() {
 		sleep 2
 	done
 	[[ ${result} == *'Action: reject'* && ${result} == *GTUBE* ]] || die "mailserver: Rspamd does not reject the GTUBE test message."
+	# A logged-in sender may not put an address of somebody else into From (here the verify mailbox, which no login
+	# owns), but passes with its own.
+	if ((${#MS_ADDRESSES[@]} > 0)); then
+		result=$(_ms_from_test "${MS_ADDRESSES[0]}" "${MAIL_VERIFY_LOCALPART}@${MS_DOMAINS[0]}")
+		[[ ${result} == *'Action: reject'* ]] ||
+			die "mailserver: Rspamd lets ${MS_ADDRESSES[0]} send with the From address of another login."
+		result=$(_ms_from_test "${MS_ADDRESSES[0]}" "${MS_ADDRESSES[0]}")
+		[[ ${result} == *'Action:'* && ${result} != *'Action: reject'* ]] ||
+			die "mailserver: Rspamd rejects ${MS_ADDRESSES[0]} with its own From address."
+	fi
 	# The DNS records name the DKIM key Rspamd signs with (its TXT strings joined, as resolvers do).
 	for domain in "${MS_DOMAINS[@]}"; do
 		key="${MS_DKIM_DIR}/${domain}.$(opt dkim_selector).key"
@@ -839,7 +930,7 @@ mod_remove() {
 	for file in "${MS_MAILBOXES}" "${MS_VIRTUAL}" "${MS_SENDERS}" "${MS_ALIASES}" "${MS_RECIPIENT_ACCESS}" "${MS_USERS}" \
 		"${MS_DOVECOT_CONF}" "${MS_DNS_FILE}" "${MS_RSPAMD}/worker-normal.inc" "${MS_RSPAMD}/worker-proxy.inc" \
 		"${MS_RSPAMD}/worker-controller.inc" "${MS_RSPAMD}/actions.conf" "${MS_RSPAMD}/dkim_signing.conf" \
-		"${MS_RSPAMD}/milter_headers.conf" "${MS_RSPAMD}/logging.inc"; do
+		"${MS_RSPAMD}/milter_headers.conf" "${MS_RSPAMD}/logging.inc" "${MS_RSPAMD_LUA}" "${MS_RSPAMD_SENDERS}"; do
 		file_remove "${file}"
 	done
 	files_forget_path "${MAIL_POSTFIX_MAIN}"
