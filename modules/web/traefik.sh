@@ -714,20 +714,24 @@ _traefik_verify_admin() {
 	return
 }
 
+# _traefik_proxy_status CURL-ARGS...: the HTTP status the socket proxy gives Traefik's user for a request.
+_traefik_proxy_status() {
+	runuser -u "${TRAEFIK_USER}" -- curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
+		--unix-socket "${TRAEFIK_PROXY_SOCKET}" "$@" || true
+	return
+}
+
 # The socket proxy answers Traefik's read-only calls and refuses the rest.
 _traefik_verify_docker() {
 	local status
 	opt_bool docker || return 0
 	ctr_running "${TRAEFIK_PROXY_NAME}" || die "traefik: the socket proxy ${TRAEFIK_PROXY_NAME} is not running."
 	[[ -S ${TRAEFIK_PROXY_SOCKET} ]] || die "traefik: the socket proxy has no socket at ${TRAEFIK_PROXY_SOCKET}."
-	status=$(runuser -u "${TRAEFIK_USER}" -- curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
-		--unix-socket "${TRAEFIK_PROXY_SOCKET}" http://localhost/containers/json || true)
+	status=$(_traefik_proxy_status http://localhost/containers/json)
 	[[ ${status} == 200 ]] || die "traefik: the socket proxy does not list the containers for Traefik (status ${status})."
-	status=$(runuser -u "${TRAEFIK_USER}" -- curl -s --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
-		--unix-socket "${TRAEFIK_PROXY_SOCKET}" http://localhost/containers/create || true)
+	status=$(_traefik_proxy_status -X POST http://localhost/containers/create)
 	[[ ${status} =~ ^40[0-9]$ ]] || die "traefik: the socket proxy lets a container be created (status ${status})."
-	status=$(runuser -u "${TRAEFIK_USER}" -- curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
-		--unix-socket "${TRAEFIK_PROXY_SOCKET}" http://localhost/images/json || true)
+	status=$(_traefik_proxy_status http://localhost/images/json)
 	[[ ${status} =~ ^40[0-9]$ ]] || die "traefik: the socket proxy answers more than container calls (status ${status})."
 	return
 }
@@ -735,11 +739,11 @@ _traefik_verify_docker() {
 # _traefik_die MESSAGE: stops verify with MESSAGE and the last lines Traefik wrote to the journal, which hold the reason
 # (a configuration it refuses, a port it cannot bind).
 _traefik_die() {
-	local line
+	local message=$1 line
 	while IFS= read -r line; do
 		log_warn "traefik: journal: ${line}"
 	done < <(journalctl -u "${TRAEFIK_UNIT}" -n 80 --no-pager -o cat 2>/dev/null || true)
-	die "traefik: $1"
+	die "traefik: ${message}"
 	return 1
 }
 

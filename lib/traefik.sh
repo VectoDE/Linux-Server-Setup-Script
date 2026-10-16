@@ -188,14 +188,16 @@ traefik_route_conf() {
 
 # traefik_route_write NAME URL DOMAIN...
 traefik_route_write() {
-	_traefik_ready || die "traefik: the route $1 needs Traefik's configuration in ${TRAEFIK_DYNAMIC}."
-	traefik_route_conf "$@" | _traefik_write "${TRAEFIK_DYNAMIC}/route-$1.yml"
+	local name=$1
+	_traefik_ready || die "traefik: the route ${name} needs Traefik's configuration in ${TRAEFIK_DYNAMIC}."
+	traefik_route_conf "$@" | _traefik_write "${TRAEFIK_DYNAMIC}/route-${name}.yml"
 	return
 }
 
 # traefik_route_remove NAME
 traefik_route_remove() {
-	_traefik_drop "${TRAEFIK_DYNAMIC}/route-$1.yml"
+	local name=$1
+	_traefik_drop "${TRAEFIK_DYNAMIC}/route-${name}.yml"
 	return
 }
 

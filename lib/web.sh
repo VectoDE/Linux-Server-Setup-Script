@@ -717,7 +717,7 @@ _web_routes_dir() {
 
 # _web_route_parse NAME DOMAIN UPSTREAM: checks the arguments and sets WEB_ROUTE_DOMAINS (array) and WEB_ROUTE_URL.
 _web_route_parse() {
-	local name=$1 domains=$2 upstream=$3 domain
+	local name=$1 domains=$2 given=$3 upstream=$3 domain
 	_web_name_check "${name}"
 	IFS=', ' read -ra WEB_ROUTE_DOMAINS <<<"${domains}"
 	((${#WEB_ROUTE_DOMAINS[@]} > 0)) || die "web: the route ${name} has no host name."
@@ -727,7 +727,7 @@ _web_route_parse() {
 	done
 	[[ ${upstream} == http://* || ${upstream} == https://* ]] || upstream="http://${upstream}"
 	[[ ${upstream} =~ ^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]{1,5}(/[A-Za-z0-9._~/-]*)?$ ]] ||
-		die "web: the upstream '$3' of the route ${name} is not HOST:PORT or an http(s):// URL with a port."
+		die "web: the upstream '${given}' of the route ${name} is not HOST:PORT or an http(s):// URL with a port."
 	WEB_ROUTE_URL=${upstream}
 	return
 }
