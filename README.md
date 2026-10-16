@@ -68,7 +68,7 @@ up). Peak RAM covers install and `lss verify`; "while running" is what stays res
 | `lynis`            | 25 s               | 80 MiB                    | 5 MiB   | weekly audit                                        |
 | `usbguard`         | 10 s               | 90 MiB                    | 10 MiB  | usbguard-daemon                                      |
 | `guard`            | 5 s                | 90 MiB                    | –       | daily check                                         |
-| `traefik`          | not measured yet   | not measured yet          | not measured yet | Traefik with Coraza                        |
+| `traefik`          | 35 s               | 300 MiB; 1.8 GiB with Coraza (arm64) | 330 MiB | Traefik, 100 MiB; 1.75 GiB with Coraza |
 | `docker`           | not measured yet   | not measured yet          | not measured yet | dockerd and containerd                     |
 | `podman`           | not measured yet   | not measured yet          | not measured yet | – (no daemon)                              |
 | `portainer`        | not measured yet   | not measured yet          | not measured yet | Portainer container, up to 512 MiB         |

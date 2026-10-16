@@ -360,6 +360,19 @@ use_module() {
 	[[ ${output} == *$'        serversTransport: lss-backend\n        servers:\n          - url: https://127.0.0.1:8090'* ]]
 }
 
+@test "the certificate of the admin host leaves with it, certbot's lineage included" {
+	load_module
+	WEB_CERT_LIVE=${BATS_TEST_TMPDIR}/letsencrypt/live
+	mkdir -p "${WEB_TLS_DIR}/lss-admin" "${WEB_CERT_LIVE}/lss-admin"
+	_traefik_admin_cert_remove
+	[[ ! -e ${WEB_TLS_DIR}/lss-admin ]]
+	grep -qxF 'certbot delete --non-interactive --cert-name lss-admin' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	rmdir "${WEB_CERT_LIVE}/lss-admin"
+	_traefik_admin_cert_remove
+	[[ ! -s ${STUB_LOG} ]]
+}
+
 @test "the routes of the setting are recorded, and a route that left the setting is removed" {
 	load_module
 	# shellcheck disable=SC2329 # called by the functions under test

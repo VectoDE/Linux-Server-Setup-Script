@@ -430,6 +430,7 @@ _traefik_admin() {
 	if [[ -z ${host} ]]; then
 		file_remove "${TRAEFIK_DYNAMIC}/admin.yml"
 		file_remove "${TRAEFIK_HTPASSWD}"
+		_traefik_admin_cert_remove
 		return 0
 	fi
 	_traefik_htpasswd
@@ -437,6 +438,18 @@ _traefik_admin() {
 	_traefik_admin_conf | file_write 0640 "root:${TRAEFIK_USER}" "${TRAEFIK_DYNAMIC}/admin.yml"
 	if state_installed tls; then
 		web_cert_issue lss-admin "${host}"
+	fi
+	return
+}
+
+# _traefik_admin_cert_remove: the certificate of the admin host goes with it, also certbot's lineage, which the tls
+# module would otherwise renew and miss in the web server's directory.
+_traefik_admin_cert_remove() {
+	file_remove "${WEB_TLS_DIR}/lss-admin"
+	if [[ -d ${WEB_CERT_LIVE}/lss-admin ]] && command -v certbot >/dev/null 2>&1; then
+		log_command certbot delete --non-interactive --cert-name lss-admin ||
+			die "traefik: certbot could not delete the certificate lss-admin."
+		files_note_change "certificate lss-admin deleted"
 	fi
 	return
 }
@@ -817,7 +830,7 @@ mod_remove() {
 	file_remove "${TRAEFIK_DIR}"
 	file_remove "${TRAEFIK_HOME}"
 	file_remove "${TRAEFIK_BIN}"
-	file_remove "${WEB_TLS_DIR}/lss-admin"
+	_traefik_admin_cert_remove
 	if [[ -d ${TRAEFIK_CACHE} ]]; then
 		rm -rf -- "${TRAEFIK_CACHE}"
 		files_note_change "removed ${TRAEFIK_CACHE}"
