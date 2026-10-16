@@ -120,7 +120,7 @@ _traefik_wait() {
 	local port
 	port=$(opt_int dashboard_port)
 	for _ in {1..30}; do
-		curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${port}/ping" && return 0
+		curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${port}/ping" 2>/dev/null && return 0
 		sleep 1
 	done
 	_traefik_die "the ping on 127.0.0.1:${port} does not answer."

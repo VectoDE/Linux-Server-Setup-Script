@@ -74,6 +74,10 @@ _apache_listen_conf() {
 	printf 'LogFormat "%%a %%l %%u %%t \\"%%r\\" %%>s %%b \\"%%{Referer}i\\" \\"%%{User-Agent}i\\"" lss_combined\n'
 	if web_backend; then
 		printf 'RemoteIPHeader X-Forwarded-For\nRemoteIPInternalProxy 127.0.0.1 ::1\n'
+		# Traefik connects to 127.0.0.1 without SNI, so the handshake runs in the default site and Host picks the site
+		# afterwards. Apache 2.4.65 and later refuse that switch (421) when the TLS settings of the two sites differ in
+		# anything (certificate, stapling); "authonly" compares only client authentication, which lss never uses.
+		printf '<IfDirective SSLVHostSNIPolicy>\n\tSSLVHostSNIPolicy authonly\n</IfDirective>\n'
 	fi
 	return
 }
