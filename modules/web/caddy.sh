@@ -78,11 +78,12 @@ $(_caddy_headers)
 	}
 }
 
-# Dot files and directories (.git, .env, .htpasswd) are never served; ACME challenges below .well-known are.
+# Dot files and directories (.git, .env, .htpasswd) are never served; .well-known paths (ACME challenges, OpenID and
+# similar discovery documents of proxied apps) are, as with nginx and Apache.
 (lss_hidden) {
 	@lss_hidden {
 		path */.*
-		not path /.well-known/*
+		not path */.well-known/*
 	}
 	respond @lss_hidden 404
 }

@@ -213,6 +213,8 @@ mod_remove() {
 	svc_disable "$(mail_postfix_unit)"
 	svc_disable postfix
 	svc_dropin_remove "${unit}" lss-sandbox
+	svc_selinux_spawner_remove postfix
+	svc_selinux_spawner_remove postfix_start
 	file_remove "${RELAY_ALIASES}"
 	file_remove "${RELAY_SASL}"
 	file_remove "${RELAY_GENERIC}"

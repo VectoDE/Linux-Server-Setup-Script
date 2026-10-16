@@ -106,3 +106,14 @@ alertmanager-0.34.1 x86_64 265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464
 alertmanager-0.34.1 aarch64 d98d6cbaf52151c7e76e24355fec88b11cebcb9875d4cdd8b76ddce7a7e5535c https://github.com/prometheus/alertmanager/releases/download/v0.34.1/alertmanager-0.34.1.linux-arm64.tar.gz
 node_exporter-1.12.1 x86_64 b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63 https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-amd64.tar.gz
 node_exporter-1.12.1 aarch64 ad35b605f9954b9f1ffddf5ba054bdc5a98d790b9eae5291e1eeb83f1ecbd0e7 https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-arm64.tar.gz
+
+# Self-Updater 4.2.1 (VectoDE, npm package of the release): SHA-256 digest of the release asset on GitHub (gh api
+# repos/VectoDE/Self-Updater/releases/tags/v4.2.1, checked 2026-10-15; the download matched it).
+self-updater-4.2.1 any 2a864c6fcdc6325b7ef87916ee277202ff675937223fdd6d585b7d4fa313e74f https://github.com/VectoDE/Self-Updater/releases/download/v4.2.1/vectode-self-updater-4.2.1.tgz
+# PGSTY Silo RELEASE.2026-09-16T00-00-00Z (the maintained fork of the MinIO server; module minio, native mode): the
+# packages of the GitHub release, SHA-256 digests of the release assets (gh api repos/pgsty/silo/releases, checked
+# 2026-10-15).
+silo-deb x86_64 176aad3944d9e9f949baf47bcea86e62a3271094be075c6547c056f652ae7e5f https://github.com/pgsty/silo/releases/download/RELEASE.2026-09-16T00-00-00Z/silo_20260916000000.0.0-1PGSTY_amd64.deb
+silo-deb aarch64 32f7fab06f38a90920bf7295017b031da0eb03fcb1e54fd948f109fd30e3a711 https://github.com/pgsty/silo/releases/download/RELEASE.2026-09-16T00-00-00Z/silo_20260916000000.0.0-1PGSTY_arm64.deb
+silo-rpm x86_64 cb4d6690d386e43dca0b9c6ae4e3abb1fad49c75f9df7d36502c5f8742ef3a77 https://github.com/pgsty/silo/releases/download/RELEASE.2026-09-16T00-00-00Z/silo-20260916000000.0.0-1PGSTY.x86_64.rpm
+silo-rpm aarch64 e7fa4c2fcf49a9d7632e91b4aceef3225c5330571cb19116e5ba59c8d2dc031c https://github.com/pgsty/silo/releases/download/RELEASE.2026-09-16T00-00-00Z/silo-20260916000000.0.0-1PGSTY.aarch64.rpm
