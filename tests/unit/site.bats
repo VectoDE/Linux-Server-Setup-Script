@@ -61,6 +61,7 @@ copy_repo() {
 
 @test "the policy allows exactly the inlined stylesheet and the page loads nothing from elsewhere" {
 	local css hash page
+	command -v openssl >/dev/null || skip "openssl is missing, which checks the hash independently"
 	css=$(<"${REPO_ROOT}/site/styles.css")
 	hash=$(printf '%s' "${css}" | openssl dgst -sha256 -binary | openssl base64 -A)
 	page=$(<"${PAGE}")

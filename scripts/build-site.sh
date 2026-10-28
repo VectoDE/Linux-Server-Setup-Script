@@ -51,9 +51,10 @@ esc() {
 # inline VAR TEXT: VAR is the escaped TEXT with `code` spans as <code>.
 inline() {
 	local -n _inline_out=$1
+	local _inline_source=$2
 	# shellcheck disable=SC2016 # literal backticks, nothing to expand
 	local _inline_text _inline_html="" _inline_re='^([^`]*)`([^`]*)`(.*)$'
-	esc _inline_text "$2"
+	esc _inline_text "${_inline_source}"
 	while [[ ${_inline_text} =~ ${_inline_re} ]]; do
 		_inline_html+="${BASH_REMATCH[1]}<code>${BASH_REMATCH[2]}</code>"
 		_inline_text=${BASH_REMATCH[3]}
@@ -114,14 +115,14 @@ load_modules() {
 # option_default VAR MODULE OPTION: VAR is the default value of OPTION from MOD_OPTIONS.
 option_default() {
 	local -n _default_out=$1
-	local _od_name _od_default _
+	local _od_module=$2 _od_option=$3 _od_name _od_default _
 	while IFS='|' read -r _od_name _od_default _; do
-		if [[ ${_od_name} == "$3" ]]; then
+		if [[ ${_od_name} == "${_od_option}" ]]; then
 			_default_out=${_od_default}
 			return 0
 		fi
-	done <<<"${M_OPTIONS[$2]}"
-	fail "$2 has the option '$3' missing from MOD_OPTIONS."
+	done <<<"${M_OPTIONS[${_od_module}]}"
+	fail "${_od_module} has the option '${_od_option}' missing from MOD_OPTIONS."
 }
 
 # install_order VAR MODULE...: VAR is the list of the modules with their requirements first, like module_resolve
@@ -190,7 +191,8 @@ menu_prompt() {
 
 # systems_rows TYPE: the fields of every TYPE line of data/systems.conf, "|"-separated.
 systems_rows() {
-	sed -n "s/^$1|//p" "${SYSTEMS}"
+	local type=$1
+	sed -n "s/^${type}|//p" "${SYSTEMS}"
 	return
 }
 
@@ -198,7 +200,8 @@ systems_rows() {
 
 # readme_rows HEADING: the body rows of the first table under "## HEADING", cells trimmed and joined with "|".
 readme_rows() {
-	awk -v heading="## $1" '
+	local heading=$1
+	awk -v heading="## ${heading}" '
 		$0 == heading { inside = 1; next }
 		inside && /^## / { exit }
 		inside && /^\|/ { rows++; if (rows > 2) print; next }
@@ -222,6 +225,13 @@ check_readme() {
 
 # --- scenes -------------------------------------------------------------------------------------------------------
 
+# list_close TAG: the end of an ol or ul.
+list_close() {
+	local tag=$1
+	printf '</%s>\n' "${tag}"
+	return
+}
+
 # scene_open ID TITLE KIND LENGTH: starts a scene. KIND tells film.js what the progress drives (steps: lines appear,
 # roll: the stage rolls past, switch: one item at a time, still: the stage only rolls when it is taller than the
 # screen). LENGTH is the scroll length in screens, 1 to 6.
@@ -243,7 +253,8 @@ scene_open() {
 
 # scene_close CAPTION: the caption (subtitle) of the scene and the end of it.
 scene_close() {
-	printf '<p class="cap">%s</p>\n</div>\n</section>\n' "$1"
+	local caption=$1
+	printf '<p class="cap">%s</p>\n</div>\n</section>\n' "${caption}"
 	return
 }
 
@@ -274,9 +285,9 @@ EOF
 }
 
 log_line() {
-	local level text class=${3:-}
-	esc level "$1"
-	inline text "$2"
+	local source_level=$1 source_text=$2 class=${3:-} level text
+	esc level "${source_level}"
+	inline text "${source_text}"
 	printf '<li class="s%s"><span class="lv">%s</span><span>%s</span></li>\n' "${class:+ ${class}}" "${level}" "${text}"
 	return
 }
@@ -305,7 +316,7 @@ scene_run() {
 	printf '</ol>\n<p class="log-head s">When a step fails</p>\n<ol class="log" aria-label="The same run when the last module fails">\n'
 	log_line '==>' "${last}"
 	log_line ERROR "${last}: verification failed; changed files were restored. Details: /var/log/lss/<run id>.log" deny
-	printf '</ol>\n'
+	list_close ol
 	stage_close
 	scene_close "Each module checks its settings before it changes anything. When a step fails, lss puts back every
 file that module touched in the run. Later, <code>lss verify</code> shows whether it still works."
@@ -346,7 +357,8 @@ modules with <code>lss install</code> and <code>lss remove</code>."
 }
 
 group_caption() {
-	case $1 in
+	local group=$1
+	case ${group} in
 	base) printf 'The ground floor: host name, locale and updates, time over NTS, swap, the administrator account, tools and a persistent journal.' ;;
 	security) printf 'The hardening and the checks that keep it in place. One of fail2ban and CrowdSec; ssh-2fa, clamav and usbguard are opt-in.' ;;
 	web) printf 'One web server owns ports 80 and 443, HTTPS only, with certificates from Let&#39;s Encrypt and sites from a single setting.' ;;
@@ -358,7 +370,7 @@ group_caption() {
 	network) printf 'A WireGuard VPN for the admin interfaces, a validating DNS resolver and a time server.' ;;
 	mail) printf 'The server sends its own mail through a relay, or runs a mail server for your domains with webmail.' ;;
 	apps) printf 'Self-hosted apps as Docker Compose stacks behind the web server, each on its own host name.' ;;
-	*) printf 'The modules in modules/%s.' "$1" ;;
+	*) printf 'The modules in modules/%s.' "${group}" ;;
 	esac
 	return
 }
@@ -399,14 +411,15 @@ scene_group() {
 		fi
 		printf '</li>\n'
 	done
-	printf '</ul>\n'
+	list_close ul
 	stage_close
 	scene_close "$(group_caption "${group}")"
 	return
 }
 
 rule_row() {
-	printf '<tr class="s%s"><td>%s</td><td>%s</td><td>%s</td></tr>\n' "${4:+ $4}" "$1" "$2" "$3"
+	local first=$1 second=$2 third=$3 class=${4:-}
+	printf '<tr class="s%s"><td>%s</td><td>%s</td><td>%s</td></tr>\n' "${class:+ ${class}}" "${first}" "${second}" "${third}"
 	return
 }
 
@@ -457,7 +470,7 @@ scene_guard() {
 	log_line report "71 failed SSH logins in 24 hours (more than ${threshold}), most from 203.0.113.0/24" deny
 	log_line report "last backup 6 hours ago (limit ${max_age} hours), restore test passed"
 	log_line sent 'webhook https://ntfy.sh/your-topic'
-	printf '</ol>\n'
+	list_close ol
 	stage_close
 	scene_close "The <code>guard</code> module checks the server every day, repairs modules that drifted, and sends what
 it found to a webhook or by e-mail. Failed services, full disks, vulnerable packages and container images are in the
@@ -476,7 +489,7 @@ scene_install() {
 	log_line OK 'SHA-256 of the release archive matches SHA256SUMS' ok
 	log_line OK 'attestation: built by release.yml from refs/heads/main on a GitHub-hosted runner' ok
 	log_line OK 'installed to /opt/lss/<version>; /opt/lss/current points to it' ok
-	printf '</ol>\n'
+	list_close ol
 	stage_close
 	scene_close "<code>bootstrap.sh</code> runs nothing it downloaded until the checksum matches and the Sigstore build
 attestation proves the release workflow of this repository built it. <code>lss update</code> takes the same path, and
@@ -552,7 +565,8 @@ system; the README has them for every module."
 }
 
 help_link() {
-	printf '<li><a href="%s/%s">%s</a> %s</li>\n' "${REPO_URL}" "$1" "$2" "$3"
+	local path=$1 name=$2 what=$3
+	printf '<li><a href="%s/%s">%s</a> %s</li>\n' "${REPO_URL}" "${path}" "${name}" "${what}"
 	return
 }
 
@@ -574,13 +588,25 @@ EOF
 	help_link "discussions" "Discussions" "questions and ideas"
 	help_link "issues/new/choose" "Report a bug" "with the bug template"
 	help_link "security/policy" "Security policy" "report vulnerabilities privately"
-	printf '</ul>\n'
+	list_close ul
 	stage_close
 	scene_close "lss is free software under the MIT license, maintained in spare time."
 	return
 }
 
 # --- page ---------------------------------------------------------------------------------------------------------
+
+# sha256_base64: the SHA-256 of stdin, base64 encoded as a CSP hash wants it. Coreutils only: the coverage run of the
+# unit tests uses an image without openssl.
+sha256_base64() {
+	local hex _name bytes='' index
+	read -r hex _name < <(sha256sum)
+	for ((index = 0; index < ${#hex}; index += 2)); do
+		bytes+="\x${hex:index:2}"
+	done
+	printf '%b' "${bytes}" | base64 -w 0
+	return
+}
 
 chapters() {
 	local index html
@@ -589,7 +615,7 @@ chapters() {
 		esc html "${SCENE_TITLES[${index}]}"
 		printf '<li><a href="#%s">%s</a></li>\n' "${SCENE_IDS[${index}]}" "${html}"
 	done
-	printf '</ol>\n'
+	list_close ol
 	return
 }
 
@@ -624,7 +650,7 @@ build() {
 
 	# The stylesheet goes into the page byte for byte, and the policy allows exactly that content.
 	css=$(<"${SITE_SRC}/styles.css")
-	hash=$(printf '%s' "${css}" | openssl dgst -sha256 -binary | openssl base64 -A)
+	hash=$(printf '%s' "${css}" | sha256_base64)
 	mkdir -p "${out}"
 	{
 		cat <<EOF
