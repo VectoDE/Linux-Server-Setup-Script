@@ -42,6 +42,30 @@ calls() {
 	[ "${output}" = 'Setting up nginx (1.24.0)' ]
 }
 
+@test "apt is tried again when a download fails or an index cannot be fetched, and gives up after three attempts" {
+	use_os ubuntu-22.04
+	PKG_APT_DELAY=0
+	export STUB_OUT_apt_get='E: Failed to fetch https://ppa.launchpadcontent.net/x.deb  503  Service Unavailable'
+	export STUB_EXIT_apt_get=100
+	run _pkg_apt_retry install dotnet-sdk-10.0
+	[ "${status}" -eq 100 ]
+	[ "$(grep -c '^apt-get .* install dotnet-sdk-10.0' "${STUB_LOG}")" -eq 3 ]
+	[[ ${output} == *'failed (attempt 2 of 3)'* ]]
+	: >"${STUB_LOG}"
+	# An index that stays out of reach is only a warning of apt-get update, after the last attempt as well.
+	export STUB_OUT_apt_get='W: Failed to fetch https://ppa.launchpadcontent.net/dists/jammy/InRelease  503'
+	export STUB_EXIT_apt_get=0
+	run _pkg_apt_retry update
+	[ "${status}" -eq 0 ]
+	[ "$(grep -c '^apt-get .* update' "${STUB_LOG}")" -eq 3 ]
+	: >"${STUB_LOG}"
+	export STUB_OUT_apt_get='Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease'
+	run _pkg_apt_retry update
+	[ "${status}" -eq 0 ]
+	[ "$(grep -c '^apt-get .* update' "${STUB_LOG}")" -eq 1 ]
+	[ "${output}" = 'Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease' ]
+}
+
 @test "dnf is used on the RHEL family and family lists pick the right names" {
 	use_os rocky-9
 	export STUB_EXIT_rpm=1
