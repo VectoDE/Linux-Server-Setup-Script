@@ -121,12 +121,14 @@ mod_configure() {
 	fi
 	file_write 0755 root:root "${BACKUP_SCRIPT}" <"${LSS_ROOT}/libexec/lss-backup"
 	_restic_conf | file_write 0600 root:root "${BACKUP_CONF}"
-	# Reads everything, writes only its state, its cache, the dumps, the metrics and a local repository.
+	# Reads everything, writes only its state, its cache, the dumps (of the databases and of the app stacks, which it
+	# reaches through the Docker socket), the metrics and a local repository.
 	svc_unit "${BACKUP_UNIT}.service" < <(
 		printf '# Managed by lss (module restic).\n[Unit]\nDescription=lss backup with restic\n'
 		printf 'After=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\n'
 		printf 'ExecStart=%s run\nNice=10\nIOSchedulingClass=idle\n' "${BACKUP_SCRIPT}"
-		svc_scanner_sandbox strict "${BACKUP_STATE}" "${BACKUP_CACHE}" /var/backups/lss-db "${MON_TEXTFILE_DIR}" \
+		svc_scanner_sandbox strict "${BACKUP_STATE}" "${BACKUP_CACHE}" /var/backups/lss-db /var/backups/lss-apps \
+			/var/lib/lss/app-backup "${MON_TEXTFILE_DIR}" \
 			${writable:+"${writable}"}
 	)
 	svc_unit "${BACKUP_UNIT}.timer" <<EOF

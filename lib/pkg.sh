@@ -19,6 +19,28 @@ _pkg_apt() {
 	return "${PIPESTATUS[0]}"
 }
 
+# Third-party archives (Launchpad PPAs, vendor repositories) answer 503 for minutes at a time. apt-get update only
+# warns when an index cannot be fetched (W: Failed to fetch), so a package of that source looks missing; apt-get
+# install fails on the first archive it cannot download. Both are tried again; apt changes nothing when a download
+# fails. A warning that stays after the last attempt is left to the caller, as apt-get itself does.
+PKG_APT_DELAY=30
+_pkg_apt_retry() {
+	local attempt output status
+	for attempt in 1 2 3; do
+		status=0
+		output=$(_pkg_apt "$@") || status=$?
+		[[ -z ${output} ]] || printf '%s\n' "${output}"
+		if ((status == 0 && attempt < 3)) && grep -qE '^[WE]: Failed to fetch' <<<"${output}"; then
+			status=1
+		fi
+		((status != 0)) || return 0
+		((attempt < 3)) || break
+		printf 'apt-get %s failed (attempt %s of 3); trying again in %s seconds.\n' "$1" "${attempt}" "${PKG_APT_DELAY}"
+		sleep "${PKG_APT_DELAY}"
+	done
+	return "${status}"
+}
+
 # Mirrors of the RHEL family drop out for minutes at a time; dnf gives up on the first broken mirror list, so a
 # failed transaction is tried again with fresh metadata. dnf changes nothing when a transaction fails.
 _pkg_dnf() {
@@ -35,7 +57,7 @@ _pkg_dnf() {
 
 pkg_update() {
 	if os_is_debian; then
-		log_command _pkg_apt update
+		log_command _pkg_apt_retry update
 	else
 		log_command _pkg_dnf makecache
 	fi
@@ -79,7 +101,7 @@ pkg_install() {
 	log_info "Installing ${missing[*]}"
 	if os_is_debian; then
 		pkg_update_once
-		log_command _pkg_apt install --no-install-recommends "${missing[@]}"
+		log_command _pkg_apt_retry install --no-install-recommends "${missing[@]}"
 	else
 		log_command _pkg_dnf install "${missing[@]}"
 	fi
@@ -131,7 +153,7 @@ pkg_remove_family() {
 pkg_upgrade() {
 	if os_is_debian; then
 		pkg_update
-		log_command _pkg_apt full-upgrade
+		log_command _pkg_apt_retry full-upgrade
 	else
 		log_command _pkg_dnf upgrade --refresh
 	fi

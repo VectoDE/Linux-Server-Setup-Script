@@ -14,6 +14,7 @@ setup() {
 	shopt -s lastpipe
 	export TMPDIR=${BATS_TEST_TMPDIR}
 	WEB_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	WEB_WAF_DIR=${BATS_TEST_TMPDIR}/waf
 	mkdir -p "${WEB_TLS_DIR}/default"
 	WEB_ACME_ROOT=${BATS_TEST_TMPDIR}/www/acme
 	WEB_DEFAULT_ROOT=${BATS_TEST_TMPDIR}/www/default
@@ -241,6 +242,37 @@ EOF
 	[ "$(files_changes_of core)" = 1 ]
 }
 
+@test "a route's placeholder is self-signed for its names, follows them and leaves a tls certificate alone" {
+	as_test_user
+	fake_openssl
+	web_cert_placeholder office office.example.com docs.example.com
+	grep -q '^openssl req -x509 .*-subj /CN=office.example.com -addext subjectAltName=DNS:office.example.com,DNS:docs.example.com ' "${STUB_LOG}"
+	grep -q "^install -m 0640 -o root -g ${WEB_GROUP} .*/privkey.pem ${WEB_TLS_DIR}/office/privkey.pem$" "${STUB_LOG}"
+	[ -s "${WEB_TLS_DIR}/office/fullchain.pem" ]
+	[ "$(files_changes_of core)" = 1 ]
+	# The same names: kept.
+	: >"${STUB_LOG}"
+	export STUB_SAN='DNS:office.example.com, DNS:docs.example.com'
+	web_cert_placeholder office office.example.com docs.example.com
+	run ! grep -q '^openssl req' "${STUB_LOG}"
+	[ "$(files_changes_of core)" = 1 ]
+	# Other names: a new one.
+	web_cert_placeholder office office.example.com
+	grep -q '^openssl req .*subjectAltName=DNS:office.example.com ' "${STUB_LOG}"
+	[ "$(files_changes_of core)" = 2 ]
+	# A certificate of the tls module stays.
+	: >"${STUB_LOG}"
+	mkdir -p "${WEB_CERT_LIVE}/office"
+	printf 'issued\n' >"${WEB_CERT_LIVE}/office/fullchain.pem"
+	web_cert_placeholder office other.example.com
+	run ! grep -q '^openssl req' "${STUB_LOG}"
+	# openssl failing stops with an error.
+	export STUB_EXIT_openssl_req=1
+	run web_cert_placeholder shop shop.example.com
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"could not create a self-signed certificate for shop.example.com"* ]]
+}
+
 @test "the default certificate is self-signed for the host name with a key for the web group" {
 	as_test_user
 	fake_openssl
@@ -282,7 +314,7 @@ EOF
 	export STUB_EXIT_openssl_req=1
 	run web_default_cert
 	[ "${status}" -eq 1 ]
-	[[ ${output} == *'web: could not create the self-signed default certificate.'* ]]
+	[[ ${output} == *'web: could not create a self-signed certificate for web.example.com.'* ]]
 }
 
 @test "the names of a certificate are read from its subjectAltName" {
@@ -1036,4 +1068,48 @@ EOF
 	run _modsecurity_nginx_headers "${tree}"
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"nginx-dev 1.28.3-2ubuntu1.11 has no nginx sources in ${MODSEC_NGINX_DEV_SRC}."* ]]
+}
+
+@test "ModSecurity 3 lets well-formed multipart bodies through, ModSecurity 2 keeps the strict test" {
+	use_os debian-13
+	# shellcheck source=modules/web/modsecurity.sh
+	source "${REPO_ROOT}/modules/web/modsecurity.sh"
+	LSS_MODULE=modsecurity
+	# shellcheck disable=SC2329 # called by the function under test
+	_modsecurity_json() { return 1; }
+	run _modsecurity_engine_conf nginx
+	[ "${status}" -eq 0 ]
+	grep -qF "SecRule MULTIPART_UNMATCHED_BOUNDARY \"@eq 1\" \"id:'200004'," <<<"${output}"
+	grep -qxF 'SecPcreMatchLimit 1000' <<<"${output}"
+	run _modsecurity_engine_conf apache
+	[ "${status}" -eq 0 ]
+	grep -qF "SecRule MULTIPART_UNMATCHED_BOUNDARY \"!@eq 0\" \"id:'200004'," <<<"${output}"
+}
+
+@test "ModSecurity exclusions of a route become host rules and reach the configuration once ModSecurity is there" {
+	as_test_user
+	web_waf_exclude stats 953110 stats.example.com www.stats.example.com
+	grep -qxF 'RULES=953110' "${WEB_WAF_DIR}/stats.conf"
+	grep -qxF 'DOMAINS=stats.example.com www.stats.example.com' "${WEB_WAF_DIR}/stats.conf"
+	run web_waf_rules
+	[ "${status}" -eq 0 ]
+	[ "${lines[1]}" = 'SecRule REQUEST_HEADERS:Host "@rx ^(?:stats\.example\.com|www\.stats\.example\.com)(?::[0-9]+)?$" "id:9500001,phase:1,pass,nolog,t:none,t:lowercase,ctl:ruleRemoveById=953110"' ]
+	run web_waf_exclude stats '953110;evil' stats.example.com
+	[ "${status}" -eq 1 ]
+	run web_waf_exclude stats 953110 'stats.example.com"'
+	[ "${status}" -eq 1 ]
+	# With ModSecurity the rules land next to its configuration and the web server reloads.
+	state_set nginx status installed
+	state_set modsecurity status installed
+	local conf=${BATS_TEST_TMPDIR}/conf/nginx
+	# shellcheck disable=SC2329 # called by web_waf_apply
+	web_reload() { printf 'reload\n' >>"${STUB_LOG}"; }
+	mkdir -p "${conf}/modsecurity"
+	web_waf_apply
+	grep -qF 'ctl:ruleRemoveById=953110' "${conf}/modsecurity/sites.conf"
+	grep -qxF reload "${STUB_LOG}"
+	web_waf_exclude_remove stats
+	[ ! -e "${WEB_WAF_DIR}" ]
+	run grep -c SecRule "${conf}/modsecurity/sites.conf"
+	[ "${output}" = 0 ]
 }

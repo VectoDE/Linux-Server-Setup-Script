@@ -94,16 +94,18 @@ _files_record_checksum() {
 	return
 }
 
-# file_write MODE OWNER:GROUP DEST, content on stdin. Sets LSS_FILE_CHANGED to 1 or 0.
+# file_write MODE OWNER:GROUP DEST, content on stdin. Sets LSS_FILE_CHANGED to 1 or 0. OWNER:GROUP are names, or
+# numbers (UID:GID) for IDs without an account, such as the users of a container in a user namespace.
 file_write() {
-	local mode=$1 owner=$2 dest=$3 tmp current_mode current_owner
+	local mode=$1 owner=$2 dest=$3 tmp current_mode current_owner format='%U:%G'
 	LSS_FILE_CHANGED=0
+	[[ ! ${owner} =~ ^[0-9]+:[0-9]+$ ]] || format='%u:%g'
 	mkdir -p "$(dirname "${dest}")"
 	tmp=$(mktemp "${dest}.lss.XXXXXX")
 	cat >"${tmp}"
 	if [[ -f ${dest} ]] && cmp -s "${tmp}" "${dest}"; then
 		current_mode=$(stat -c '%a' "${dest}")
-		current_owner=$(stat -c '%U:%G' "${dest}")
+		current_owner=$(stat -c "${format}" "${dest}")
 		if [[ ${current_mode} == "${mode#0}" && ${current_owner} == "${owner}" ]]; then
 			rm -f -- "${tmp}"
 			_files_record_checksum "${dest}"

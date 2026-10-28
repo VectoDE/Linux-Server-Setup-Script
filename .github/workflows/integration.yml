@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        group: [base, security, scanners, web, runtime, database, database-alt, container, backup, backup-alt, monitoring, network, mail]
+        group: [base, security, scanners, web, runtime, database, database-alt, container, backup, backup-alt, monitoring, network, mail, apps]
         arch: [x64, arm64]
         include:
           - group: base
@@ -51,7 +51,8 @@ jobs:
           - group: database-alt
             modules: mysql valkey mongodb
           # Podman runs inside a test container (its storage on a volume, not on overlayfs). Docker, Portainer and
-          # k3s need a kernel of their own (bridges, iptables, cgroups) and run in the VM jobs below.
+          # k3s run in the VM jobs below with a kernel of their own; on arm64 (no KVM) the app jobs run Docker inside
+          # these containers.
           - group: container
             modules: podman
           # restic alone (local repository), then the database dumps of every engine; the conflicting engines in a job
@@ -71,6 +72,10 @@ jobs:
           # filter without public DNS.
           - group: mail
             modules: mail-relay guard,mail-relay mailserver nginx,php,mailserver,webmail
+          # The apps that run without Docker: Self-Updater deploys a Git repository (its own, by tag) and MinIO (Silo)
+          # runs from its package behind nginx. The Docker stacks of the other apps run in the apps VM jobs below.
+          - group: apps
+            modules: node,self-updater nginx,minio
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -139,12 +144,14 @@ jobs:
         # Debian 13 for every change, on every distribution in the nightly and the manual runs. Docker with Portainer,
         # then k3s (after Docker is removed; they conflict) on every supported system, in a clean VM because the runner
         # already has Docker; minimal-secure on the newest Ubuntu release; the Kubernetes node profile with a Lynis audit;
-        # Docker with the monitoring stack, as on a DevOps server.
+        # Docker with the monitoring stack and Forgejo, as on a DevOps server; mail, Nextcloud with Collabora Online and
+        # Vaultwarden, as on an office server, also on Rocky Linux 9 (the SELinux policy of the RHEL family 9 and 10).
+        # With the apps, profile all needs most of the memory and processors of the runner.
         include: >-
-          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"}',
+          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"},{"system":"debian-13","run":"profile office","memory":8192},{"system":"rocky-9","run":"profile office","memory":8192},{"system":"almalinux-10","run":"profile office","memory":8192}',
           (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-          && '{"system":"debian-12","run":"profile all"},{"system":"debian-13","run":"profile all"},{"system":"rocky-9","run":"profile all"},{"system":"almalinux-10","run":"profile all"},{"system":"ubuntu-22.04","run":"profile all"},{"system":"ubuntu-24.04","run":"profile all"},{"system":"ubuntu-26.04","run":"profile all"}'
-          || '{"system":"debian-13","run":"profile all"}')) }}
+          && '{"system":"debian-12","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"debian-13","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"rocky-9","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"almalinux-10","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-22.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-24.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-26.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"}'
+          || '{"system":"debian-13","run":"profile all","memory":12288,"cpus":4,"disk":"40G"}')) }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -169,6 +176,11 @@ jobs:
         env:
           SYSTEM: vm-${{ matrix.system }}
           RUN: ${{ matrix.run }}
+          LSS_VM_MEMORY: ${{ matrix.memory || 4096 }}
+          LSS_VM_CPUS: ${{ matrix.cpus || 2 }}
+          LSS_VM_DISK: ${{ matrix.disk || '20G' }}
+          # Every module at once (profile all) takes close to 40 minutes; the limit of one run is 70 minutes there.
+          LSS_TEST_TIMEOUT: ${{ matrix.run == 'profile all' && 4200 || 2400 }}
         run: |
           if [[ $RUN == kernel ]]; then
             tests/integration/run.sh "$SYSTEM" time swap firewall kernel-hardening mac auditd usbguard wireguard
@@ -186,3 +198,104 @@ jobs:
             esac
             tests/integration/run.sh "$SYSTEM" --profile "${RUN#profile }" "$minimum"
           fi
+
+  # The apps as Docker Compose stacks behind each web server, on every supported system (x86_64 VMs: Docker needs a
+  # kernel of its own). Docker and the web server are the base; each app is installed, used (mod_verify), installed
+  # again and removed on its own. Nextcloud alone, then with Collabora Online (Nextcloud Office).
+  apps:
+    name: ${{ matrix.system }} VM / apps ${{ matrix.set }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
+        set: [office, dev, web]
+        include:
+          - set: office
+            base: docker,nginx
+            modules: nextcloud collabora,nextcloud vaultwarden
+          - set: dev
+            base: docker,apache
+            modules: forgejo uptime-kuma n8n
+          - set: web
+            base: docker,caddy,tls
+            modules: keycloak matomo wordpress minio
+            settings: LSS_MINIO_MODE=docker
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install QEMU and allow access to KVM
+        run: |
+          sudo apt-get -qq update
+          sudo NEEDRESTART_SUSPEND=1 apt-get -qq install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils >/dev/null
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install, verify, reinstall, remove
+        env:
+          SYSTEM: vm-${{ matrix.system }}
+          BASE: ${{ matrix.base }}
+          MODULES: ${{ matrix.modules }}
+          LSS_TEST_SETTINGS: ${{ matrix.settings }}
+          LSS_VM_MEMORY: 8192
+          LSS_VM_CPUS: 4
+          LSS_VM_DISK: 40G
+        run: |
+          read -ra modules <<<"$MODULES"
+          tests/integration/run.sh "$SYSTEM" --base "$BASE" "${modules[@]}"
+
+  # The app stacks on arm64. The arm64 runners have no KVM, so Ubuntu 24.04 runs them on the runner itself (host); the
+  # runner's own Docker goes first, so the docker module sets Docker up as on a fresh server. The other systems run in
+  # the privileged systemd containers of the container jobs, with Docker inside (its storage on a volume) and the
+  # runner's kernel: its netfilter modules load on the runner, as a container cannot load them.
+  apps-arm64:
+    name: ${{ matrix.system == 'host' && 'ubuntu-24.04 arm64' || format('{0} arm64 container', matrix.system) }} / apps ${{ matrix.set }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [host, debian-12, debian-13, ubuntu-22.04, ubuntu-26.04, rocky-9, almalinux-10]
+        set: [office, dev, web]
+        include:
+          - set: office
+            base: docker,nginx
+            modules: nextcloud collabora,nextcloud vaultwarden
+          - set: dev
+            base: docker,apache
+            modules: forgejo uptime-kuma n8n
+          - set: web
+            base: docker,caddy,tls
+            modules: keycloak matomo wordpress minio
+            settings: LSS_MINIO_MODE=docker
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Remove the runner's Docker
+        if: matrix.system == 'host'
+        run: |
+          sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
+          mapfile -t packages < <(dpkg-query -W -f "\${Package}\n" 'moby-*' 'docker-*' containerd 'containerd.io' 2>/dev/null)
+          [ "${#packages[@]}" -eq 0 ] || sudo NEEDRESTART_SUSPEND=1 apt-get -qq purge -y "${packages[@]}" >/dev/null
+          sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+      - name: Load the netfilter modules of Docker
+        if: matrix.system != 'host'
+        run: sudo modprobe -a br_netfilter xt_addrtype
+      - name: Install, verify, reinstall, remove
+        env:
+          SYSTEM: ${{ matrix.system }}
+          BASE: ${{ matrix.base }}
+          MODULES: ${{ matrix.modules }}
+          LSS_TEST_SETTINGS: ${{ matrix.settings }}
+        run: |
+          read -ra modules <<<"$MODULES"
+          tests/integration/run.sh "$SYSTEM" --base "$BASE" "${modules[@]}"

@@ -42,6 +42,30 @@ calls() {
 	[ "${output}" = 'Setting up nginx (1.24.0)' ]
 }
 
+@test "apt is tried again when a download fails or an index cannot be fetched, and gives up after three attempts" {
+	use_os ubuntu-22.04
+	PKG_APT_DELAY=0
+	export STUB_OUT_apt_get='E: Failed to fetch https://ppa.launchpadcontent.net/x.deb  503  Service Unavailable'
+	export STUB_EXIT_apt_get=100
+	run _pkg_apt_retry install dotnet-sdk-10.0
+	[ "${status}" -eq 100 ]
+	[ "$(grep -c '^apt-get .* install dotnet-sdk-10.0' "${STUB_LOG}")" -eq 3 ]
+	[[ ${output} == *'failed (attempt 2 of 3)'* ]]
+	: >"${STUB_LOG}"
+	# An index that stays out of reach is only a warning of apt-get update, after the last attempt as well.
+	export STUB_OUT_apt_get='W: Failed to fetch https://ppa.launchpadcontent.net/dists/jammy/InRelease  503'
+	export STUB_EXIT_apt_get=0
+	run _pkg_apt_retry update
+	[ "${status}" -eq 0 ]
+	[ "$(grep -c '^apt-get .* update' "${STUB_LOG}")" -eq 3 ]
+	: >"${STUB_LOG}"
+	export STUB_OUT_apt_get='Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease'
+	run _pkg_apt_retry update
+	[ "${status}" -eq 0 ]
+	[ "$(grep -c '^apt-get .* update' "${STUB_LOG}")" -eq 1 ]
+	[ "${output}" = 'Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease' ]
+}
+
 @test "dnf is used on the RHEL family and family lists pick the right names" {
 	use_os rocky-9
 	export STUB_EXIT_rpm=1
@@ -274,7 +298,7 @@ time.sleep(30)' >"${port_file}" 2>/dev/null 3>&- &
 @test "without a firewall tool rules are only recorded and applied later" {
 	use_os debian-12
 	PATH=$(printf '%s' "${PATH}" | tr ':' '\n' | grep -v fixtures/bin | paste -sd:)
-	command -v ufw >/dev/null && skip "ufw is installed on this machine"
+	type -P ufw >/dev/null && skip "ufw is installed on this machine"
 	LSS_MODULE=web
 	fw_allow 443/tcp
 	[ "$(cat "${LSS_STATE_DIR}/firewall/web")" = 443/tcp ]
@@ -656,6 +680,99 @@ EOF
 	run ! grep -qxF 'NoNewPrivileges=yes' <<<"${output}"
 }
 
+@test "svc_selinux_spawner allows the domains of a master's workers with NoNewPrivileges, once, and removes them" {
+	export SVC_SELINUX_DIR=${BATS_TEST_TMPDIR}/selinux
+	local dir=${BATS_TEST_TMPDIR}/libexec modules='' program
+	mkdir -p "${dir}"
+	for program in master qmgr smtpd trivial-rewrite; do
+		printf '#!/bin/sh
+' >"${dir}/${program}"
+		chmod 0755 "${dir}/${program}"
+	done
+	install -m 0644 /dev/null "${dir}/qmgr.conf"
+	eval "_lss_file_write() $(declare -f file_write | tail -n +2)"
+	# shellcheck disable=SC2329 # called by the function under test
+	file_write() { _lss_file_write "$1" "${OWNER}" "$3"; }
+	# shellcheck disable=SC2329 # called by the function under test
+	selinuxexeccon() {
+		case ${1##*/}:$2 in
+		master:*:init_t:*) printf 'system_u:system_r:postfix_master_t:s0\n' ;;
+		qmgr:*:postfix_master_t:* | qmgr.conf:*) printf 'system_u:system_r:postfix_qmgr_t:s0\n' ;;
+		smtpd:*:postfix_master_t:*) printf 'system_u:system_r:postfix_smtpd_t:s0\n' ;;
+		unknown:*) return 1 ;;
+		*) printf '%s\n' "$2" ;;
+		esac
+	}
+	# shellcheck disable=SC2329
+	semodule() {
+		if [[ $1 == -l ]]; then
+			printf '%s\n' "${modules}"
+		else
+			printf 'semodule %s %s\n' "$1" "${2##*/}" >>"${STUB_LOG}"
+		fi
+	}
+	# Without SELinux there is nothing to allow.
+	export STUB_EXIT_selinuxenabled=1
+	svc_selinux_spawner postfix "${dir}/master" "${dir}"
+	run ! grep -q semodule "${STUB_LOG}"
+	[ ! -e "${SVC_SELINUX_DIR}" ]
+	# Only the workers that change their domain, from executable files; the master's own programs stay out.
+	export STUB_EXIT_selinuxenabled=0
+	svc_selinux_spawner postfix "${dir}/master" "${dir}" "${BATS_TEST_TMPDIR}/missing"
+	grep -qxF 'semodule -i lss_spawn_postfix.cil' "${STUB_LOG}"
+	[ "$(cat "${SVC_SELINUX_DIR}/lss_spawn_postfix.cil")" = "$(printf '%s\n' \
+		'(allow postfix_master_t postfix_qmgr_t (process2 (nnp_transition nosuid_transition)))' \
+		'(allow postfix_master_t postfix_smtpd_t (process2 (nnp_transition nosuid_transition)))')" ]
+	# Loaded and unchanged: nothing to do. Gone from the policy: loaded again.
+	: >"${STUB_LOG}"
+	modules=lss_spawn_postfix
+	svc_selinux_spawner postfix "${dir}/master" "${dir}"
+	run ! grep -q semodule "${STUB_LOG}"
+	modules=''
+	svc_selinux_spawner postfix "${dir}/master" "${dir}"
+	grep -qxF 'semodule -i lss_spawn_postfix.cil' "${STUB_LOG}"
+	: >"${STUB_LOG}"
+	modules=lss_spawn_postfix
+	svc_selinux_spawner_remove postfix
+	grep -qxF 'semodule -r lss_spawn_postfix' "${STUB_LOG}"
+	[ ! -e "${SVC_SELINUX_DIR}/lss_spawn_postfix.cil" ]
+	# A master that SELinux does not know stops the run.
+	run svc_selinux_spawner postfix "${BATS_TEST_TMPDIR}/unknown" "${dir}"
+	[ "${status}" -ne 0 ]
+	# A domain as the source and single programs: the helpers systemd runs for a unit.
+	: >"${STUB_LOG}"
+	modules=''
+	printf '#!/bin/sh\n' >"${BATS_TEST_TMPDIR}/restorecon"
+	chmod 0755 "${BATS_TEST_TMPDIR}/restorecon"
+	# shellcheck disable=SC2329
+	selinuxexeccon() {
+		if [[ ${1##*/}:$2 == restorecon:*:init_t:* ]]; then
+			printf 'system_u:system_r:setfiles_t:s0\n'
+		else
+			printf '%s\n' "$2"
+		fi
+	}
+	svc_selinux_spawner postfix_start init_t "${BATS_TEST_TMPDIR}/restorecon" "${dir}/qmgr"
+	grep -qxF 'semodule -i lss_spawn_postfix_start.cil' "${STUB_LOG}"
+	[ "$(cat "${SVC_SELINUX_DIR}/lss_spawn_postfix_start.cil")" = \
+		'(allow init_t setfiles_t (process2 (nnp_transition nosuid_transition)))' ]
+}
+
+@test "svc_exec_programs lists the programs systemd runs for a unit" {
+	# shellcheck disable=SC2329 # called by the function under test
+	systemctl() {
+		case $3 in
+		ExecStartPre) printf '%s\n' '{ path=/usr/sbin/restorecon ; argv[]=/usr/sbin/restorecon -R /var/spool/postfix/pid ; ignore_errors=yes }' \
+			'{ path=/usr/libexec/postfix/aliasesdb ; argv[]=/usr/libexec/postfix/aliasesdb ; ignore_errors=no }' ;;
+		ExecStart) printf '%s\n' '{ path=/usr/sbin/postfix ; argv[]=/usr/sbin/postfix start ; ignore_errors=no }' ;;
+		*) ;;
+		esac
+	}
+	run svc_exec_programs postfix.service
+	[ "${status}" -eq 0 ]
+	[ "${output}" = "$(printf '%s\n' /usr/sbin/restorecon /usr/libexec/postfix/aliasesdb /usr/sbin/postfix)" ]
+}
+
 @test "svc_sandbox writes the baseline and the service's own lines, without new privileges outside SELinux" {
 	# shellcheck disable=SC2329 # called by the function under test
 	svc_dropin() {
@@ -792,4 +909,40 @@ EOF
 	grep -qxF 'URIs: https://repo.example.invalid/debian/' "${BATS_TEST_TMPDIR}/writes"
 	grep -qxF 'Suites: trixie/' "${BATS_TEST_TMPDIR}/writes"
 	run ! grep -q '^Components:' "${BATS_TEST_TMPDIR}/writes"
+}
+
+@test "ufw runs again when it loses the iptables race (initcaps) and passes other failures through" {
+	local bin=${BATS_TEST_TMPDIR}/racebin
+	mkdir -p "${bin}"
+	FW_UFW_DELAY=0
+	printf '1\n' >"${BATS_TEST_TMPDIR}/fails"
+	cat >"${bin}/ufw" <<SCRIPT
+#!/usr/bin/env bash
+printf 'ufw %s\n' "\$*" >>"${STUB_LOG}"
+left=\$(cat "${BATS_TEST_TMPDIR}/fails")
+if ((left > 0)); then
+	printf '%s\n' \$((left - 1)) >"${BATS_TEST_TMPDIR}/fails"
+	printf '%s\n' "\${UFW_ERROR:-ERROR: initcaps}" >&2
+	exit 1
+fi
+echo 'Rule added'
+SCRIPT
+	chmod +x "${bin}/ufw"
+	PATH="${bin}:${PATH}"
+	run ufw allow 443/tcp
+	[ "${status}" -eq 0 ]
+	[ "${output}" = 'Rule added' ]
+	[ "$(grep -c '^ufw allow 443/tcp' "${STUB_LOG}")" -eq 2 ]
+	: >"${STUB_LOG}"
+	printf '9\n' >"${BATS_TEST_TMPDIR}/fails"
+	run ufw allow 443/tcp
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'ERROR: initcaps'* ]]
+	[ "$(grep -c '^ufw allow 443/tcp' "${STUB_LOG}")" -eq "${FW_UFW_TRIES}" ]
+	: >"${STUB_LOG}"
+	printf '1\n' >"${BATS_TEST_TMPDIR}/fails"
+	UFW_ERROR='ERROR: Bad port' run ufw allow 443/tcp
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *'ERROR: Bad port'* ]]
+	[ "$(grep -c '^ufw allow 443/tcp' "${STUB_LOG}")" -eq 1 ]
 }
