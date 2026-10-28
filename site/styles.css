@@ -358,6 +358,53 @@ h1 {
 	display: inline-block;
 }
 
+/* What the repository holds, counted on every build. The number comes first, its label below it. */
+.nums {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem 5ch;
+	margin: 1.75rem 0 0;
+	font-family: var(--mono);
+}
+
+.nums div {
+	display: flex;
+	flex-direction: column-reverse;
+	gap: 0.35rem;
+}
+
+.nums dt {
+	color: var(--muted);
+	font-size: 0.875rem;
+	line-height: 1.2;
+}
+
+.nums dd {
+	margin: 0;
+	font-size: clamp(1.75rem, 1.2rem + 2vw, 3rem);
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	line-height: 1;
+	letter-spacing: -0.04em;
+}
+
+/* Every word of a heading sits in a mask of its own, so the film can raise it into view. */
+h2 .w {
+	display: inline-block;
+	padding-bottom: 0.08em;
+	overflow: hidden;
+	vertical-align: top;
+}
+
+h2 .w > span {
+	display: inline-block;
+}
+
+/* The field (film.js draws it with motion allowed): packets that close into a shield while the modules pass. */
+.field {
+	display: none;
+}
+
 /* Logs in the format of lss: level, then the message */
 
 .log {
@@ -690,6 +737,38 @@ th {
 		height: 600svh;
 	}
 
+	.field {
+		position: fixed;
+		inset: 0;
+		z-index: 0;
+		display: block;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+	}
+
+	main,
+	.foot {
+		position: relative;
+		z-index: 1;
+	}
+
+	/* The opening steps back while the film starts. */
+	#top h1 {
+		transform: translate3d(0, calc(var(--p, 0) * -14svh), 0) scale(calc(1 - var(--p, 0) * 0.22));
+		transform-origin: 0 100%;
+	}
+
+	/*
+	 * Captions come in word by word while their scene arrives. film.js sets --r (0 to 1) only on a scene on the screen;
+	 * everywhere else the words are fully there, so nothing is hidden from a reader that does not scroll.
+	 */
+	.cap .wd {
+		--a: clamp(0, (var(--r, 1) - var(--i) * 0.6) * 4, 1);
+		opacity: calc(0.12 + 0.88 * var(--a));
+		filter: blur(calc((1 - var(--a)) * 3px));
+	}
+
 	/* A scene of one screen (l1) is not played: it scrolls past like a page. */
 	.scene:not(.l1) .frame {
 		position: sticky;
@@ -772,6 +851,59 @@ th {
 
 		to {
 			clip-path: inset(0);
+		}
+	}
+
+	@keyframes rise {
+		from {
+			transform: translate3d(0, 105%, 0);
+		}
+	}
+}
+
+/* The words of a heading rise out of their masks as it scrolls in: driven by the scroll where the browser can. */
+@media (prefers-reduced-motion: no-preference) and (scripting: enabled) and (height >= 30rem) {
+	@supports (animation-timeline: view()) {
+		h2 .w > span {
+			animation: rise linear both;
+			animation-timeline: view();
+			animation-range: entry 0% entry 90%;
+		}
+
+		h2 .w:nth-child(2) > span {
+			animation-range: entry 8% entry 98%;
+		}
+
+		h2 .w:nth-child(3) > span {
+			animation-range: entry 16% cover 30%;
+		}
+
+		h2 .w:nth-child(n + 4) > span {
+			animation-range: entry 24% cover 34%;
+		}
+	}
+
+	/* Elsewhere film.js marks the page (fx) and then each heading as seen when it comes into view. */
+	@supports not (animation-timeline: view()) {
+		.fx h2 .w > span {
+			transform: translate3d(0, 105%, 0);
+			transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+		}
+
+		.fx h2 .w:nth-child(2) > span {
+			transition-delay: 0.07s;
+		}
+
+		.fx h2 .w:nth-child(3) > span {
+			transition-delay: 0.14s;
+		}
+
+		.fx h2 .w:nth-child(n + 4) > span {
+			transition-delay: 0.21s;
+		}
+
+		.fx h2.seen .w > span {
+			transform: none;
 		}
 	}
 }

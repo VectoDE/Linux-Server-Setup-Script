@@ -40,7 +40,26 @@ cannot fall behind the modules, and a pull request shows the result of its own c
 ## Motion, keyboard and screen readers
 
 Every word of every scene is in the HTML from the start. `site/film.js` only moves and marks it: it sets the scene
-counter, shows lines, rolls the stage and highlights the current item. The film needs motion allowed
+counter, shows lines, rolls the stage and highlights the current item. What moves while you scroll:
+
+| Scene                  | Motion                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| Opening                | The title steps back and shrinks; the counts of modules, groups, profiles and tested systems run up from 0 once after loading |
+| Every scene            | The words of the heading rise out of their masks as it scrolls in; the caption comes in word by word (opacity and blur) |
+| A run                  | Log lines appear one by one, the newest marked, and the log rolls like a terminal         |
+| Profiles, menu         | One profile or menu item at a time                                                         |
+| Module groups          | The list rolls past and the current module is marked                                       |
+| Run to last group      | Packets drifting across the screen leave their lines in random order and close into a shield with "lss" cut out |
+| Guard                  | A scan line sweeps over the shield                                                         |
+| After the guard        | The field fades out and stops drawing                                                      |
+
+The field is a 2D canvas behind the text, drawn by `film.js` without a library. It starts after the page has
+loaded, stops in hidden tabs and once it has faded out, and draws at most at 1.5 times the CSS resolution. On
+screens narrower than 900 px the shield sits behind the text and is drawn at half the strength. The scatter of the
+packets comes from a fixed seed, so the page looks the same on every visit. The heading masks use CSS
+scroll-driven animations (`animation-timeline: view()`) where the browser has them; elsewhere `film.js` raises them
+when the heading comes into view, and without the script they stay where they are. Scrolling is the browser's own:
+nothing takes over the wheel, keys, find in page or anchors. The film needs motion allowed
 (`prefers-reduced-motion: no-preference`), scripting and a screen at least 30rem tall. Otherwise the same scenes
 are a still sequence of full-screen frames, with nothing hidden.
 

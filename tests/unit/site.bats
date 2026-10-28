@@ -50,7 +50,7 @@ copy_repo() {
 	grep -qF '<code>LSS_GUARD_TIME=07:00</code>' "${PAGE}"
 	grep -qF '<code>LSS_KERNEL_HARDENING_BLOCK_USB_STORAGE=true</code>' "${PAGE}"
 	grep -qF '<span class="m-alt">Instead of apache, caddy</span>' "${PAGE}"
-	grep -qF '<h2 id="guard-h">Every morning at 07:00</h2>' "${PAGE}"
+	grep -qF '<h2 id="guard-h"><span class="w"><span>Every</span></span> <span class="w"><span>morning</span></span> <span class="w"><span>at</span></span> <span class="w"><span>07:00</span></span> </h2>' "${PAGE}"
 }
 
 @test "the help text comes from lss and the menu from lib/ui.sh" {

@@ -233,8 +233,8 @@ list_close() {
 }
 
 # scene_open ID TITLE KIND LENGTH: starts a scene. KIND tells film.js what the progress drives (steps: lines appear,
-# roll: the stage rolls past, switch: one item at a time, still: the stage only rolls when it is taller than the
-# screen). LENGTH is the scroll length in screens, 1 to 6.
+# roll: the stage rolls past, switch: one item at a time, hero: the title steps back, still: the stage only rolls
+# when it is taller than the screen). LENGTH is the scroll length in screens, 1 to 6.
 scene_open() {
 	local id=$1 title=$2 kind=$3 length=$4 number html
 	if ((length > 6)); then
@@ -268,8 +268,47 @@ stage_close() {
 	return
 }
 
+# heading ID TEXT [PREFIX]: the h2 of a scene, every word in a mask of its own so that it can rise into view. PREFIX
+# is shown muted in front of the text, like the "modules/" of a group.
+heading() {
+	local id=$1 text=$2 prefix=${3:-} word html
+	local -a words=()
+	printf '<h2 id="%s-h">' "${id}"
+	if [[ -n ${prefix} ]]; then
+		esc html "${prefix}"
+		printf '<span class="w path"><span>%s</span></span>' "${html}"
+	fi
+	read -ra words <<<"${text}"
+	for word in "${words[@]}"; do
+		esc html "${word}"
+		printf '<span class="w"><span>%s</span></span> ' "${html}"
+	done
+	printf '</h2>\n'
+	return
+}
+
+# count_tested: the number of releases data/systems.conf lists as tested in CI.
+count_tested() {
+	local _distribution _releases tested count=0
+	local -a releases=()
+	while IFS='|' read -r _distribution _releases tested; do
+		IFS=',' read -ra releases <<<"${tested}"
+		count=$((count + ${#releases[@]}))
+	done < <(systems_rows system)
+	printf '%s' "${count}"
+	return
+}
+
+# counter NUMBER LABEL: one figure of the opening.
+counter() {
+	local number=$1 label=$2
+	printf '<div><dt>%s</dt><dd data-count="%s">%s</dd></div>\n' "${label}" "${number}" "${number}"
+	return
+}
+
 scene_hero() {
-	scene_open top "lss" still 1
+	local -a profile_files=(profiles/*.conf)
+	scene_open top "lss" hero 2
 	cat <<'EOF'
 <h1 id="top-h"><span class="h1-word">lss</span><span class="h1-sub">Linux Server Setup</span></h1>
 EOF
@@ -279,6 +318,13 @@ EOF
 <p class="lead">Sets up and hardens Linux servers from modules. Install a whole profile in one run, or only the
 modules you need, and come back later to add, change or remove one.</p>
 EOF
+	# Read from the repository on every build. The order of dt and dd is swapped visually, the number comes first.
+	printf '<dl class="nums">\n'
+	counter "${#MODULES[@]}" modules
+	counter "${#GROUPS_SORTED[@]}" groups
+	counter "${#profile_files[@]}" profiles
+	counter "$(count_tested)" "systems tested in CI"
+	printf '</dl>\n'
 	stage_close
 	scene_close "Scroll to play the film. Every scene is plain text, so it reads the same with motion turned off."
 	return
@@ -297,7 +343,7 @@ scene_run() {
 	install_order order firewall fail2ban
 	last=${order##* }
 	scene_open run "A run" steps 3
-	printf '<h2 id="run-h">One module at a time</h2>\n'
+	heading run "One module at a time"
 	stage_open
 	printf '<ol class="log" aria-label="Output of lss install firewall fail2ban">\n'
 	log_line '$' 'sudo lss install firewall fail2ban' cmdline
@@ -329,7 +375,7 @@ scene_profiles() {
 	local -a words=()
 	mapfile -t rows < <(profiles)
 	scene_open profiles "Profiles" switch "${#rows[@]}"
-	printf '<h2 id="profiles-h">%s profiles</h2>\n' "${#rows[@]}"
+	heading profiles "${#rows[@]} profiles"
 	stage_open
 	printf '<div class="sw">\n<ol class="sw-names" data-switch aria-hidden="true">\n'
 	for row in "${rows[@]}"; do
@@ -383,7 +429,7 @@ scene_group() {
 	done
 	count=${#names[@]}
 	scene_open "group-${group}" "modules/${group}" roll "$((2 + (count + 3) / 4))"
-	printf '<h2 id="group-%s-h"><span class="path">modules/</span>%s</h2>\n' "${group}" "${group}"
+	heading "group-${group}" "${group}" modules/
 	noun=modules
 	if ((count == 1)); then
 		noun=module
@@ -425,7 +471,7 @@ rule_row() {
 
 scene_security() {
 	scene_open security "Security model" steps 3
-	printf '<h2 id="security-h">Closed by default</h2>\n'
+	heading security "Closed by default"
 	stage_open
 	cat <<'EOF'
 <table class="rules">
@@ -458,7 +504,7 @@ scene_guard() {
 	option_default max_age guard backup_max_age
 	[[ ${time} =~ ^[0-9:]+$ ]] || fail "guard: the default time '${time}' is not HH:MM."
 	scene_open guard "Guard" steps 3
-	printf '<h2 id="guard-h">Every morning at %s</h2>\n' "${time}"
+	heading guard "Every morning at ${time}"
 	stage_open
 	printf '<pre class="unit s"><span class="u-c"># systemctl cat lss-guard.timer</span>\n[Timer]\nOnCalendar=*-*-* %s:00\nRandomizedDelaySec=10min</pre>\n' \
 		"${time}"
@@ -480,7 +526,7 @@ report too."
 
 scene_install() {
 	scene_open install "Verified install" steps 3
-	printf '<h2 id="install-h">Verified before it runs</h2>\n'
+	heading install "Verified before it runs"
 	stage_open
 	printf '<ol class="log" aria-label="Installing lss from a release">\n'
 	log_line '$' 'gh release download -R VectoDE/Linux-Server-Setup-Script --pattern bootstrap.sh' cmdline
@@ -499,7 +545,7 @@ attestation proves the release workflow of this repository built it. <code>lss u
 
 scene_cli() {
 	scene_open cli "Commands" roll 3
-	printf '<h2 id="cli-h">lss --help</h2>\n'
+	heading cli "lss --help"
 	stage_open
 	local text
 	esc text "$(help_text)"
@@ -515,7 +561,7 @@ scene_menu() {
 	local item tag text prompt
 	mapfile -t items < <(menu_items)
 	scene_open menu "Menu" switch "${#items[@]}"
-	printf '<h2 id="menu-h">Or the menu</h2>\n'
+	heading menu "Or the menu"
 	stage_open
 	esc prompt "$(menu_prompt)"
 	esc text "${LSS_SITE_VERSION}"
@@ -536,7 +582,7 @@ as the command line."
 scene_systems() {
 	local distribution releases tested setup ram disk duration arch
 	scene_open systems "Systems" still 2
-	printf '<h2 id="systems-h">Where it runs</h2>\n'
+	heading systems "Where it runs"
 	stage_open
 	printf '<table class="sys">\n<caption>Supported systems</caption>\n'
 	printf '<thead><tr><th scope="col">Distribution</th><th scope="col">Releases</th><th scope="col">Tested in CI</th></tr></thead>\n<tbody>\n'
@@ -572,7 +618,7 @@ help_link() {
 
 scene_help() {
 	scene_open help "Help" still 1
-	printf '<h2 id="help-h">Help</h2>\n'
+	heading help "Help"
 	stage_open
 	cat <<'EOF'
 <p class="cmd"><span class="prompt" aria-hidden="true">$ </span>lss info guard</p>
@@ -682,6 +728,7 @@ $(chapters)
 </nav>
 <p class="hud-tc" aria-hidden="true"><span id="tc-n">01</span><span class="hud-of">/${#SCENE_IDS[@]}</span> <span id="tc-title">lss</span></p>
 </header>
+<canvas class="field" aria-hidden="true"></canvas>
 <main id="film" tabindex="-1">
 ${body}
 </main>
