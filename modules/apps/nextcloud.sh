@@ -100,12 +100,21 @@ _nc_installed() {
 	return
 }
 
+# _nc_started: the entrypoint of the image has finished. On the first start it copies Nextcloud into the volume
+# (custom_apps, config and version.php come last) and only then starts Apache; occ in between finds a half-copied tree
+# ("App directory custom_apps not found"). Through docker-proxy the port takes connections from the start, so the
+# test is an HTTP answer from Apache itself (any status; curl reports 000 for none).
+_nc_started() {
+	[[ $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$(opt_int port)/status.php" 2>/dev/null) != 000 ]]
+	return
+}
+
 # _nc_install: the first installation. occ asks for the database and the admin password when they are not on its
 # command line; both come from the mounted secret files through a pipe, so they never appear in a process list.
 _nc_install() {
 	local i
 	for ((i = 0; i < 100; i++)); do
-		_nc_occ status >/dev/null 2>&1 && break
+		_nc_started && _nc_occ status >/dev/null 2>&1 && break
 		sleep 3
 	done
 	_nc_installed && return 0
