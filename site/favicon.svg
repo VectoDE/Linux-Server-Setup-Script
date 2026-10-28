@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<!--
+SPDX-FileCopyrightText: 2025-2026 VectoDE
+
+SPDX-License-Identifier: MIT
+-->
+<rect width="32" height="32" fill="#0f2747"/>
+<rect x="5" y="7" width="14" height="3" fill="#9fb1ca"/>
+<rect x="5" y="14" width="22" height="5" fill="#ffd84d"/>
+<rect x="5" y="23" width="10" height="3" fill="#9fb1ca"/>
+</svg>
