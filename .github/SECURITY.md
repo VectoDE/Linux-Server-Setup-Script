@@ -57,19 +57,21 @@ documented as an [OpenVEX](https://openvex.dev/) statement in `.vex/`, with the 
 
 From 2.0.0 on, releases are built only by the release workflow of this repository, never from a laptop. Each release
 carries a signed build attestation (Sigstore, SLSA provenance) that names this repository, the workflow and the
-commit. Verify a downloaded archive with the GitHub CLI:
+commit. Verify a downloaded file with the GitHub CLI, naming the release workflow on `main` as the signer:
 
 ```bash
-gh attestation verify lss-<version>.tar.gz --repo VectoDE/Linux-Server-Setup-Script
+gh attestation verify lss-<version>.tar.gz --repo VectoDE/Linux-Server-Setup-Script \
+  --cert-identity https://github.com/VectoDE/Linux-Server-Setup-Script/.github/workflows/release.yml@refs/heads/main
 ```
 
-`lss update` checks the attestation of every version before it installs it and refuses an archive that does not
-verify.
+`bootstrap.sh` and `lss update` check the checksum and the attestation of every version before they install it and
+refuse a release that does not verify ([installing and upgrading](../docs/upgrading.md#what-gets-checked)).
 
 ## Secrets and credentials
 
-- The project keeps no stored secrets: workflows use the short-lived `GITHUB_TOKEN`, attestations use the workflow's
-  OIDC identity.
+- Workflows use the short-lived `GITHUB_TOKEN`, attestations the workflow's OIDC identity. The only stored secrets
+  are the deploy key and the SSH signing key of the release commit and tag, in the environment `release`, which only
+  `main` can use and only the job that commits and tags reads ([releasing](../docs/releasing.md)).
 - On a server, lss keeps generated secrets (passwords, 2FA enrolment) in `/etc/lss/secrets`, mode 0600 in a 0700 directory, and
   shows them only with `lss secrets show NAME`. They never go into logs.
 - Secrets are never committed. gitleaks in CI and GitHub secret scanning with push protection block leaks.
