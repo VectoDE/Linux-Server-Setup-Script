@@ -337,6 +337,10 @@ docker() {
 	[ "$(stat -c '%a' "${file}")" = 600 ]
 	[ "$(cat "${file}")" = 'machine cloud.example.com login admin password S3cret' ]
 	rm -f -- "${file}"
+	# Straight to the container (APP_GET_LOCAL), curl looks the login up under 127.0.0.1.
+	file=$(APP_GET_LOCAL=8081 app_netrc admin demo-admin-password)
+	[ "$(cat "${file}")" = 'machine 127.0.0.1 login admin password S3cret' ]
+	rm -f -- "${file}"
 }
 
 @test "the host names of another app come from its settings or the server's name" {
