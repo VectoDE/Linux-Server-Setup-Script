@@ -92,19 +92,59 @@ _wp_installed() {
 	return
 }
 
-# _wp_owner_check: an installation that exists already must be the one lss made, so its administrator logs in with
-# the password of the secret. Otherwise somebody else ran the installer first, and lss stops before it publishes the
-# site.
-_wp_owner_check() {
-	local page status
-	secret_exists wordpress-admin-password ||
-		die "wordpress: WordPress is installed already, but lss has no password for $(opt admin_user), so lss did not install it. Check the instance; lss remove wordpress --purge starts over."
-	page=$(app_get wp-login.php -X POST --data-urlencode "log=$(opt admin_user)" \
+# _wp_login: logs the administrator of lss in with the password of the secret and sets WP_LOGIN_STATUS (the HTTP
+# status) and WP_LOGIN_COOKIES (the session cookies as a Cookie header value). A redirect alone proves nothing (WordPress
+# also redirects to HTTPS or to the installer); only a successful login sets wordpress_logged_in_* for this user. The
+# cookies come from the Set-Cookie headers and go back in a Cookie header of their own, not through the cookie engine of
+# curl: curl 7.76 (Rocky 9) does not send a Secure cookie to http://127.0.0.1, where the installation check runs.
+_wp_login() {
+	local headers page user cookie
+	local -a cookies
+	WP_LOGIN_STATUS='' WP_LOGIN_COOKIES=''
+	user=$(opt admin_user)
+	headers=$(mktemp)
+	page=$(app_get wp-login.php -D "${headers}" -X POST --data-urlencode "log=${user}" \
 		--data-urlencode "pwd@$(secret_path wordpress-admin-password)" \
 		--data-urlencode "redirect_to=https://$(app_domain)/wp-admin/") || true
-	status=$(app_status "${page}")
-	[[ ${status} == 302 ]] ||
-		die "wordpress: WordPress is installed already, but $(opt admin_user) cannot log in with the password of lss (HTTP ${status}), so lss did not install it. Check the instance; lss remove wordpress --purge starts over."
+	WP_LOGIN_STATUS=$(app_status "${page}")
+	WP_LOGIN_COOKIES=$(tr -d '\r' <"${headers}" |
+		sed -nE 's/^[Ss][Ee][Tt]-[Cc][Oo][Oo][Kk][Ii][Ee]:[[:space:]]*(wordpress_(sec|logged_in)_[^=;[:space:]]*=[^;[:space:]]+).*/\1/p' |
+		paste -sd ';' - | sed 's/;/; /g')
+	rm -f -- "${headers}"
+	[[ ${WP_LOGIN_STATUS} == 302 ]] || return 1
+	# The value of wordpress_logged_in_* starts with the login name and a | (URL-encoded %7C).
+	IFS=';' read -ra cookies <<<"${WP_LOGIN_COOKIES}"
+	for cookie in "${cookies[@]}"; do
+		cookie=${cookie# }
+		[[ ${cookie} == wordpress_logged_in_*=* ]] || continue
+		case ${cookie#*=} in
+		"${user}%7C"* | "${user}%7c"* | "${user}|"*) return 0 ;;
+		*) ;;
+		esac
+	done
+	return 1
+}
+
+# _wp_admin_page: the dashboard with the session cookies of _wp_login; they go to curl as a header file, so they never
+# appear in a process list.
+_wp_admin_page() {
+	local header page
+	header=$(mktemp)
+	printf 'Cookie: %s\n' "${WP_LOGIN_COOKIES}" >"${header}"
+	page=$(app_get wp-admin/ -H "@${header}") || true
+	rm -f -- "${header}"
+	printf '%s' "${page}"
+	return
+}
+
+# _wp_owner_check: an installation that exists already must be the one lss made, so its administrator logs in with
+# the password of the secret (_wp_login). Otherwise somebody else ran the installer first, and lss stops before it
+# publishes the site.
+_wp_owner_check() {
+	secret_exists wordpress-admin-password ||
+		die "wordpress: WordPress is installed already, but lss has no password for $(opt admin_user), so lss did not install it. Check the instance; lss remove wordpress --purge starts over."
+	_wp_login ||
+		die "wordpress: WordPress is installed already, but $(opt admin_user) cannot log in with the password of lss (HTTP ${WP_LOGIN_STATUS:-none}, no session cookie of $(opt admin_user)), so lss did not install it. Check the instance; lss remove wordpress --purge starts over."
 	return
 }
 
@@ -149,7 +189,7 @@ mod_configure() {
 }
 
 mod_verify() {
-	local page jar status home
+	local page home
 	app_verify_stack
 	app_verify_backup
 	page=$(app_wait wp-login.php 200) || die "wordpress: the login page does not answer."
@@ -159,19 +199,9 @@ mod_verify() {
 	home=$(jq -r '.home // empty' <<<"${page%$'\n'*}" 2>/dev/null) || home=''
 	[[ $(app_status "${page}") == 200 && ${home} == "https://$(app_domain)" ]] ||
 		die "wordpress: the REST API answers $(app_status "${page}") with the address '${home}' instead of https://$(app_domain)."
-	# Used, not only running: the administrator logs in and opens the dashboard. Without testcookie WordPress skips its
-	# check for a browser that blocks cookies; the session cookies land in the jar.
-	jar=$(mktemp)
-	page=$(app_get wp-login.php -b "${jar}" -c "${jar}" -X POST \
-		--data-urlencode "log=$(opt admin_user)" --data-urlencode "pwd@$(secret_path wordpress-admin-password)" \
-		--data-urlencode "redirect_to=https://$(app_domain)/wp-admin/") || true
-	status=$(app_status "${page}")
-	if [[ ${status} != 302 ]]; then
-		rm -f -- "${jar}"
-		die "wordpress: $(opt admin_user) cannot log in (HTTP ${status})."
-	fi
-	page=$(app_get wp-admin/ -b "${jar}") || true
-	rm -f -- "${jar}"
+	# Used, not only running: the administrator logs in and opens the dashboard with the session cookies of the login.
+	_wp_login || die "wordpress: $(opt admin_user) cannot log in (HTTP ${WP_LOGIN_STATUS:-none}, no session cookie of $(opt admin_user))."
+	page=$(_wp_admin_page)
 	if [[ $(app_status "${page}") != 200 ]] || ! grep -q 'id="wpadminbar"' <<<"${page}"; then
 		die "wordpress: the dashboard does not open after the login."
 	fi
