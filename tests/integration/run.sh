@@ -67,6 +67,13 @@ start_target() {
 			echo "Unknown system ${system}" >&2
 			exit 2
 		}
+		# Right after the runner boots (arm64 images), its Docker daemon may still be starting; the job waits for it
+		# instead of failing on the first docker call.
+		for ((i = 0; i < 60; i++)); do
+			docker info >/dev/null 2>&1 && break
+			((i != 10)) || sudo systemctl start docker.service || true
+			sleep 2
+		done
 		docker build -q -f "tests/integration/images/${system}/Containerfile" -t "lss-test:${system}" \
 			"tests/integration/images/${system}" >/dev/null
 		docker rm -f "${container}" >/dev/null 2>&1 || true
