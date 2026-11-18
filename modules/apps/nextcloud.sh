@@ -109,11 +109,23 @@ _nc_started() {
 	return
 }
 
-# _nc_owner_check: an installation that exists already must be the one lss made, with the administrator of lss in the
-# admin group; otherwise lss stops before it publishes the site.
+# _nc_owner_check: an installation that exists already must be the one lss made: the administrator of lss is in the
+# admin group, and the OCS API of the container accepts the password of lss for it. The request goes to 127.0.0.1 with
+# the host name localhost (APP_GET_LOCAL), which the installation of lss trusts from the start, before the site is
+# published. Otherwise lss stops.
 _nc_owner_check() {
-	_nc_occ user:info "$(opt admin_user)" --output=json 2>/dev/null | jq -e '.groups | index("admin")' >/dev/null 2>&1 ||
-		die "nextcloud: Nextcloud is installed already, but $(opt admin_user) of lss is missing among its administrators, so lss did not install it. Check the instance; lss remove nextcloud --purge starts over."
+	local user port netrc page id
+	user=$(opt admin_user)
+	port=$(opt_int port)
+	_nc_occ user:info "${user}" --output=json 2>/dev/null | jq -e '.groups | index("admin")' >/dev/null 2>&1 ||
+		die "nextcloud: Nextcloud is installed already, but ${user} of lss is missing among its administrators, so lss did not install it. Check the instance; lss remove nextcloud --purge starts over."
+	netrc=$(APP_GET_LOCAL=${port} app_netrc "${user}" nextcloud-admin-password)
+	page=$(APP_GET_LOCAL=${port} APP_GET_DOMAIN=localhost app_get 'ocs/v2.php/cloud/user?format=json' \
+		--netrc-file "${netrc}" -H 'OCS-APIRequest: true') || true
+	rm -f -- "${netrc}"
+	id=$(jq -r '.ocs.data.id // empty' <<<"${page%$'\n'*}" 2>/dev/null) || id=''
+	[[ $(app_status "${page}") == 200 && ${id} == "${user}" ]] ||
+		die "nextcloud: Nextcloud is installed already, but ${user} cannot log in with the password of lss (HTTP $(app_status "${page}")), so lss did not install it. Check the instance; lss remove nextcloud --purge starts over."
 	return
 }
 

@@ -660,14 +660,17 @@ app_networks() {
 	return
 }
 
-# app_netrc USER SECRET: a temporary netrc file (mode 0600) with the login of USER at the app's host name, so curl
-# sends the password without it showing up in the process list; prints its path. The caller deletes it.
+# app_netrc USER SECRET: a temporary netrc file (mode 0600) with the login of USER at the host app_get connects to (the
+# app's host name, or 127.0.0.1 with APP_GET_LOCAL), so curl sends the password without it showing up in the process
+# list; prints its path. The caller deletes it.
 app_netrc() {
-	local user=$1 secret=$2 file password
+	local user=$1 secret=$2 file password machine
 	secret_load "${secret}" password
+	machine=$(app_domain)
+	[[ -z ${APP_GET_LOCAL:-} ]] || machine=127.0.0.1
 	file=$(mktemp)
 	chmod 600 "${file}"
-	printf 'machine %s login %s password %s\n' "$(app_domain)" "${user}" "${password}" >"${file}"
+	printf 'machine %s login %s password %s\n' "${machine}" "${user}" "${password}" >"${file}"
 	printf '%s' "${file}"
 	return
 }
