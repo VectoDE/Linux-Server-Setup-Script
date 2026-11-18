@@ -128,21 +128,44 @@ _n8n_owner() {
 	if [[ ${status} == 200 ]]; then
 		log_info "n8n: created the owner $(_n8n_email); password in $(secret_path n8n-owner-password)"
 		files_note_change "created the n8n owner"
-	elif [[ ${status} != 400 ]] || ! grep -qi 'already setup' <<<"${page}"; then
+	elif [[ ${status} == 400 ]] && grep -qi 'already setup' <<<"${page}"; then
+		_n8n_owner_check
+	else
 		die "n8n: the owner cannot be created (HTTP ${status})."
 	fi
 	return
 }
 
+# _n8n_owner_check: an owner set up already must be the one of lss, so it logs in with the password of the secret.
+# Otherwise somebody else set n8n up first, and lss stops before it publishes the editor.
+_n8n_owner_check() {
+	local page body jar
+	jar=$(mktemp)
+	body=$(mktemp)
+	chmod 600 "${body}"
+	# shellcheck disable=SC2016 # jq variables
+	_n8n_body "${body}" '{emailOrLdapLoginId: $email, email: $email, password: $password}'
+	page=$(_n8n_rest "${jar}" login -X POST --data-binary "@${body}") || true
+	rm -f -- "${body}" "${jar}"
+	[[ $(app_status "${page}") == 200 ]] ||
+		die "n8n: the owner is set up already, but $(_n8n_email) cannot log in with the password of lss (HTTP $(app_status "${page}")), so lss did not set it up. Check the instance; lss remove n8n --purge starts over."
+	return
+}
+
 mod_configure() {
+	local APP_GET_LOCAL
 	app_db_secrets postgres "${N8N_USER}"
 	app_secret n8n-encryption-key "${N8N_USER}" 48 encryption-key
 	_n8n_compose | app_compose
 	app_backup DB=postgres DB_USER=n8n LIVE=data
 	app_up
+	# The first visitor could set up the owner: that happens against the container before the editor is published.
+	APP_GET_LOCAL=$(opt_int port)
+	app_wait healthz/readiness 200 >/dev/null || die "n8n: the container on 127.0.0.1:${APP_GET_LOCAL} does not answer."
+	_n8n_owner
+	APP_GET_LOCAL=''
 	app_site "$(opt_int port)"
 	app_wait healthz/readiness 200 >/dev/null || die "n8n: https://$(app_domain)/healthz/readiness does not answer."
-	_n8n_owner
 	return
 }
 

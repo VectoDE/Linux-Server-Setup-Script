@@ -89,7 +89,13 @@ socket.on("connect_error", (error) => fail(`connect: ${error.message}`));
 socket.on("connect", async () => {
 	if (action === "setup") {
 		const needed = await ask("needSetup");
-		if (!needed) { console.log("exists"); process.exit(0); }
+		if (!needed) {
+			// Set up already: only by lss when its administrator logs in with the password of the secret.
+			const login = await ask("login", { username, password, token: "" });
+			if (!login.ok) fail(`the administrator exists already, but ${username} cannot log in with the password of lss, so lss did not set it up: ${login.msg}`);
+			console.log("exists");
+			process.exit(0);
+		}
 		const result = await call("setup", username, password);
 		if (!result.ok) fail(`setup: ${result.msg}`);
 		console.log("created");
@@ -126,19 +132,24 @@ _kuma() {
 }
 
 mod_configure() {
-	local result
+	local result APP_GET_LOCAL
 	app_secret uptime-kuma-admin-password "${KUMA_USER}" 32 admin-password
 	_kuma_script | app_file config/lss-kuma.js "${KUMA_USER}" 0444
 	_kuma_compose | app_compose
 	app_backup COPY=data
 	app_up
-	app_site "$(opt_int port)"
-	app_wait '' 302 >/dev/null || die "uptime-kuma: https://$(app_domain)/ does not answer."
-	result=$(_kuma setup 2>&1) || die "uptime-kuma: the administrator cannot be created: ${result}"
+	# The setup page makes the first visitor the administrator: lss sets it up inside the container before the site is
+	# published, and stops when somebody else did (lss-kuma.js setup).
+	APP_GET_LOCAL=$(opt_int port)
+	app_wait '' 302 >/dev/null || die "uptime-kuma: the container on 127.0.0.1:${APP_GET_LOCAL} does not answer."
+	result=$(_kuma setup 2>&1) || die "uptime-kuma: the administrator cannot be set up: ${result}"
 	if [[ ${result} == *created* ]]; then
 		log_info "uptime-kuma: created the administrator $(opt admin_user); password in $(secret_path uptime-kuma-admin-password)"
 		files_note_change "created the Uptime Kuma administrator"
 	fi
+	APP_GET_LOCAL=''
+	app_site "$(opt_int port)"
+	app_wait '' 302 >/dev/null || die "uptime-kuma: https://$(app_domain)/ does not answer."
 	return
 }
 
