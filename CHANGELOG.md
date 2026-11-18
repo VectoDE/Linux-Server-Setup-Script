@@ -12,6 +12,10 @@ now or later.
 
 ### Added
 
+- Support matrix in `data/systems.conf`: lss finds the release by `ID` and `VERSION_ID` there, refuses only what is
+  not listed, warns on every run, in `lss status` and in the guard findings once the vendor's security support has
+  ended, and names the extended support left. `lss support` prints it (exit status 2 after the end). Proxmox VE is
+  told apart from Debian by `/etc/pve` and `pveversion`.
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
   CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
   `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and

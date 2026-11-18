@@ -24,6 +24,10 @@ touches the system, restores its files when something fails, and can prove with 
 x86_64 and arm64 (aarch64). CI runs on x86_64: on every pull request it installs, verifies, installs again and removes
 every module on each tested system.
 
+lss runs only on the releases of the support matrix in `data/systems.conf` and refuses every other system. When the
+vendor of a release ends its security support, every lss run, `lss status` and the guard warn and name the extended
+support that is left (Debian: Freexian ELTS; Ubuntu: Ubuntu Pro; RHEL: Extended Life Cycle Support).
+
 ## System requirements
 
 | Setup                                   | RAM                                       | Free disk | Install time            |
@@ -183,6 +187,7 @@ Without a command, `sudo lss` opens a menu. On the RHEL family, sudo looks for c
 | `lss configure MODULE...`            | Apply changed settings to installed modules                                      |
 | `lss verify [MODULE...]`             | Check that installed modules work and that nobody changed their files            |
 | `lss status`                         | Installed modules and their services                                             |
+| `lss support`                        | Vendor support of this release; a warning (exit status 2) after its end          |
 | `lss remove MODULE... [--purge]`     | Remove modules; `--purge` also deletes their data                                |
 | `lss audit`                          | Lynis audit with the hardening index                                             |
 | `lss secrets show NAME`              | Print a generated secret, such as `admin-user-password`                          |

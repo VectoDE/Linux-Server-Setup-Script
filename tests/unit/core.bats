@@ -36,11 +36,82 @@ setup() {
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"CentOS Linux 7 (Core) is not supported"* ]]
 	use_os ubuntu-24.10
-	[[ $(os_unsupported_reason) == *"not an LTS release"* ]]
+	[[ $(os_unsupported_reason) == "Ubuntu 24.10 is not supported. Supported: Debian 12, 13; Ubuntu 22.04, 24.04, 26.04; "* ]]
 	use_os arch
 	[[ $(os_unsupported_reason) == *"Arch Linux is not supported"* ]]
 	use_os debian-12 armv7l
 	[[ $(os_unsupported_reason) == *"Architecture armv7l"* ]]
+}
+
+@test "every release of the support matrix has an os-release fixture and is accepted with its family" {
+	local type id name version family rest count=0
+	while IFS='|' read -r type id name version family rest; do
+		[[ ${type} == release ]] || continue
+		[ -f "${REPO_ROOT}/tests/fixtures/os-release/${id}-${version}" ]
+		use_os "${id}-${version}"
+		[ "${OS_SUPPORTED}" = 1 ]
+		[ "${OS_FAMILY}" = "${family}" ]
+		[ "${OS_LABEL}" = "${name} ${version}" ]
+		[ -z "$(os_unsupported_reason)" ]
+		count=$((count + 1))
+	done <"${REPO_ROOT}/data/systems.conf"
+	[ "${count}" -eq 11 ]
+}
+
+@test "only releases outside the matrix are refused, by ID and VERSION_ID and never by codename" {
+	write_release 'ID=debian' 'VERSION_ID="11"' 'VERSION_CODENAME=bookworm' 'PRETTY_NAME="Debian GNU/Linux 11"'
+	[ "${OS_SUPPORTED}" = 0 ]
+	[ "${OS_FAMILY}" = debian ]
+	[[ $(os_unsupported_reason) == "Debian GNU/Linux 11 is not supported. Supported: Debian 12, 13; "* ]]
+	write_release 'ID=debian' 'VERSION_ID="12.8"' 'VERSION_CODENAME=trixie'
+	[ "${OS_LABEL}" = 'Debian 12' ]
+	write_release 'ID=ubuntu' 'VERSION_ID="24.04"' 'VERSION_CODENAME=oracular'
+	[ "${OS_LABEL}" = 'Ubuntu 24.04' ]
+	write_release 'ID=linuxmint' 'ID_LIKE="ubuntu debian"' 'VERSION_ID="22"' 'PRETTY_NAME="Linux Mint 22"'
+	[ "${OS_SUPPORTED}" = 0 ]
+	[[ $(os_unsupported_reason) == "Linux Mint 22 is not supported."* ]]
+	[ "$(os_supported_list)" = 'Debian 12, 13; Ubuntu 22.04, 24.04, 26.04; Red Hat Enterprise Linux 9, 10; Rocky Linux 9, 10; AlmaLinux 9, 10' ]
+}
+
+@test "a missing support matrix stops lss" {
+	LSS_SYSTEMS=${BATS_TEST_TMPDIR}/missing run use_os debian-12
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"Cannot read the support matrix ${BATS_TEST_TMPDIR}/missing."* ]]
+}
+
+@test "vendor support: the date while it lasts, a warning with the extended support after it" {
+	use_os debian-12
+	LSS_TODAY=2028-06-30 run os_support_status
+	[ "${status}" -eq 0 ]
+	[ "${output}" = 'Debian 12: security support from the vendor until 2028-06-30, then Freexian ELTS until 2033-06-30.' ]
+	LSS_TODAY=2028-07-01 run os_support_status
+	[ "${status}" -eq 2 ]
+	[ "${output}" = 'Debian 12 left the security support of its vendor on 2028-06-30; Freexian ELTS covers it until 2033-06-30, otherwise upgrade to a newer release.' ]
+	LSS_TODAY=2033-07-01 run os_support_status
+	[ "${status}" -eq 2 ]
+	[ "${output}" = 'Debian 12 left the security support of its vendor on 2028-06-30 and Freexian ELTS on 2033-06-30; upgrade to a newer release.' ]
+	use_os rocky-9
+	LSS_TODAY=2026-11-18 run os_support_status
+	[ "${output}" = 'Rocky Linux 9: security support from the vendor until 2032-05-31.' ]
+	LSS_TODAY=2032-06-01 run os_support_status
+	[ "${status}" -eq 2 ]
+	[ "${output}" = 'Rocky Linux 9 left the security support of its vendor on 2032-05-31 and has no extended support; upgrade to a newer release.' ]
+	# No line of the warning starts with "Not" or "No".
+	run ! grep -qE '^(Not|No)' <<<"${output}"
+}
+
+@test "Proxmox VE is told apart from Debian by /etc/pve and pveversion" {
+	use_os debian-12
+	[ "${OS_PROXMOX}" = 0 ]
+	mkdir -p "${BATS_TEST_TMPDIR}/pve" "${BATS_TEST_TMPDIR}/bin"
+	printf '#!/bin/sh\necho pve-manager/8.4.1\n' >"${BATS_TEST_TMPDIR}/bin/pveversion"
+	chmod +x "${BATS_TEST_TMPDIR}/bin/pveversion"
+	LSS_PVE_DIR=${BATS_TEST_TMPDIR}/pve
+	use_os debian-12
+	[ "${OS_PROXMOX}" = 0 ]
+	PATH=${BATS_TEST_TMPDIR}/bin:${PATH} use_os debian-12
+	[ "${OS_PROXMOX}" = 1 ]
+	[ "${OS_LABEL}" = 'Debian 12' ]
 }
 
 write_release() {

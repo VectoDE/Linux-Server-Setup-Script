@@ -10,7 +10,8 @@
 # when GUARD_AUTOFIX=true), failed systemd units, disk space, pending security updates, vulnerable packages (debsecan
 # on Debian, dnf updateinfo on the RHEL family), failed SSH logins and active bans, the results of the daily AIDE,
 # rkhunter and ClamAV runs, the Lynis hardening index, certificates that expire soon, HIGH and CRITICAL vulnerabilities
-# in the container images of Docker and Podman (Trivy), the age of the last backup and a weekly restore test (restic).
+# in the container images of Docker and Podman (Trivy), the age of the last backup and a weekly restore test (restic),
+# and the vendor support of the release (lss support).
 # The numbers of findings, fixes and notes also go to the node exporter for Prometheus (lss_guard_*).
 # Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
 # Notes (logins, bans) are part of the summary but do not make the run fail.
@@ -87,6 +88,14 @@ check_modules() {
 		fi
 	done
 	return
+}
+
+# check_support: the release of the system has left the security support of its vendor (lss support exits with 2).
+check_support() {
+	local output status=0
+	output=$("${LSS}" --no-color support 2>&1) || status=$?
+	((status != 2)) || finding "$(head -n 1 <<<"${output}")"
+	return 0
 }
 
 check_units() {
@@ -431,6 +440,7 @@ main() {
 		exit 1
 	}
 	check_modules
+	check_support
 	check_units
 	check_disks
 	check_updates

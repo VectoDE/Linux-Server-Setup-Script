@@ -39,6 +39,20 @@ journalctl() {
 	printf '%s\n' "${SCAN_OUTPUT}"
 }
 
+@test "a release after the end of its vendor support is a finding; lss support reports it with exit status 2" {
+	local stub=${BATS_TEST_TMPDIR}/lss
+	printf '#!/bin/sh\necho "$SUPPORT_LINE"\nexit "$SUPPORT_STATUS"\n' >"${stub}"
+	chmod +x "${stub}"
+	LSS=${stub}
+	SUPPORT_LINE='Debian 12: security support from the vendor until 2028-06-30.' SUPPORT_STATUS=0 check_support
+	[ "${#FINDINGS[@]}" -eq 0 ]
+	SUPPORT_LINE='Debian 12 left the security support of its vendor on 2028-06-30.' SUPPORT_STATUS=2 check_support
+	[ "${#FINDINGS[@]}" -eq 1 ]
+	[ "${FINDINGS[0]}" = 'Debian 12 left the security support of its vendor on 2028-06-30.' ]
+	SUPPORT_LINE='lss is broken' SUPPORT_STATUS=1 check_support
+	[ "${#FINDINGS[@]}" -eq 1 ]
+}
+
 @test "AIDE changes reach the summary with the numbers from the report" {
 	SCAN_UNIT=lss-aide-check
 	SCAN_STATUS=5
