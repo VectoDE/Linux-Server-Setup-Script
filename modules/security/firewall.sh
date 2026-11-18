@@ -147,7 +147,7 @@ mod_verify() {
 mod_remove() {
 	fw_rollback_cancel
 	if [[ $(fw_backend) == ufw ]]; then
-		if command -v ufw >/dev/null 2>&1; then
+		if type -P ufw >/dev/null; then
 			ufw --force disable >/dev/null
 		fi
 		svc_disable ufw

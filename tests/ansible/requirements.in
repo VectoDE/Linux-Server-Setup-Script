@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# Python tools of the Ansible collection checks: building (ansible-galaxy), running and linting it. requirements.txt
+# pins them with hashes: uv pip compile --universal --python-version 3.12 --generate-hashes requirements.in -o requirements.txt
+ansible-core
+ansible-lint

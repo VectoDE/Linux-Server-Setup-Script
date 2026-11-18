@@ -166,7 +166,10 @@ mod_verify() {
 	if opt_bool userns_remap; then
 		[[ ${options} == *name=userns* ]] || die "docker: user namespace remapping is off (${options})."
 	fi
-	if os_is_debian && [[ $(cat /sys/module/apparmor/parameters/enabled 2>/dev/null) == Y ]]; then
+	# dockerd confines containers with AppArmor where the kernel has it and its interface (securityfs) is mounted,
+	# which a container (Docker in a test container) does not see.
+	if os_is_debian && [[ $(cat /sys/module/apparmor/parameters/enabled 2>/dev/null) == Y ]] &&
+		[[ -d /sys/kernel/security/apparmor ]]; then
 		[[ ${options} == *name=apparmor* ]] || die "docker: containers run without AppArmor (${options})."
 	fi
 	# The API is root on the host: only the Unix socket, never TCP. dockerd itself holds the published ports of the

@@ -12,6 +12,13 @@ now or later.
 
 ### Added
 
+- Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
+  CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
+  `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and
+  the attestation verify; `lss update [VERSION]` updates, downgrades and, with `--rollback`, returns to the version
+  before, checked the same way ([installing and upgrading](docs/upgrading.md)).
+- Ansible collection `vectode.lss` with every release: the role `vectode.lss.lss` installs lss from a verified release
+  and sets up modules, the module `vectode.lss.lss` installs and removes modules with check mode.
 - `lss` command with an interactive menu and the commands `list`, `info`, `install`, `configure`, `verify`, `status`,
   `remove`, `audit`, `secrets` and `profiles`; `--dry-run`, `--set KEY=VALUE` and a settings file in
   `/etc/lss/lss.conf`.
@@ -95,10 +102,15 @@ now or later.
   its results for Prometheus through the node exporter.
 - The services of the backup, monitoring and network modules run with a systemd sandbox drop-in; a service that
   listens on the WireGuard address starts after the interface.
+- Website on GitHub Pages: lss explained as a film that plays while scrolling, generated from the module metadata,
+  the profiles and `data/systems.conf` on every deploy. A field of packets drawn on a canvas closes into a shield
+  while the module groups pass. Strict Content Security Policy, a still version for reduced motion and Lighthouse
+  100 checked in CI.
 
 ### Removed
 
-- `install-configure-script.bash` will be removed when 2.0.0 is released. Its features move into modules.
+- `install-configure-script.bash`, the 1.x install script. Its features are modules now; [upgrading from
+  1.x](docs/upgrading.md#from-1x) maps its options to them.
 
 ## [1.0.1] - 2025-10-22
 

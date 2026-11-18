@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+---
+# Test playbook of tests/integration/ansible.sh: the role vectode.lss.lss on a systemd container, with the test
+# release directory and its signer passed to bootstrap.sh through the environment.
+- name: Set up the test server with lss
+  hosts: all
+  gather_facts: false
+  environment:
+    LSS_RELEASE_URL: file:///srv/release
+    LSS_RELEASE_WORKFLOW: "{{ lookup('ansible.builtin.env', 'LSS_RELEASE_WORKFLOW') }}"
+    LSS_RELEASE_REF: "{{ lookup('ansible.builtin.env', 'LSS_RELEASE_REF') }}"
+  roles:
+    - role: vectode.lss.lss
+      vars:
+        lss_modules: "{{ test_modules | default(['tools']) }}"
+        lss_modules_absent: "{{ test_modules_absent | default([]) }}"
+        lss_settings:
+          LSS_SYSTEM_HOSTNAME: lss-test
+          LSS_SYSTEM_UPGRADE: false
+          LSS_TIME_TIMEZONE: Europe/Berlin
+          LSS_TOOLS_EXTRA: tree

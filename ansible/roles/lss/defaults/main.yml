@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+---
+# Version of lss to install: by default the one this collection was released with. The release workflow raises it
+# together with VERSION.
+lss_version: "2.0.0-dev"
+# Settings written to /etc/lss/lss.conf (mode 0600), as KEY: value. Names follow LSS_<MODULE>_<OPTION>; `lss info
+# MODULE` lists them. Booleans become true and false.
+lss_settings: {}
+# Profile to install (minimal-secure, webhosting, ...), modules to install, and modules to remove.
+lss_profile: ""
+lss_modules: []
+lss_modules_absent: []
+# native or docker for services that support both; empty keeps the setting or default.
+lss_mode: ""
