@@ -9,6 +9,8 @@ lss_test_setup() {
 	bats_require_minimum_version 1.5.0
 	REPO_ROOT=$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)
 	export LSS_ROOT=${REPO_ROOT}
+	# Tests that move LSS_ROOT to a copy of their own keep the support matrix of the repository.
+	export LSS_SYSTEMS=${REPO_ROOT}/data/systems.conf
 	export LSS_STATE_DIR=${BATS_TEST_TMPDIR}/state
 	export LSS_SECRETS_DIR=${BATS_TEST_TMPDIR}/secrets
 	export LSS_LOG_FILE=${BATS_TEST_TMPDIR}/lss.log

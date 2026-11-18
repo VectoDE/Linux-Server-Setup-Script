@@ -44,8 +44,8 @@ setup() {
 }
 
 @test "every release of the support matrix has an os-release fixture and is accepted with its family" {
-	local type id name version family rest count=0
-	while IFS='|' read -r type id name version family rest; do
+	local type id name version family count=0
+	while IFS='|' read -r type id name version family _; do
 		[[ ${type} == release ]] || continue
 		[ -f "${REPO_ROOT}/tests/fixtures/os-release/${id}-${version}" ]
 		use_os "${id}-${version}"

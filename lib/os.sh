@@ -24,6 +24,7 @@ OS_LABEL=''
 OS_EOL=''
 OS_EXTENDED=''
 OS_EXTENDED_UNTIL=''
+# shellcheck disable=SC2034 # read by the modules of stage 9d (Proxmox VE) and the tests
 OS_PROXMOX=0
 
 _os_value() {
@@ -148,6 +149,7 @@ os_require_supported() {
 # LSS_TODAY (YYYY-MM-DD) replaces today's date in the tests.
 os_support_status() {
 	local today=${LSS_TODAY:-$(date -u +%F)}
+	[[ -n ${OS_EOL} ]] || return 0
 	if [[ ! ${today} > ${OS_EOL} ]]; then
 		printf '%s: security support from the vendor until %s%s.\n' "${OS_LABEL}" "${OS_EOL}" \
 			"${OS_EXTENDED:+, then ${OS_EXTENDED} until ${OS_EXTENDED_UNTIL}}"
