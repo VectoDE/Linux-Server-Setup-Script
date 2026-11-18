@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# lss app-backup: the data of the app stacks (Docker Compose, lib/apps.sh) in a form restic can back up consistently.
+# Installed by the app modules as /usr/local/lib/lss/app-backup; lss-backup runs it before every backup, and lss
+# verify of an app runs it for that app (app-backup NAME...).
+#
+# Every app registers itself in /etc/lss/app-backup/NAME.conf (KEY=value lines, parsed, never sourced):
+#   PROJECT   the Compose project (lss-NAME)          COMPOSE   its compose.yaml
+#   DB        postgres, mariadb or none: the service "db" is dumped (pg_dumpall, mariadb-dump of every database)
+#   DB_USER   the database user of the PostgreSQL service (its superuser in the official image)
+#   COPY      volumes copied while the service "app" is paused for a moment (SQLite databases next to their files)
+#   LIVE      volumes backed up where they are (files only; the database of the stack is in the dump)
+#   PATHS     host directories of the app (native installations)
+# The dumps and copies go to /var/backups/lss-apps/NAME (root only), replaced on every run; restic keeps the history.
+# The paths restic backs up (that directory, the LIVE volumes, PATHS) are listed in /var/lib/lss/app-backup/paths,
+# and the result of each app in /var/lib/lss/app-backup/status.
+set -Eeuo pipefail
+shopt -s inherit_errexit
+
+REGISTRY=${LSS_APP_BACKUP_REGISTRY:-/etc/lss/app-backup}
+OUT_ROOT=${LSS_APP_BACKUP_DIR:-/var/backups/lss-apps}
+STATE=${LSS_APP_BACKUP_STATE:-/var/lib/lss/app-backup}
+DOCKER=${LSS_DOCKER:-docker}
+
+say() {
+	printf 'lss-app-backup: %s\n' "$*"
+	return
+}
+
+# setting FILE KEY [DEFAULT]: the value of KEY in the registration FILE.
+setting() {
+	local file=$1 key=$2 default=${3-} line
+	while IFS= read -r line || [[ -n ${line} ]]; do
+		if [[ ${line} == "${key}="* ]]; then
+			printf '%s' "${line#*=}"
+			return 0
+		fi
+	done <"${file}"
+	printf '%s' "${default}"
+	return
+}
+
+# compose FILE ARGS...: docker compose for the stack of the registration FILE.
+compose() {
+	local file=$1
+	shift
+	"${DOCKER}" compose --project-name "$(setting "${file}" PROJECT)" -f "$(setting "${file}" COMPOSE)" "$@"
+	return
+}
+
+# mountpoint FILE VOLUME: the directory of the named volume VOLUME of the stack on the host.
+mountpoint() {
+	local file=$1 volume=$2 path
+	path=$("${DOCKER}" volume inspect --format '{{.Mountpoint}}' "$(setting "${file}" PROJECT)_${volume}") || return 1
+	[[ ${path} == /* && -d ${path} ]] || return 1
+	printf '%s' "${path}"
+	return
+}
+
+# dump_db FILE OUT: the database of the stack as SQL. The MariaDB root password goes to the dump tool through its
+# environment inside the container, never on a command line.
+dump_db() {
+	local file=$1 out=$2
+	case $(setting "${file}" DB none) in
+	postgres)
+		compose "${file}" exec -T db pg_dumpall --username="$(setting "${file}" DB_USER)" --clean --if-exists >"${out}"
+		;;
+	mariadb)
+		# shellcheck disable=SC2016 # expanded inside the container
+		compose "${file}" exec -T db sh -c 'MYSQL_PWD=$(cat /run/secrets/db-root-password) exec mariadb-dump --user=root \
+			--all-databases --single-transaction --routines --events --triggers --hex-blob' >"${out}"
+		;;
+	*) return 1 ;;
+	esac
+	return
+}
+
+# copy_volumes FILE DIR: the COPY volumes into DIR/VOLUME, with the stack paused so that files and SQLite databases
+# match; the stack runs on even when a copy fails.
+copy_volumes() {
+	local file=$1 dir=$2 volume source attempt status=0
+	local -a volumes=()
+	read -ra volumes <<<"$(setting "${file}" COPY)"
+	((${#volumes[@]} > 0)) || return 0
+	# Only the app pauses; its database (if any) is dumped, and the one-shot "init" service has exited.
+	compose "${file}" pause app >/dev/null 2>&1 || return 1
+	for volume in "${volumes[@]}"; do
+		if source=$(mountpoint "${file}" "${volume}"); then
+			rm -rf -- "${dir}/${volume}.part"
+			if cp -a -- "${source}" "${dir}/${volume}.part"; then
+				rm -rf -- "${dir:?}/${volume}"
+				mv -f -- "${dir}/${volume}.part" "${dir}/${volume}"
+			else
+				rm -rf -- "${dir}/${volume}.part"
+				status=1
+			fi
+		else
+			status=1
+		fi
+	done
+	for attempt in 1 2 3; do
+		compose "${file}" unpause app >/dev/null 2>&1 && break
+		((attempt < 3)) || {
+			say "the app of $(setting "${file}" PROJECT) stays paused; run docker compose unpause app." >&2
+			status=1
+		}
+		sleep 2
+	done
+	return "${status}"
+}
+
+# backup_app FILE: the dump, the copies and the paths of one app; prints the paths for restic.
+backup_app() {
+	local file=$1 name dir out volume path failed=0
+	local -a volumes=() paths=()
+	name=$(basename "${file}" .conf)
+	dir=${OUT_ROOT}/${name}
+	mkdir -p "${dir}"
+	chmod 0700 "${dir}"
+	if [[ $(setting "${file}" DB none) != none ]]; then
+		out=${dir}/db.sql
+		# The dump goes to a temporary file first, so a failed run never replaces the last good dump.
+		if dump_db "${file}" "${out}.part" && [[ -s ${out}.part ]]; then
+			mv -f -- "${out}.part" "${out}"
+		else
+			rm -f -- "${out}.part"
+			say "the database dump of ${name} failed; ${out} keeps the previous one." >&2
+			failed=1
+		fi
+	fi
+	if ! copy_volumes "${file}" "${dir}"; then
+		say "the copy of the data of ${name} failed; ${dir} keeps the previous one." >&2
+		failed=1
+	fi
+	read -ra volumes <<<"$(setting "${file}" LIVE)"
+	for volume in "${volumes[@]}"; do
+		if path=$(mountpoint "${file}" "${volume}"); then
+			printf '%s\n' "${path}"
+		else
+			say "the volume ${volume} of ${name} is missing." >&2
+			failed=1
+		fi
+	done
+	read -ra paths <<<"$(setting "${file}" PATHS)"
+	for path in "${paths[@]}"; do
+		[[ ! -e ${path} ]] || printf '%s\n' "${path}"
+	done
+	return "${failed}"
+}
+
+# run_backups [NAME...]: every registered app (or the ones named); fails when one of them failed.
+run_backups() {
+	local file name failed=0 count=0
+	local -a files=()
+	if (($# > 0)); then
+		for name in "$@"; do
+			[[ ${name} =~ ^[a-z0-9][a-z0-9-]*$ && -f ${REGISTRY}/${name}.conf ]] || {
+				say "${name} is not registered in ${REGISTRY}." >&2
+				return 1
+			}
+			files+=("${REGISTRY}/${name}.conf")
+		done
+	else
+		for file in "${REGISTRY}"/*.conf; do
+			[[ -f ${file} ]] && files+=("${file}")
+		done
+	fi
+	mkdir -p "${OUT_ROOT}" "${STATE}"
+	chmod 0700 "${OUT_ROOT}" "${STATE}"
+	: >"${STATE}/paths.tmp"
+	: >"${STATE}/status.tmp"
+	for file in "${files[@]}"; do
+		name=$(basename "${file}" .conf)
+		count=$((count + 1))
+		if backup_app "${file}" >>"${STATE}/paths.tmp"; then
+			printf '%s ok %s\n' "${name}" "$(date +%s)" >>"${STATE}/status.tmp"
+			say "saved the data of ${name}."
+		else
+			printf '%s failed %s\n' "${name}" "$(date +%s)" >>"${STATE}/status.tmp"
+			failed=1
+		fi
+	done
+	# A run for some apps only (lss verify) leaves the list of the full run alone.
+	if (($# == 0)); then
+		if ((count > 0)); then
+			printf '%s\n' "${OUT_ROOT}" >>"${STATE}/paths.tmp"
+		fi
+		mv -f -- "${STATE}/paths.tmp" "${STATE}/paths"
+		mv -f -- "${STATE}/status.tmp" "${STATE}/status"
+		((count > 0)) || say "0 apps are registered here; nothing to save."
+	else
+		rm -f -- "${STATE}/paths.tmp" "${STATE}/status.tmp"
+	fi
+	return "${failed}"
+}
+
+main() {
+	[[ ${EUID} -eq 0 ]] || {
+		say "must run as root." >&2
+		exit 1
+	}
+	umask 077
+	run_backups "$@"
+}
+
+# The unit tests source this file without running it.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi

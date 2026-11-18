@@ -20,6 +20,31 @@ fw_backend() {
 	return
 }
 
+# Attempts and the pause in seconds for a ufw command that loses a race in iptables.
+FW_UFW_TRIES=3
+FW_UFW_DELAY=2
+
+# ufw ARG...: ufw, again after a short pause when it fails with "initcaps". Before every change ufw tests the
+# capabilities of iptables with a chain of its own; when k3s (or Docker) rewrites its chains at the same moment, that
+# test fails ("CHAIN_DEL failed") although nothing is wrong. Other failures and the output pass through unchanged.
+# The function hides the command from command -v; "type -P ufw" tells whether ufw is installed.
+ufw() {
+	local try=1 code err
+	err=$(mktemp)
+	while :; do
+		code=0
+		command ufw "$@" 2>"${err}" || code=$?
+		if ((code == 0 || try >= FW_UFW_TRIES)) || ! grep -q initcaps "${err}"; then
+			break
+		fi
+		try=$((try + 1))
+		sleep "${FW_UFW_DELAY}"
+	done
+	cat "${err}" >&2
+	rm -f -- "${err}"
+	return "${code}"
+}
+
 fw_vpn_network() {
 	config_get LSS_WIREGUARD_NETWORK 10.66.0.0/24
 	return
@@ -42,7 +67,7 @@ fw_vpn_address() {
 
 fw_is_enabled() {
 	if [[ $(fw_backend) == ufw ]]; then
-		command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'
+		type -P ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'
 	else
 		svc_is_active firewalld
 	fi
@@ -120,7 +145,7 @@ _fw_apply() {
 # The backend tool is installed (the firewall module installs it).
 fw_available() {
 	if [[ $(fw_backend) == ufw ]]; then
-		command -v ufw >/dev/null 2>&1
+		type -P ufw >/dev/null
 	else
 		command -v firewall-offline-cmd >/dev/null 2>&1
 	fi

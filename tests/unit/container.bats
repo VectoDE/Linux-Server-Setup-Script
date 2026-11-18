@@ -395,10 +395,48 @@ record_writes() {
 	run ctr_compose_up 'Bad Name' "${file}"
 	[ "${status}" -eq 1 ]
 	ctr_compose_up shop "${file}"
+	grep -qxF "docker compose --project-name shop -f ${file} pull --quiet --policy missing" "${BATS_TEST_TMPDIR}/engine.log"
 	grep -qxF "docker compose --project-name shop -f ${file} up --detach --remove-orphans --quiet-pull" "${BATS_TEST_TMPDIR}/engine.log"
 	LSS_MODULE=podman
 	run ctr_compose_up shop "${file}"
 	[[ ${output} == *"need the docker module"* ]]
+}
+
+@test "Compose projects retry a failed image pull and give up after the last attempt" {
+	command -v jq >/dev/null || skip "jq is not installed"
+	local file=${BATS_TEST_TMPDIR}/compose.yaml
+	: >"${file}"
+	CTR_PULL_DELAY=0
+	printf '1
+' >"${BATS_TEST_TMPDIR}/fails"
+	# shellcheck disable=SC2329 # called by ctr_compose_up
+	docker() {
+		local left
+		printf 'docker %s
+' "$*" >>"${BATS_TEST_TMPDIR}/engine.log"
+		if [[ $* == *config* ]]; then
+			printf '{"services": {}}
+'
+		elif [[ $* == *" pull "* ]]; then
+			left=$(cat "${BATS_TEST_TMPDIR}/fails")
+			((left > 0)) || return 0
+			printf '%s
+' $((left - 1)) >"${BATS_TEST_TMPDIR}/fails"
+			return 1
+		fi
+		return 0
+	}
+	ctr_compose_up shop "${file}"
+	[ "$(grep -c ' pull ' "${BATS_TEST_TMPDIR}/engine.log")" -eq 2 ]
+	grep -q ' up --detach' "${BATS_TEST_TMPDIR}/engine.log"
+	: >"${BATS_TEST_TMPDIR}/engine.log"
+	printf '9
+' >"${BATS_TEST_TMPDIR}/fails"
+	run ctr_compose_up shop "${file}"
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"images of shop cannot be pulled"* ]]
+	[ "$(grep -c ' pull ' "${BATS_TEST_TMPDIR}/engine.log")" -eq "${CTR_PULL_TRIES}" ]
+	run ! grep -q ' up --detach' "${BATS_TEST_TMPDIR}/engine.log"
 }
 
 @test "Trivy is kept when it is current and removed with the last engine" {

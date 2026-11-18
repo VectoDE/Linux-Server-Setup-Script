@@ -11,6 +11,7 @@ path = [
   ".github/CODEOWNERS",
   ".github/allowed_signers",
   "templates/**",
+  "site/lighthouserc.json",
   "tests/fixtures/os-release/**",
   "scripts/release/tag-ruleset.json",
 ]

@@ -33,6 +33,8 @@ WEB_ADMIN_CADDY_AUTH=/etc/lss/web/admin-auth.caddy
 WEB_CERT_HOOK=/etc/letsencrypt/renewal-hooks/deploy/lss-deploy
 # CA certificate of a private ACME server (LSS_TLS_CA_BUNDLE, for example Pebble or step-ca); certbot trusts it.
 WEB_ACME_CA=/etc/letsencrypt/lss-acme-ca.pem
+# Rule exclusions of the routes for ModSecurity (web_waf_exclude), one file per route.
+WEB_WAF_DIR=/etc/lss/waf
 # certbot's certificate lineages (one directory per certificate name).
 WEB_CERT_LIVE=/etc/letsencrypt/live
 # The fail2ban jails and the CrowdSec log acquisition for the installed web server.
@@ -161,26 +163,55 @@ web_default_cert() {
 		return 0
 	fi
 	name=$(hostname -f 2>/dev/null || hostname)
+	_web_self_signed "${dir}" "${name}"
+	files_note_change "self-signed default certificate"
+	return
+}
+
+# _web_self_signed DIR DOMAIN...: a self-signed certificate for the names DOMAIN (the first one is the subject) in
+# DIR/fullchain.pem and DIR/privkey.pem, valid for 825 days; the key is readable by WEB_GROUP.
+_web_self_signed() {
+	local dir=$1 subject=$2 tmp san domain
+	shift
+	san=''
+	for domain in "$@"; do
+		san+="${san:+,}DNS:${domain}"
+	done
 	tmp=$(mktemp -d)
-	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 -subj "/CN=${name}" \
-		-addext "subjectAltName=DNS:${name}" -keyout "${tmp}/privkey.pem" -out "${tmp}/fullchain.pem" >/dev/null 2>&1 ||
-		die "web: could not create the self-signed default certificate."
-	install -d -m 0755 "${WEB_TLS_DIR}"
+	if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 -subj "/CN=${subject}" \
+		-addext "subjectAltName=${san}" -keyout "${tmp}/privkey.pem" -out "${tmp}/fullchain.pem" >/dev/null 2>&1; then
+		rm -rf -- "${tmp}"
+		die "web: could not create a self-signed certificate for ${subject}."
+	fi
 	# Certificates are state, not configuration: the tls module's deploy hook replaces them, so they are not
 	# recorded as managed files (lss verify would report every renewal as a change made outside lss).
-	install -d -m 0755 "${dir}"
+	install -d -m 0755 "${WEB_TLS_DIR}" "${dir}"
 	install -m 0640 -o root -g "${WEB_GROUP}" "${tmp}/privkey.pem" "${dir}/privkey.pem"
 	install -m 0644 -o root -g root "${tmp}/fullchain.pem" "${dir}/fullchain.pem"
-	files_note_change "self-signed default certificate"
 	rm -rf -- "${tmp}"
 	return
 }
 
-# web_cert_placeholder NAME: until NAME has a certificate of its own, its directory holds a copy of the default
-# certificate, so a site can point at WEB_TLS_DIR/NAME from the start and keeps that path after the real one arrives.
+# web_cert_placeholder NAME [DOMAIN...]: until NAME has a certificate of its own, its directory holds a copy of the
+# default certificate, so a site can point at WEB_TLS_DIR/NAME from the start and keeps that path after the real one
+# arrives. With DOMAIN, the placeholder is a self-signed certificate for these names instead, so clients that trust
+# it (a Nextcloud that calls Collabora through the web server) can check the host name; it follows the names and is
+# renewed within 30 days of expiry, and a certificate of the tls module (lineage NAME) is never replaced.
 web_cert_placeholder() {
 	local name=$1 dir
+	shift
 	dir="${WEB_TLS_DIR}/${name}"
+	if [[ $# -gt 0 ]]; then
+		[[ ! -s ${WEB_CERT_LIVE}/${name}/fullchain.pem ]] || return 0
+		if [[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] &&
+			[[ $(web_cert_domains "${dir}/fullchain.pem") == "$(printf '%s\n' "$@" | sort -u)" ]] &&
+			openssl x509 -checkend $((30 * 86400)) -noout -in "${dir}/fullchain.pem" >/dev/null 2>&1; then
+			return 0
+		fi
+		_web_self_signed "${dir}" "$@"
+		files_note_change "self-signed certificate for ${name}"
+		return
+	fi
 	[[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] && return 0
 	install -d -m 0755 "${dir}"
 	install -m 0644 -o root -g root "${WEB_TLS_DIR}/default/fullchain.pem" "${dir}/fullchain.pem"
@@ -645,6 +676,105 @@ web_site_remove() {
 	server=$(web_server)
 	[[ -n ${server} ]] || return 0
 	file_remove "$(web_conf_dir "${server}")/sites/${name}.$(_web_ext "${server}")"
+	return
+}
+
+# web_proxy_route NAME UPSTREAM DOMAIN...: publishes a local service (UPSTREAM, such as http://127.0.0.1:8081) as the
+# HTTPS route NAME for the host names DOMAIN, with a certificate from the tls module when it is installed. The one
+# place where an app becomes reachable from outside: today it writes a reverse-proxy site of the web server, and an
+# edge proxy in front of the web server can take its routes over here. Reloads the web server when the site changed.
+web_proxy_route() {
+	local name=$1 upstream=$2
+	shift 2
+	[[ $# -gt 0 ]] || die "web: the route ${name} has no host names."
+	web_cert_placeholder "${name}" "$@"
+	web_site_write "${name}" proxy "${upstream}" "$@"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_reload
+	if state_installed tls; then
+		web_cert_issue "${name}" "$@"
+	fi
+	return
+}
+
+# web_proxy_route_remove NAME: removes the route of web_proxy_route with its certificates and ModSecurity exclusions.
+web_proxy_route_remove() {
+	local name=$1
+	web_waf_exclude_remove "${name}"
+	if [[ -n $(web_server) ]]; then
+		web_site_remove "${name}"
+		web_reload
+	fi
+	file_remove "${WEB_TLS_DIR}/${name}"
+	if [[ -d ${WEB_CERT_LIVE}/${name} ]] && command -v certbot >/dev/null 2>&1; then
+		log_command certbot delete --non-interactive --cert-name "${name}" ||
+			log_warn "${name}: certbot could not delete the certificate ${name}."
+	fi
+	return
+}
+
+# web_waf_exclude NAME "RULE_ID..." DOMAIN...: the Core Rule Set rules ModSecurity skips for the host names of the
+# route NAME, for an application whose normal pages a rule takes for an attack (the system check of the Matomo
+# installer shows PHP code, which rule 953110 reads as a leak). The exclusions are data in WEB_WAF_DIR, so they apply
+# whenever the modsecurity module is installed, before or after the route; web_waf_rules turns them into rules.
+web_waf_exclude() {
+	local name=$1 rules=$2 domain
+	shift 2
+	_web_name_check "${name}"
+	[[ ${rules} =~ ^[0-9]{6}( [0-9]{6})*$ ]] || die "web: '${rules}' are not rule IDs of the Core Rule Set."
+	[[ $# -gt 0 ]] || die "web: the ModSecurity exclusions of ${name} have no host names."
+	for domain in "$@"; do
+		[[ ${domain} =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "web: '${domain}' is not a host name."
+	done
+	install -d -m 0755 "${WEB_WAF_DIR}"
+	printf '# Managed by lss (route %s). ModSecurity skips these rules for these host names.\nRULES=%s\nDOMAINS=%s\n' \
+		"${name}" "${rules}" "$*" | file_write 0644 root:root "${WEB_WAF_DIR}/${name}.conf"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_waf_apply
+	return
+}
+
+# web_waf_exclude_remove NAME: drops the exclusions of the route NAME.
+web_waf_exclude_remove() {
+	local name=$1
+	[[ -e ${WEB_WAF_DIR}/${name}.conf ]] || return 0
+	file_remove "${WEB_WAF_DIR}/${name}.conf"
+	rmdir "${WEB_WAF_DIR}" 2>/dev/null || true
+	web_waf_apply
+	return
+}
+
+# web_waf_rules: the exclusions of every route as ModSecurity rules (phase 1, before the rules they switch off), with
+# IDs from 9500001 on in the order of the route names.
+web_waf_rules() {
+	local file id=9500000 rules domains pattern ctl rule
+	printf '# Managed by lss. Rule exclusions of the routes in %s (web_waf_exclude).\n' "${WEB_WAF_DIR}"
+	for file in "${WEB_WAF_DIR}"/*.conf; do
+		[[ -f ${file} ]] || continue
+		rules=$(sed -n 's/^RULES=//p' "${file}")
+		domains=$(sed -n 's/^DOMAINS=//p' "${file}")
+		[[ ${rules} =~ ^[0-9]{6}( [0-9]{6})*$ && ${domains} =~ ^[a-z0-9.\ -]+$ ]] || continue
+		pattern=$(sed 's/\./\\./g; s/ /|/g' <<<"${domains}")
+		ctl=''
+		for rule in ${rules}; do
+			ctl+=",ctl:ruleRemoveById=${rule}"
+		done
+		id=$((id + 1))
+		printf 'SecRule REQUEST_HEADERS:Host "@rx ^(?:%s)(?::[0-9]+)?$" "id:%s,phase:1,pass,nolog,t:none,t:lowercase%s"\n' \
+			"${pattern}" "${id}" "${ctl}"
+	done
+	return
+}
+
+# web_waf_apply: writes the exclusions (web_waf_rules) into the ModSecurity configuration of the modsecurity module
+# and reloads the web server when they changed; without ModSecurity there is nothing to do.
+web_waf_apply() {
+	local server dir
+	state_installed modsecurity || return 0
+	server=$(web_server)
+	[[ ${server} == nginx || ${server} == apache ]] || return 0
+	dir=$(web_conf_dir "${server}")/modsecurity
+	[[ -d ${dir} ]] || return 0
+	web_waf_rules | file_write 0644 root:root "${dir}/sites.conf"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || web_reload
 	return
 }
 

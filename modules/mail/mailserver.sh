@@ -380,6 +380,8 @@ _ms_dovecot() {
 	# Dovecot puts its sockets for Postfix there; Postfix 3.10 creates the directory only on its first start, which
 	# comes later, and the sandbox needs it to exist. Postfix's own owner and mode.
 	[[ -d /var/spool/postfix/private ]] || install -d -m 0700 -o postfix -g root /var/spool/postfix/private
+	# Dovecot starts its auth and delivery processes in their own SELinux domains (svc_selinux_spawner).
+	svc_selinux_spawner dovecot "$(type -P dovecot || echo /usr/sbin/dovecot)" /usr/libexec/dovecot /usr/lib/dovecot
 	svc_sandbox dovecot.service "ReadWritePaths=${MS_VMAIL}" ReadWritePaths=-/var/lib/dovecot \
 		ReadWritePaths=/var/spool/postfix/private
 	svc_enable dovecot
@@ -926,6 +928,9 @@ mod_remove() {
 	svc_dropin_remove "${unit}" lss-sandbox
 	svc_dropin_remove dovecot.service lss-sandbox
 	svc_dropin_remove rspamd.service lss-sandbox
+	svc_selinux_spawner_remove postfix
+	svc_selinux_spawner_remove postfix_start
+	svc_selinux_spawner_remove dovecot
 	local file
 	for file in "${MS_MAILBOXES}" "${MS_VIRTUAL}" "${MS_SENDERS}" "${MS_ALIASES}" "${MS_RECIPIENT_ACCESS}" "${MS_USERS}" \
 		"${MS_DOVECOT_CONF}" "${MS_DNS_FILE}" "${MS_RSPAMD}/worker-normal.inc" "${MS_RSPAMD}/worker-proxy.inc" \

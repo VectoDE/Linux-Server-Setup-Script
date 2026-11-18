@@ -9,6 +9,11 @@
 
 VM_DIR=''
 VM_PORT=${LSS_VM_SSH_PORT:-2222}
+# Size of the VM: the app stacks and the profile all need more than the default (LSS_VM_MEMORY in MiB, LSS_VM_CPUS,
+# LSS_VM_DISK as for qemu-img).
+VM_MEMORY=${LSS_VM_MEMORY:-4096}
+VM_CPUS=${LSS_VM_CPUS:-2}
+VM_DISK=${LSS_VM_DISK:-20G}
 
 vm_ssh() {
 	ssh -i "${VM_DIR}/key" -p "${VM_PORT}" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -51,7 +56,7 @@ vm_start() {
 	read -r image group <<<"$(vm_image "${name}")"
 	[[ -n ${image} ]] || exit 1
 	VM_DIR=$(mktemp -d)
-	qemu-img create -q -f qcow2 -b "${image}" -F qcow2 "${VM_DIR}/disk.qcow2" 20G
+	qemu-img create -q -f qcow2 -b "${image}" -F qcow2 "${VM_DIR}/disk.qcow2" "${VM_DISK}"
 	ssh-keygen -q -t ed25519 -N '' -C lss-vm-test -f "${VM_DIR}/key"
 	cat >"${VM_DIR}/user-data" <<EOF
 #cloud-config
@@ -66,7 +71,7 @@ users:
 EOF
 	printf 'instance-id: lss-test\nlocal-hostname: lss-test\n' >"${VM_DIR}/meta-data"
 	cloud-localds "${VM_DIR}/seed.iso" "${VM_DIR}/user-data" "${VM_DIR}/meta-data"
-	qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 4096 -smp 2 \
+	qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m "${VM_MEMORY}" -smp "${VM_CPUS}" \
 		-drive "file=${VM_DIR}/disk.qcow2,if=virtio" -drive "file=${VM_DIR}/seed.iso,if=virtio,format=raw" \
 		-nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:${VM_PORT}-:22" \
 		-device qemu-xhci -device usb-kbd \
