@@ -4,7 +4,7 @@
 
 MOD_NAME="uptime-kuma"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Uptime Kuma 2 (status pages and uptime checks) as a rootless Docker Compose stack behind the web server, with SQLite and the first administrator already created"
+MOD_DESCRIPTION="Uptime Kuma 2 (status pages and uptime checks) as a rootless Docker Compose stack behind the reverse proxy, with SQLite and the first administrator already created"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Uptime Kuma site, separated by spaces; empty: uptime-kuma.<host name of the server>

@@ -4,7 +4,7 @@
 
 MOD_NAME="collabora"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Collabora Online (CODE 26.04) as a Docker Compose stack behind the web server, the office suite of Nextcloud Office; only the Nextcloud host names may open documents"
+MOD_DESCRIPTION="Collabora Online (CODE 26.04) as a Docker Compose stack behind the reverse proxy, the office suite of Nextcloud Office; only the Nextcloud host names may open documents"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Collabora site, separated by spaces; empty: collabora.<host name of the server>

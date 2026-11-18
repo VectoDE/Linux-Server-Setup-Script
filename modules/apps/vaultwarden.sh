@@ -4,7 +4,7 @@
 
 MOD_NAME="vaultwarden"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Vaultwarden 1.37 (password manager, compatible with the Bitwarden apps) as a Docker Compose stack behind the web server; no open registration, users are invited from the admin page"
+MOD_DESCRIPTION="Vaultwarden 1.37 (password manager, compatible with the Bitwarden apps) as a Docker Compose stack behind the reverse proxy; no open registration, users are invited from the admin page"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Vaultwarden site, separated by spaces; empty: vaultwarden.<host name of the server>
