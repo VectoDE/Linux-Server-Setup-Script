@@ -16,6 +16,7 @@ setup() {
 	SECRET_FILE=${BATS_TEST_TMPDIR}/secret
 	printf 'secret\n' >"${SECRET_FILE}"
 	SUPER_USERS='[{"login":"admin"}]'
+	WP_COOKIES=$'Set-Cookie: wordpress_sec_abc=lssadmin%7C1%7Ctok%7Chmac; path=/wp-admin; secure; HttpOnly\r\nSet-Cookie: wordpress_logged_in_abc=lssadmin%7C1%7Ctok%7Chmac; path=/; secure; HttpOnly'
 	return
 }
 
@@ -96,15 +97,34 @@ wp_stubs() {
 	}
 	# shellcheck disable=SC2329 # called by the module
 	app_get() {
+		local path=$1 headers='' header=''
 		printf 'get %s %s\n' "${APP_GET_LOCAL:-public}" "$*" >>"${STUB_LOG}"
-		case $1 in
+		shift
+		while (($#)); do
+			case $1 in
+			-D) headers=$2 ;;
+			-H) header=$2 ;;
+			*) ;;
+			esac
+			shift
+		done
+		[[ ${header} != @* ]] || cp -- "${header#@}" "${BATS_TEST_TMPDIR}/header"
+		case ${path} in
 		wp-login.php)
 			if [[ ! -e ${INSTALLED} ]]; then
 				printf 'install\n302'
-			elif [[ $* == *log=* ]]; then
+			elif [[ -n ${headers} ]]; then
+				printf 'HTTP/1.1 %s Found\r\n%s\r\n' "${LOGIN_STATUS:-302}" "${SET_COOKIES-${WP_COOKIES}}" >"${headers}"
 				printf 'login\n%s' "${LOGIN_STATUS:-302}"
 			else
 				printf 'login\n200'
+			fi
+			;;
+		wp-admin/)
+			if grep -q 'wordpress_logged_in_' "${BATS_TEST_TMPDIR}/header" 2>/dev/null; then
+				printf '<div id="wpadminbar"></div>\n200'
+			else
+				printf 'login\n302'
 			fi
 			;;
 		wp-admin/install.php*)
@@ -136,7 +156,7 @@ wp_stubs() {
 	: >"${INSTALLED}"
 	LOGIN_STATUS=200 run mod_configure
 	[ "${status}" -eq 1 ]
-	[[ ${output} == *"wordpress: WordPress is installed already, but lssadmin cannot log in with the password of lss (HTTP 200)"* ]]
+	[[ ${output} == *"wordpress: WordPress is installed already, but lssadmin cannot log in with the password of lss (HTTP 200, no session cookie of lssadmin)"* ]]
 	run ! grep -q '^site ' "${STUB_LOG}"
 	run ! grep -q 'install.php' "${STUB_LOG}"
 	SECRET_MISSING=1 run mod_configure
@@ -149,8 +169,48 @@ wp_stubs() {
 	wp_stubs
 	: >"${INSTALLED}"
 	mod_configure
-	grep -q '^get 8088 wp-login.php -X POST --data-urlencode log=lssadmin' "${STUB_LOG}"
+	grep -q '^get 8088 wp-login.php -D .* -X POST --data-urlencode log=lssadmin' "${STUB_LOG}"
 	grep -q '^site 8088' "${STUB_LOG}"
+}
+
+@test "a redirect after the WordPress login is no proof without the session cookie of the administrator of lss" {
+	load_app wordpress
+	wp_stubs
+	: >"${INSTALLED}"
+	# A redirect (to HTTPS, to the installer, ...) without any session cookie.
+	SET_COOKIES='Location: https://app.example.com/wp-login.php' run mod_configure
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"lssadmin cannot log in with the password of lss (HTTP 302, no session cookie of lssadmin)"* ]]
+	# The session of somebody else, a longer name or only the cookie for /wp-admin is no proof either.
+	SET_COOKIES='Set-Cookie: wordpress_logged_in_abc=intruder%7C1%7Ctok%7Chmac; path=/' run mod_configure
+	[ "${status}" -eq 1 ]
+	SET_COOKIES='Set-Cookie: wordpress_logged_in_abc=lssadmin2%7C1%7Ctok%7Chmac; path=/' run mod_configure
+	[ "${status}" -eq 1 ]
+	SET_COOKIES='Set-Cookie: wordpress_sec_abc=lssadmin%7C1%7Ctok%7Chmac; path=/wp-admin' run mod_configure
+	[ "${status}" -eq 1 ]
+	run ! grep -q '^site ' "${STUB_LOG}"
+	# Header names in any case and a bare | in the value pass.
+	SET_COOKIES='set-cookie: wordpress_logged_in_abc=lssadmin|1|tok|hmac; path=/' mod_configure
+	grep -q '^site 8088' "${STUB_LOG}"
+}
+
+@test "the WordPress session cookies go back in a header file of their own, not through the cookie engine of curl" {
+	load_app wordpress
+	wp_stubs
+	: >"${INSTALLED}"
+	APP_GET_LOCAL=8088
+	_wp_login
+	[ "${WP_LOGIN_COOKIES}" = 'wordpress_sec_abc=lssadmin%7C1%7Ctok%7Chmac; wordpress_logged_in_abc=lssadmin%7C1%7Ctok%7Chmac' ]
+	local page
+	page=$(_wp_admin_page)
+	[ "$(app_status "${page}")" = 200 ]
+	[ "$(cat "${BATS_TEST_TMPDIR}/header")" = "Cookie: ${WP_LOGIN_COOKIES}" ]
+	# Neither the cookies nor a cookie jar appear on the command line of curl.
+	run ! grep -qE 'tok%7Chmac| -b | -c ' "${STUB_LOG}"
+	grep -q '^get 8088 wp-admin/ -H @' "${STUB_LOG}"
+	# Without the cookies the dashboard does not open.
+	LOGIN_STATUS=200 run _wp_login
+	[ "${status}" -eq 1 ]
 }
 
 # --- n8n ----------------------------------------------------------------------------------------------------------
@@ -307,9 +367,49 @@ mt_stubs() {
 	_nc_occ() {
 		printf '%s\n' "${NC_USER_INFO}"
 	}
+	# shellcheck disable=SC2329 # called by _nc_owner_check
+	app_netrc() {
+		printf '%s' "${BATS_TEST_TMPDIR}/netrc"
+	}
+	# shellcheck disable=SC2329 # called by _nc_owner_check
+	app_get() {
+		printf '{"ocs":{"data":{"id":"admin"}}}\n200'
+	}
 	NC_USER_INFO='{"groups":["admin","users"]}'
 	_nc_owner_check
 	NC_USER_INFO='{"groups":["users"]}' run _nc_owner_check
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"nextcloud: Nextcloud is installed already, but admin of lss is missing among its administrators"* ]]
+}
+
+@test "an installed Nextcloud whose administrator does not take the password of lss stops lss" {
+	command -v jq >/dev/null || skip "jq is not installed"
+	load_app nextcloud
+	# shellcheck disable=SC2329 # called by _nc_owner_check
+	_nc_occ() {
+		printf '{"groups":["admin"]}\n'
+	}
+	# shellcheck disable=SC2329 # called by _nc_owner_check
+	app_netrc() {
+		printf 'netrc %s\n' "${APP_GET_LOCAL:-public}" >>"${STUB_LOG}"
+		: >"${BATS_TEST_TMPDIR}/netrc"
+		printf '%s' "${BATS_TEST_TMPDIR}/netrc"
+	}
+	# shellcheck disable=SC2329 # called by _nc_owner_check
+	app_get() {
+		printf 'get %s %s %s\n' "${APP_GET_LOCAL:-public}" "${APP_GET_DOMAIN:-}" "$*" >>"${STUB_LOG}"
+		printf '%s\n%s' "${OCS_BODY}" "${OCS_STATUS:-200}"
+	}
+	OCS_BODY='{"ocs":{"data":{"id":"admin"}}}'
+	_nc_owner_check
+	# Straight to the container as localhost, with the login in a netrc file for 127.0.0.1 that is gone afterwards.
+	grep -q '^netrc 8081$' "${STUB_LOG}"
+	grep -q '^get 8081 localhost ocs/v2.php/cloud/user?format=json --netrc-file .* -H OCS-APIRequest: true$' "${STUB_LOG}"
+	[ ! -e "${BATS_TEST_TMPDIR}/netrc" ]
+	OCS_STATUS=401 OCS_BODY='{"ocs":{"meta":{"statuscode":997}}}' run _nc_owner_check
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"nextcloud: Nextcloud is installed already, but admin cannot log in with the password of lss (HTTP 401)"* ]]
+	OCS_BODY='{"ocs":{"data":{"id":"intruder"}}}' run _nc_owner_check
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"cannot log in with the password of lss (HTTP 200)"* ]]
 }
