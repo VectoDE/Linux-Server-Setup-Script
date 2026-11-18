@@ -4,7 +4,7 @@
 
 MOD_NAME="n8n"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="n8n 2 (workflow automation) with PostgreSQL as a Docker Compose stack behind the web server, with the owner account already created and telemetry off"
+MOD_DESCRIPTION="n8n 2 (workflow automation) with PostgreSQL as a Docker Compose stack behind the reverse proxy, with the owner account already created and telemetry off"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the n8n site, separated by spaces; empty: n8n.<host name of the server>

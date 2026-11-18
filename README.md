@@ -360,10 +360,11 @@ vulnerabilities per image.
 
 ### Apps
 
-The apps run as Docker Compose stacks behind the web server (nginx, Apache or Caddy), each on host names of its own:
-`LSS_<APP>_DOMAINS`, by default the module name in front of the server's name (`nextcloud.example.com`). Those names
-must point to the server; with the `tls` module every app gets its own certificate. `minio` and `self-updater` also
-run without Docker: Silo from its package, Self-Updater from its npm release.
+The apps run as Docker Compose stacks behind the reverse proxy (Traefik, or nginx, Apache or Caddy without it), each on
+host names of its own: `LSS_<APP>_DOMAINS`, by default the module name in front of the server's name
+(`nextcloud.example.com`). Those names must point to the server; with the `tls` module every app gets its own
+certificate. `minio` and `self-updater` also run without Docker: Silo from its package, Self-Updater from its npm
+release.
 
 Every stack follows the container rules above: images pinned by digest, no capabilities, no new privileges, a
 read-only root file system where the image allows it (Collabora Online and Keycloak write below their program

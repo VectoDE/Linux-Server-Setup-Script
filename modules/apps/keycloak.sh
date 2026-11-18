@@ -4,7 +4,7 @@
 
 MOD_NAME="keycloak"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Keycloak 26 (single sign-on with OpenID Connect and SAML) with PostgreSQL as a Docker Compose stack behind the web server"
+MOD_DESCRIPTION="Keycloak 26 (single sign-on with OpenID Connect and SAML) with PostgreSQL as a Docker Compose stack behind the reverse proxy"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Keycloak site, separated by spaces; empty: keycloak.<host name of the server>

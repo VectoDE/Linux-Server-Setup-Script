@@ -4,7 +4,7 @@
 
 MOD_NAME="wordpress"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="WordPress 7.1 with MariaDB as a Docker Compose stack behind the web server, installed with a first administrator; the theme and plugin editor is off"
+MOD_DESCRIPTION="WordPress 7.1 with MariaDB as a Docker Compose stack behind the reverse proxy, installed with a first administrator; the theme and plugin editor is off"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the WordPress site, separated by spaces; empty: wordpress.<host name of the server>

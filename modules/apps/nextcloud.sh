@@ -4,7 +4,7 @@
 
 MOD_NAME="nextcloud"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Nextcloud Hub 34 with PostgreSQL as a Docker Compose stack behind the web server, background jobs by a systemd timer, linked to Collabora Online when the collabora module is installed"
+MOD_DESCRIPTION="Nextcloud Hub 34 with PostgreSQL as a Docker Compose stack behind the reverse proxy, background jobs by a systemd timer, linked to Collabora Online when the collabora module is installed"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Nextcloud site, separated by spaces; empty: nextcloud.<host name of the server>

@@ -4,7 +4,7 @@
 
 MOD_NAME="matomo"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Matomo 5 (web analytics) with MariaDB as a Docker Compose stack behind the web server, installed with a super user and a first website, reports archived by a systemd timer"
+MOD_DESCRIPTION="Matomo 5 (web analytics) with MariaDB as a Docker Compose stack behind the reverse proxy, installed with a super user and a first website, reports archived by a systemd timer"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Matomo site, separated by spaces; empty: matomo.<host name of the server>
