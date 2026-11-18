@@ -70,7 +70,14 @@ load_module() {
 	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
 	svc_selinux_spawner() { printf 'spawner %s\n' "$*" >>"${STUB_LOG}"; }
 	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
-	postconf() { printf '/usr/lib/postfix/sbin\n'; }
+	postconf() {
+		case $2 in
+		sendmail_path) printf '/usr/sbin/sendmail.postfix\n' ;;
+		*) printf '/usr/lib/postfix/sbin\n' ;;
+		esac
+	}
+	# shellcheck disable=SC2329 # called by mail_postfix_sandbox
+	svc_exec_programs() { printf '%s\n' /usr/sbin/restorecon /usr/sbin/postfix; }
 	run mail_postfix_sandbox ReadWritePaths=/var/mail
 	[ "${lines[0]}" = 'postfix@.service' ]
 	[[ ${output} == *$'PrivateDevices=no\nReadWritePaths=/var/spool/postfix\nReadWritePaths=/var/lib/postfix\nReadWritePaths=/var/mail'* ]]
@@ -78,6 +85,7 @@ load_module() {
 	# through a policy module.
 	run ! grep -q NoNewPrivileges <<<"${output}"
 	grep -qxF 'spawner postfix /usr/lib/postfix/sbin/master /usr/lib/postfix/sbin' "${STUB_LOG}"
+	grep -qxF 'spawner postfix_start init_t /usr/sbin/restorecon /usr/sbin/postfix /usr/sbin/sendmail.postfix' "${STUB_LOG}"
 }
 
 @test "Postfix starts once, restarts only after a change and stops the run on a configuration it rejects" {

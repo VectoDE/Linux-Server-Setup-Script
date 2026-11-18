@@ -25,8 +25,9 @@ shift
 }
 settings=tests/integration/settings.conf
 container="lss-test-${system}"
-# A run that hangs ends after 40 minutes, so the diagnostics below still show what it waited for.
-LSS_RUN="timeout --kill-after=60 2400 lss"
+# A run that hangs ends after 40 minutes (LSS_TEST_TIMEOUT seconds), so the diagnostics below still show what it waited
+# for. The profile with every module takes almost that long on its own.
+LSS_RUN="timeout --kill-after=60 ${LSS_TEST_TIMEOUT:-2400} lss"
 # shellcheck source=tests/integration/vm.sh
 source tests/integration/vm.sh
 # shellcheck source=tests/integration/pebble.sh
@@ -66,6 +67,13 @@ start_target() {
 			echo "Unknown system ${system}" >&2
 			exit 2
 		}
+		# Right after the runner boots (arm64 images), its Docker daemon may still be starting; the job waits for it
+		# instead of failing on the first docker call.
+		for ((i = 0; i < 60; i++)); do
+			docker info >/dev/null 2>&1 && break
+			((i != 10)) || sudo systemctl start docker.service || true
+			sleep 2
+		done
 		docker build -q -f "tests/integration/images/${system}/Containerfile" -t "lss-test:${system}" \
 			"tests/integration/images/${system}" >/dev/null
 		docker rm -f "${container}" >/dev/null 2>&1 || true
