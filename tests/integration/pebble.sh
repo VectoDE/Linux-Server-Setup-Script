@@ -16,6 +16,8 @@ c87fb918d9bac8db11aa54493b5f0cf6e0725a3fe73f617d1c64737e1ab4caf9 test/certs/loca
 0977979255b0e0721c17335c056b627f66a43cf56e5a52f3cda81fb111ecf00e test/certs/localhost/key.pem"
 # Where the target keeps Pebble; LSS_TLS_CA_BUNDLE in settings.conf points at the CA certificate here.
 PEBBLE_DIR=/etc/lss-pebble
+# The CA bundle LSS_TLS_CA_BUNDLE points at: the minica certificate of the API and the roots Pebble issues from.
+PEBBLE_BUNDLE=${PEBBLE_DIR}/ca-bundle.pem
 
 pebble_start() {
 	local arch sum work file
@@ -61,5 +63,19 @@ EOF
 		--setenv=PEBBLE_WFE_NONCEREJECT=0 ${PEBBLE_DIR}/pebble -config ${PEBBLE_DIR}/config.json
 		for i in \$(seq 30); do curl -fsS --cacert ${PEBBLE_DIR}/pebble.minica.pem -o /dev/null https://localhost:14000/dir && exit 0; sleep 1; done
 		journalctl -u lss-pebble --no-pager; exit 1"
+	pebble_bundle
+	return
+}
+
+# pebble_bundle: PEBBLE_BUNDLE, the CA bundle of settings.conf. Pebble serves its API with the minica certificate but
+# signs the certificates it issues with a root it creates at every start; apps that check each other's certificates
+# (Nextcloud and Collabora) need that root, as they would need the root of a step-ca. Roots of earlier starts stay in
+# the bundle, so certificates issued before a restart keep their anchor.
+pebble_bundle() {
+	in_target "set -e
+		[ -s ${PEBBLE_BUNDLE} ] || cp ${PEBBLE_DIR}/pebble.minica.pem ${PEBBLE_BUNDLE}
+		curl -fsS --retry 3 --cacert ${PEBBLE_DIR}/pebble.minica.pem -o ${PEBBLE_DIR}/root.pem https://localhost:15000/roots/0
+		grep -q 'BEGIN CERTIFICATE' ${PEBBLE_DIR}/root.pem
+		grep -qxF \"\$(sed -n 2p ${PEBBLE_DIR}/root.pem)\" ${PEBBLE_BUNDLE} || { echo; cat ${PEBBLE_DIR}/root.pem; } >>${PEBBLE_BUNDLE}"
 	return
 }

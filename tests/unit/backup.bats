@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# The backup scripts (libexec/lss-backup, libexec/lss-db-dumps) against a restic stub, and the checks of the restic
+# The backup scripts (libexec/lss-backup, libexec/lss-db-dumps, libexec/lss-app-backup) against a restic stub, and the checks of the restic
 # module.
 
 setup() {
@@ -19,6 +19,10 @@ setup() {
 	export LSS_DB_DUMPS_CONF=${BATS_TEST_TMPDIR}/db-dumps.conf
 	export LSS_DB_DUMPS_STATE=${BATS_TEST_TMPDIR}/db-dumps-state
 	export LSS_RESTIC=restic_stub
+	export LSS_APP_BACKUP=${BATS_TEST_TMPDIR}/app-backup
+	export LSS_APP_BACKUP_STATE=${BATS_TEST_TMPDIR}/app-backup-state
+	export LSS_APP_BACKUP_REGISTRY=${BATS_TEST_TMPDIR}/app-backup.d
+	export LSS_APP_BACKUP_DIR=${BATS_TEST_TMPDIR}/lss-apps
 	mkdir -p "${LSS_TEXTFILE_DIR}" "${LSS_SECRETS_DIR}"
 	printf 'BACKUP_REPOSITORY=/srv/repo\nBACKUP_PATHS=/etc /does-not-exist\nBACKUP_EXCLUDE=*.tmp\n' >"${LSS_BACKUP_CONF}"
 	printf 'password' >"${LSS_SECRETS_DIR}/restic-password"
@@ -333,4 +337,150 @@ load_dumps() {
 	run dump_rdb valkey "${BATS_TEST_TMPDIR}/w.rdb"
 	[ "${status}" -eq 1 ]
 	[ ! -e "${BATS_TEST_TMPDIR}/w.rdb" ]
+}
+
+@test "a run saves the data of the apps first and backs up the paths they list" {
+	load_backup
+	mkdir -p "${LSS_APP_BACKUP_STATE}" "${BATS_TEST_TMPDIR}/volume"
+	printf '#!/bin/sh\necho apps >>"%s"\n' "${STUB_LOG}" >"${LSS_APP_BACKUP}"
+	chmod +x "${LSS_APP_BACKUP}"
+	printf '%s\n' "${BATS_TEST_TMPDIR}/volume" /does-not-exist-either >"${LSS_APP_BACKUP_STATE}/paths"
+	cmd_run
+	grep -qxF apps "${STUB_LOG}"
+	grep -qxF "restic backup --tag lss --exclude-caches --exclude *.tmp /etc ${BATS_TEST_TMPDIR}/volume ${LSS_BACKUP_STATE}/canary" "${STUB_LOG}"
+	printf '#!/bin/sh\nexit 1\n' >"${LSS_APP_BACKUP}"
+	run cmd_run
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"saving the data of the apps failed; the backup goes on with the rest."* ]]
+}
+
+load_apps() {
+	# shellcheck source=/dev/null
+	source "${REPO_ROOT}/libexec/lss-app-backup"
+	DOCKER=docker_stub
+	mkdir -p "${REGISTRY}" "${BATS_TEST_TMPDIR}/volumes/lss-demo_data" "${BATS_TEST_TMPDIR}/volumes/lss-demo_html"
+	printf 'app.db\n' >"${BATS_TEST_TMPDIR}/volumes/lss-demo_data/app.db"
+	return
+}
+
+# docker stub for lss-app-backup: records the call; volume inspect prints the directory below volumes/ (missing
+# ones fail), exec prints $DUMP (fails with $DUMP_EXIT), pause and unpause fail with $PAUSE_EXIT.
+docker_stub() {
+	printf 'docker %s\n' "$*" >>"${STUB_LOG}"
+	case $* in
+	'volume inspect'*)
+		[[ -d ${BATS_TEST_TMPDIR}/volumes/${*: -1} ]] || return 1
+		printf '%s\n' "${BATS_TEST_TMPDIR}/volumes/${*: -1}"
+		;;
+	*' exec '*)
+		printf '%s' "${DUMP:-}"
+		return "${DUMP_EXIT:-0}"
+		;;
+	*' pause '* | *' unpause '*) return "${PAUSE_EXIT:-0}" ;;
+	*) ;;
+	esac
+	return 0
+}
+
+register() {
+	printf 'PROJECT=lss-%s\nCOMPOSE=/etc/lss/containers/lss-%s/compose.yaml\n%s\n' "$1" "$1" "$2" >"${REGISTRY}/$1.conf"
+	return
+}
+
+@test "app data: database dumps, copies of paused apps and the paths restic takes as they are" {
+	load_apps
+	register demo $'DB=postgres\nDB_USER=demo\nCOPY=data\nLIVE=html\nPATHS=/etc /does-not-exist'
+	DUMP='SQL' run_backups
+	local compose='docker compose --project-name lss-demo -f /etc/lss/containers/lss-demo/compose.yaml'
+	grep -qxF "${compose} exec -T db pg_dumpall --username=demo --clean --if-exists" "${STUB_LOG}"
+	grep -qxF "${compose} pause app" "${STUB_LOG}"
+	grep -qxF "${compose} unpause app" "${STUB_LOG}"
+	[ "$(cat "${OUT_ROOT}/demo/db.sql")" = SQL ]
+	[ "$(cat "${OUT_ROOT}/demo/data/app.db")" = app.db ]
+	[ "$(stat -c '%a' "${OUT_ROOT}/demo")" = 700 ]
+	[ "$(cat "${STATE}/paths")" = "$(printf '%s\n' "${BATS_TEST_TMPDIR}/volumes/lss-demo_html" /etc "${OUT_ROOT}")" ]
+	grep -q '^demo ok [0-9]*$' "${STATE}/status"
+	# MariaDB: mariadb-dump as root with the password from the secret file, inside the container.
+	register shop $'DB=mariadb'
+	DUMP='SQL' run_backups shop
+	grep -qF 'compose --project-name lss-shop -f /etc/lss/containers/lss-shop/compose.yaml exec -T db sh -c MYSQL_PWD=$(cat /run/secrets/db-root-password) exec mariadb-dump --user=root' "${STUB_LOG}"
+	[ -s "${OUT_ROOT}/shop/db.sql" ]
+}
+
+@test "a failed dump or copy keeps the previous one, unpauses the app and fails the run" {
+	load_apps
+	register demo $'DB=postgres\nDB_USER=demo\nCOPY=data'
+	mkdir -p "${OUT_ROOT}/demo/data"
+	printf 'OLD\n' >"${OUT_ROOT}/demo/db.sql"
+	printf 'OLD\n' >"${OUT_ROOT}/demo/data/app.db"
+	# shellcheck disable=SC2329 # called by the functions under test
+	cp() {
+		return 1
+	}
+	DUMP='PART' DUMP_EXIT=1 run run_backups
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the database dump of demo failed; ${OUT_ROOT}/demo/db.sql keeps the previous one."* ]]
+	[[ ${output} == *"the copy of the data of demo failed; ${OUT_ROOT}/demo keeps the previous one."* ]]
+	[ "$(cat "${OUT_ROOT}/demo/db.sql")" = OLD ]
+	[ "$(cat "${OUT_ROOT}/demo/data/app.db")" = OLD ]
+	[ ! -e "${OUT_ROOT}/demo/db.sql.part" ]
+	grep -q 'unpause app' "${STUB_LOG}"
+	grep -q '^demo failed ' "${STATE}/status"
+}
+
+@test "an app that cannot be paused or unpaused, and a missing volume, fail the run" {
+	load_apps
+	# shellcheck disable=SC2329 # called by the functions under test
+	sleep() {
+		:
+	}
+	register demo $'COPY=data'
+	PAUSE_EXIT=1 run run_backups demo
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the copy of the data of demo failed"* ]]
+	run ! grep -q 'unpause' "${STUB_LOG}"
+	register demo $'COPY=data\nLIVE=gone'
+	# Pausing works, unpausing never does.
+	# shellcheck disable=SC2329 # called by the functions under test
+	compose() {
+		[[ $2 != unpause ]]
+	}
+	run run_backups demo
+	[[ ${output} == *"the app of lss-demo stays paused; run docker compose unpause app."* ]]
+	[[ ${output} == *"the volume gone of demo is missing."* ]]
+	register demo $'COPY=gone'
+	run run_backups demo
+	[ "${status}" -eq 1 ]
+}
+
+@test "a run for named apps leaves the full list alone; unknown names and an empty registry are reported" {
+	load_apps
+	register demo $'LIVE=html'
+	run_backups
+	local before
+	before=$(cat "${STATE}/paths")
+	register other $'LIVE=data'
+	mkdir -p "${BATS_TEST_TMPDIR}/volumes/lss-other_data"
+	run_backups other
+	[ "$(cat "${STATE}/paths")" = "${before}" ]
+	run run_backups '../etc'
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"../etc is not registered"* ]]
+	rm -f -- "${REGISTRY}"/*.conf
+	run run_backups
+	[ "${status}" -eq 0 ]
+	[[ ${output} == *"0 apps are registered here; nothing to save."* ]]
+	[ ! -s "${STATE}/paths" ]
+	register bad $'DB=sqlite'
+	run run_backups bad
+	[ "${status}" -eq 1 ]
+}
+
+@test "the app backup script needs root" {
+	if [[ ${EUID} -eq 0 ]]; then
+		skip "runs as root"
+	fi
+	run bash "${REPO_ROOT}/libexec/lss-app-backup"
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"must run as root."* ]]
 }
