@@ -173,27 +173,47 @@ _mt_token() {
 		--data-urlencode "userLogin=$(opt admin_user)" --data-urlencode "passwordConfirmation@$(secret_path matomo-admin-password)" \
 		-d description=lss) || true
 	token=$(jq -r '.value // empty' <<<"${page%$'\n'*}" 2>/dev/null) || token=''
-	[[ -n ${token} ]] || die "matomo: the reporting API gives the super user no token (HTTP $(app_status "${page}"))."
+	[[ -n ${token} ]] ||
+		die "matomo: the reporting API gives $(opt admin_user) a token only with the password of lss (HTTP $(app_status "${page}")); if lss did not install this Matomo, check it, and lss remove matomo --purge starts over."
 	secret_set matomo-api-token "${token}"
 	files_note_change "created the Matomo API token"
 	return
 }
 
+# _mt_owner_check: the super user of lss (its API token) is a super user of this Matomo, so the instance is the one lss
+# installed and not one somebody else set up through the open installer.
+_mt_owner_check() {
+	local page
+	page=$(app_get index.php -X POST -d module=API -d method=UsersManager.getUsersHavingSuperUserAccess -d format=json \
+		--data-urlencode "token_auth@$(secret_path matomo-api-token)") || true
+	jq -e --arg login "$(opt admin_user)" 'type == "array" and any(.[]; .login == $login)' <<<"${page%$'\n'*}" \
+		>/dev/null 2>&1 ||
+		die "matomo: $(opt admin_user) of lss is missing among the super users of this Matomo (HTTP $(app_status "${page}")), so lss did not install it. Check the instance; lss remove matomo --purge starts over."
+	return
+}
+
 mod_configure() {
+	local APP_GET_LOCAL
 	app_db_secrets mariadb "${MT_USER}"
 	_mt_compose | app_compose
 	app_backup DB=mariadb LIVE=html
 	app_up
-	app_site "$(opt_int port)"
-	# The system check of the installer contains PHP code, which rule 953110 of the Core Rule Set takes for leaked
-	# source code; ModSecurity then cuts the answer off.
-	app_waf_exclude 953110
-	app_wait matomo.js 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.js does not answer."
+	# The web installer makes the first visitor the super user: it runs against the container before the site is
+	# published, and an instance that somebody else installed stops lss there (_mt_token, _mt_owner_check).
+	APP_GET_LOCAL=$(opt_int port)
+	app_wait matomo.js 200 >/dev/null || die "matomo: the container on 127.0.0.1:${APP_GET_LOCAL} does not answer."
 	_mt_install
 	_mt_set General force_ssl 1
 	_mt_set General assume_secure_protocol 1
 	_mt_set General enable_browser_archiving_triggering 0
 	_mt_token
+	_mt_owner_check
+	APP_GET_LOCAL=''
+	app_site "$(opt_int port)"
+	# The system check of the installer contains PHP code, which rule 953110 of the Core Rule Set takes for leaked
+	# source code; ModSecurity then cuts the answer off.
+	app_waf_exclude 953110
+	app_wait matomo.js 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.js does not answer."
 	app_timer matomo-archive 1h "Matomo report archiving" app php /var/www/html/console core:archive --url="https://$(app_domain)/"
 	return
 }

@@ -406,10 +406,19 @@ app_waf_exclude() {
 
 # app_get PATH [CURL OPTION...]: the page at https://DOMAIN/PATH as the web server of this server serves it (the
 # first host name of the app, or APP_GET_DOMAIN, resolved to 127.0.0.1), followed by a line with the HTTP status.
+# With APP_GET_LOCAL=PORT the request goes straight to the container on 127.0.0.1:PORT instead, with the host name
+# and the X-Forwarded-Proto header the web server would add: the first installation of an app runs that way, before
+# app_site publishes it, so nobody from outside can take over its installer in between.
 app_get() {
 	local path=$1 domain
 	shift
 	domain=${APP_GET_DOMAIN:-$(app_domain)}
+	if [[ -n ${APP_GET_LOCAL:-} ]]; then
+		[[ ${APP_GET_LOCAL} =~ ^[0-9]{1,5}$ ]] || die "${LSS_MODULE}: APP_GET_LOCAL must be a port, not '${APP_GET_LOCAL}'."
+		curl -s --max-time 30 -w '\n%{http_code}' -H "Host: ${domain}" -H 'X-Forwarded-Proto: https' "$@" \
+			"http://127.0.0.1:${APP_GET_LOCAL}/${path#/}"
+		return
+	fi
 	curl -ks --max-time 30 -w '\n%{http_code}' --resolve "${domain}:443:127.0.0.1" "$@" "https://${domain}/${path#/}"
 	return
 }
