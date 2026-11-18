@@ -904,6 +904,11 @@ EOF
 # Records what the Traefik side of a route would do; lib/traefik.sh has its own tests.
 stub_traefik_routes() {
 	# shellcheck disable=SC2329 # called by the functions under test
+	web_cert_placeholder() {
+		printf 'web_cert_placeholder %s\n' "$*" >>"${STUB_LOG}"
+		return
+	}
+	# shellcheck disable=SC2329 # called by the functions under test
 	traefik_route_write() {
 		printf 'traefik_route_write %s\n' "$*" >>"${STUB_LOG}"
 		files_note_change "route-$1.yml"

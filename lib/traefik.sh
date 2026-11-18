@@ -133,15 +133,23 @@ _traefik_drop() {
 
 # traefik_tls_conf: the content of tls.yml: every certificate below WEB_TLS_DIR (Traefik picks one by the SNI name), the
 # default certificate for every other name, and the TLS settings of the web servers (TLS 1.2 and 1.3, the cipher suites
-# of WEB_TLS_CIPHERS).
+# of WEB_TLS_CIPHERS). With Traefik's own ACME client (LSS_TRAEFIK_ACME) the self-signed placeholders of the routes
+# stay out: Traefik requests no certificate for names a stored certificate already covers.
 traefik_tls_conf() {
 	local dir cipher
+	local -A routes=()
+	if _traefik_acme; then
+		for dir in $(web_route_names); do
+			[[ -d ${WEB_CERT_LIVE}/${dir} ]] || routes[${dir}]=1
+		done
+	fi
 	printf '# Managed by lss (Traefik). The certificates of %s; written again when one is added or removed.\ntls:\n' \
 		"${WEB_TLS_DIR}"
 	printf '  certificates:\n'
 	for dir in "${WEB_TLS_DIR}"/*/; do
 		dir=${dir%/}
 		[[ -s ${dir}/fullchain.pem && -s ${dir}/privkey.pem ]] || continue
+		[[ -z ${routes[${dir##*/}]+x} ]] || continue
 		printf '    - certFile: %s/fullchain.pem\n      keyFile: %s/privkey.pem\n' "${dir}" "${dir}"
 	done
 	printf '  stores:\n    default:\n      defaultCertificate:\n'

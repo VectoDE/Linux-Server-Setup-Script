@@ -796,6 +796,8 @@ _web_route_write() {
 	local name=$1 owner=$2 url=$3 before
 	shift 3
 	before=$(files_changes_of "${owner}")
+	traefik_active || [[ -n $(web_server) ]] ||
+		die "web: the route ${name} needs Traefik or a web server (nginx, apache or caddy)."
 	web_cert_placeholder "${name}" "$@"
 	if traefik_waf_backend; then
 		web_site_write "${name}" proxy "${url}" "$@"
@@ -804,7 +806,6 @@ _web_route_write() {
 		web_site_remove "${name}"
 		traefik_route_write "${name}" "${url}" "$@"
 	else
-		[[ -n $(web_server) ]] || die "web: the route ${name} needs Traefik or a web server (nginx, apache or caddy)."
 		traefik_route_remove "${name}"
 		web_site_write "${name}" proxy "${url}" "$@"
 	fi

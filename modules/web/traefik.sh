@@ -712,7 +712,7 @@ _traefik_verify_sites() {
 # Every recorded route answers (502 counts as an answer: the application may be down); with Traefik's ACME client
 # its certificate comes from the ACME server.
 _traefik_verify_routes() {
-	local name domain answer default i served
+	local name domain answer default i served placeholder
 	default=$(openssl x509 -noout -fingerprint -sha256 -in "${WEB_TLS_DIR}/default/fullchain.pem" 2>/dev/null || true)
 	for name in $(web_route_names); do
 		domain=$(awk '{ print $2 }' "$(_web_routes_dir)/${name}")
@@ -732,13 +732,15 @@ _traefik_verify_routes() {
 				die "traefik: the WAF let an SQL injection to the route ${name} through (status $(_traefik_status "${answer}"), not 403)."
 		fi
 		opt_bool acme || continue
+		# The self-signed placeholder of the route (web_cert_placeholder) is no ACME certificate either.
+		placeholder=$(openssl x509 -noout -fingerprint -sha256 -in "${WEB_TLS_DIR}/${name}/fullchain.pem" 2>/dev/null || true)
 		for ((i = 0; i < 90; i++)); do
 			served=$(openssl s_client -connect 127.0.0.1:443 -servername "${domain}" </dev/null 2>/dev/null |
 				openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)
-			[[ -z ${served} || ${served} == "${default}" ]] || break
+			[[ -z ${served} || ${served} == "${default}" || ${served} == "${placeholder}" ]] || break
 			sleep 2
 		done
-		[[ -n ${served} && ${served} != "${default}" ]] ||
+		[[ -n ${served} && ${served} != "${default}" && ${served} != "${placeholder}" ]] ||
 			die "traefik: the ACME server issued no certificate for ${domain}; see journalctl -u ${TRAEFIK_UNIT}."
 	done
 	return
