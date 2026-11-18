@@ -342,6 +342,18 @@ EOF
 # The Coraza directives: the recommended engine settings, the Core Rule Set with the chosen paranoia level and the
 # methods of the modsecurity module. Bodies beyond the inspection limit pass partly inspected instead of breaking
 # uploads; response bodies are not inspected.
+# Three settings loosen the defaults of the Core Rule Set; each has a reason and leaves a risk:
+#   SecRequestBodyLimitAction ProcessPartial  The default (Reject) answers 413 to every body above the limit of
+#       coraza.conf-recommended (SecRequestBodyLimit, 12.5 MiB), which breaks large uploads to Nextcloud or Forgejo.
+#       Risk: an attacker pads a request with more than the limit of harmless bytes and puts the payload behind them,
+#       where no rule looks. The applications must validate what they accept; the WAF is one layer, not the only one.
+#   SecResponseBodyAccess Off  Inspecting responses buffers every body in memory, which costs latency and RAM for
+#       downloads and streams, and its rules (the data leakage group of the Core Rule Set, such as 953110 for PHP
+#       source) turn normal pages of installers and admin tools into false positives. Risk: Coraza does not notice an
+#       application that leaks error messages, source code or stack traces in its answers.
+#   tx.allowed_methods (rule 900200) adds PUT, PATCH and DELETE to GET, HEAD, POST and OPTIONS (the same methods as
+#       the modsecurity module). The REST APIs and WebDAV of the apps need them. Risk: the method check no longer
+#       blocks these three; the content rules still inspect the requests, authorization stays with the application.
 _traefik_waf() {
 	cat <<EOF
     lss-waf:

@@ -211,7 +211,9 @@ mod_configure() {
 	APP_GET_LOCAL=''
 	app_site "$(opt_int port)"
 	# The system check of the installer contains PHP code, which rule 953110 of the Core Rule Set takes for leaked
-	# source code; ModSecurity then cuts the answer off.
+	# source code; ModSecurity then cuts the answer off. Risk that stays: for the host names of Matomo ModSecurity no
+	# longer notices PHP source in a response (a leak by the application). Coraza needs no exclusion: it does not
+	# inspect responses (SecResponseBodyAccess Off in modules/web/traefik.sh).
 	app_waf_exclude 953110
 	app_wait matomo.js 200 >/dev/null || die "matomo: https://$(app_domain)/matomo.js does not answer."
 	app_timer matomo-archive 1h "Matomo report archiving" app php /var/www/html/console core:archive --url="https://$(app_domain)/"
