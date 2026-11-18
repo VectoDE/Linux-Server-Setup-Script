@@ -142,6 +142,25 @@ use_module() {
 	[ "$(grep -c '^        - TLS_ECDHE_' <<<"${output}")" = 6 ]
 }
 
+@test "with Traefik's ACME client the placeholders of the routes stay out of tls.yml, certificates of the tls module stay" {
+	WEB_CERT_LIVE=${BATS_TEST_TMPDIR}/letsencrypt/live
+	mkdir -p "${LSS_STATE_DIR}/web-routes" "${WEB_CERT_LIVE}/shop"
+	printf 'demo app.example.com http://127.0.0.1:3000\n' >"${LSS_STATE_DIR}/web-routes/app"
+	printf 'demo shop.example.com http://127.0.0.1:3001\n' >"${LSS_STATE_DIR}/web-routes/shop"
+	for dir in default app shop; do
+		mkdir -p "${WEB_TLS_DIR}/${dir}"
+		echo pem >"${WEB_TLS_DIR}/${dir}/fullchain.pem"
+		echo pem >"${WEB_TLS_DIR}/${dir}/privkey.pem"
+	done
+	run traefik_tls_conf
+	[[ ${output} == *"- certFile: ${WEB_TLS_DIR}/app/fullchain.pem"* ]]
+	export LSS_TRAEFIK_ACME=true
+	run traefik_tls_conf
+	[[ ${output} != *"${WEB_TLS_DIR}/app/"* ]]
+	[[ ${output} == *"- certFile: ${WEB_TLS_DIR}/shop/fullchain.pem"* ]]
+	[[ ${output} == *"- certFile: ${WEB_TLS_DIR}/default/fullchain.pem"* ]]
+}
+
 @test "a route matches each of its host names and gets Traefik's ACME resolver only when it is switched on" {
 	run traefik_route_conf app http://127.0.0.1:3000 app.example.com www.app.example.com
 	[[ ${output} == *'rule: "Host(`app.example.com`) || Host(`www.app.example.com`)"'* ]]
