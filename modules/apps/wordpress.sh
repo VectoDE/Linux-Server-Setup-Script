@@ -92,10 +92,30 @@ _wp_installed() {
 	return
 }
 
-# _wp_install: step 2 of the installer; the password goes to curl as a file.
+# _wp_owner_check: an installation that exists already must be the one lss made, so its administrator logs in with
+# the password of the secret. Otherwise somebody else ran the installer first, and lss stops before it publishes the
+# site.
+_wp_owner_check() {
+	local page status
+	secret_exists wordpress-admin-password ||
+		die "wordpress: WordPress is installed already, but lss has no password for $(opt admin_user), so lss did not install it. Check the instance; lss remove wordpress --purge starts over."
+	page=$(app_get wp-login.php -X POST --data-urlencode "log=$(opt admin_user)" \
+		--data-urlencode "pwd@$(secret_path wordpress-admin-password)" \
+		--data-urlencode "redirect_to=https://$(app_domain)/wp-admin/") || true
+	status=$(app_status "${page}")
+	[[ ${status} == 302 ]] ||
+		die "wordpress: WordPress is installed already, but $(opt admin_user) cannot log in with the password of lss (HTTP ${status}), so lss did not install it. Check the instance; lss remove wordpress --purge starts over."
+	return
+}
+
+# _wp_install: step 2 of the installer; the password goes to curl as a file. Runs against the container on
+# 127.0.0.1 (APP_GET_LOCAL), before app_site publishes the site, so nobody else can reach the open installer.
 _wp_install() {
 	local email page
-	_wp_installed && return 0
+	if _wp_installed; then
+		_wp_owner_check
+		return 0
+	fi
 	email=$(opt admin_email)
 	[[ -n ${email} ]] || email=$(opt admin_user)@$(app_domain)
 	secret_get wordpress-admin-password 32 >/dev/null || die "wordpress: the password of the administrator cannot be created."
@@ -111,13 +131,20 @@ _wp_install() {
 }
 
 mod_configure() {
+	local APP_GET_LOCAL
 	app_db_secrets mariadb "${WP_USER}"
 	_wp_compose | app_compose
 	app_backup DB=mariadb LIVE=html
 	app_up
+	# The installer takes the first visitor as the administrator: it runs against the container before the site is
+	# published.
+	APP_GET_LOCAL=$(opt_int port)
+	app_wait wp-includes/css/buttons.min.css 200 >/dev/null ||
+		die "wordpress: the container on 127.0.0.1:${APP_GET_LOCAL} does not answer."
+	_wp_install
+	APP_GET_LOCAL=''
 	app_site "$(opt_int port)"
 	app_wait wp-includes/css/buttons.min.css 200 >/dev/null || die "wordpress: https://$(app_domain)/ does not answer."
-	_wp_install
 	return
 }
 

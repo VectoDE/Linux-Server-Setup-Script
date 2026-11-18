@@ -109,6 +109,14 @@ _nc_started() {
 	return
 }
 
+# _nc_owner_check: an installation that exists already must be the one lss made, with the administrator of lss in the
+# admin group; otherwise lss stops before it publishes the site.
+_nc_owner_check() {
+	_nc_occ user:info "$(opt admin_user)" --output=json 2>/dev/null | jq -e '.groups | index("admin")' >/dev/null 2>&1 ||
+		die "nextcloud: Nextcloud is installed already, but $(opt admin_user) of lss is missing among its administrators, so lss did not install it. Check the instance; lss remove nextcloud --purge starts over."
+	return
+}
+
 # _nc_install: the first installation. occ asks for the database and the admin password when they are not on its
 # command line; both come from the mounted secret files through a pipe, so they never appear in a process list.
 _nc_install() {
@@ -117,7 +125,10 @@ _nc_install() {
 		_nc_started && _nc_occ status >/dev/null 2>&1 && break
 		sleep 3
 	done
-	_nc_installed && return 0
+	if _nc_installed; then
+		_nc_owner_check
+		return 0
+	fi
 	log_info "nextcloud: installing Nextcloud (admin user $(opt admin_user), password in $(secret_path nextcloud-admin-password))"
 	# shellcheck disable=SC2016 # expanded by the shell in the container
 	log_command app_exec -e SHELL_INTERACTIVE=1 app sh -c 'printf "%s\n%s\n" "$(cat /run/secrets/db-password)" "$(cat /run/secrets/admin-password)" |
