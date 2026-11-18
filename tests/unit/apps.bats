@@ -386,6 +386,38 @@ docker() {
 	[[ ${output} == *"Nextcloud Office (richdocuments) cannot be installed"* ]]
 }
 
+@test "with Traefik's own ACME client an app trusts the CA of that server, never the placeholder of the route" {
+	WEB_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	WEB_CERT_LIVE=${BATS_TEST_TMPDIR}/live
+	mkdir -p "${WEB_TLS_DIR}/collabora" "${WEB_CERT_LIVE}"
+	printf 'PLACEHOLDER
+' >"${WEB_TLS_DIR}/collabora/fullchain.pem"
+	# Without Traefik's ACME client the self-signed certificate of the route is what the route presents.
+	[ "$(_app_route_trust collabora)" = "${WEB_TLS_DIR}/collabora/fullchain.pem" ]
+	state_set traefik status installed
+	[ "$(_app_route_trust collabora)" = "${WEB_TLS_DIR}/collabora/fullchain.pem" ]
+	# Traefik does not present the placeholder when it issues the certificate itself: no trust without a CA bundle.
+	config_set LSS_TRAEFIK_ACME true
+	[ -z "$(_app_route_trust collabora)" ]
+	# A private ACME server (Pebble): its roots, not the placeholder.
+	printf 'PEBBLE ROOT
+' >"${BATS_TEST_TMPDIR}/pebble.pem"
+	config_set LSS_TRAEFIK_ACME_CA_BUNDLE "${BATS_TEST_TMPDIR}/pebble.pem"
+	[ "$(_app_route_trust collabora)" = "${BATS_TEST_TMPDIR}/pebble.pem" ]
+	# A bundle that does not exist or is empty is no trust anchor.
+	config_set LSS_TRAEFIK_ACME_CA_BUNDLE "${BATS_TEST_TMPDIR}/missing.pem"
+	[ -z "$(_app_route_trust collabora)" ]
+	# A route with a certificate of the tls module keeps the CA of that module.
+	config_set LSS_TRAEFIK_ACME_CA_BUNDLE "${BATS_TEST_TMPDIR}/pebble.pem"
+	mkdir -p "${WEB_CERT_LIVE}/collabora"
+	state_set tls status installed
+	[ -z "$(_app_route_trust collabora)" ]
+	printf 'TLS CA
+' >"${BATS_TEST_TMPDIR}/tls-ca.pem"
+	config_set LSS_TLS_CA_BUNDLE "${BATS_TEST_TMPDIR}/tls-ca.pem"
+	[ "$(_app_route_trust collabora)" = "${BATS_TEST_TMPDIR}/tls-ca.pem" ]
+}
+
 @test "timers run a command in a container of the stack and go away on removal" {
 	# shellcheck disable=SC2329 # called by app_timer
 	svc_unit() {
