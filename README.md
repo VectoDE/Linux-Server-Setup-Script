@@ -147,6 +147,8 @@ row is the cost of the whole set, including the web server or PHP it needs.
 time and the peak memory go. Later runs reuse the build.
 
 The integration jobs print these figures as `RESOURCES` lines, so every new module and every new system adds its own.
+The tables "Supported systems" and "System requirements" above come from `data/systems.conf`, which the website reads
+too; CI fails when they differ.
 
 ## Quick start
 
@@ -499,6 +501,7 @@ well, where an alert rule picks it up.
 - [Troubleshooting](docs/troubleshooting.md): locked out, failed modules, common messages
 - [Assurance case](docs/assurance.md): threat model, trust boundaries and how lss counters common weaknesses
 - [Writing a module](docs/module-guide.md)
+- [Website](docs/website.md): the scroll film on GitHub Pages, built from the module files
 - [Changelog](CHANGELOG.md)
 
 ## Contributing and security
