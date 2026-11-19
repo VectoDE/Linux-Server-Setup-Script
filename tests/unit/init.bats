@@ -236,6 +236,12 @@ record_writes() {
 	run svc_schedule demo daily 'x' date +%F
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"contains % or a line break."* ]]
+	run svc_schedule demo $'daily\nExecStartPre=/bin/false' 'x' /bin/true
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"contains a line break or another control character."* ]]
+	run svc_schedule demo daily $'x\n* * * * * root /bin/false' /bin/true
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"contains a line break or another control character."* ]]
 	run svc_schedule demo '*-*-* 03:30:15' 'x' /bin/true
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"The schedule '*-*-* 03:30:15' of demo has no cron form."* ]]

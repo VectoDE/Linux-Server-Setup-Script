@@ -356,6 +356,9 @@ svc_schedule() {
 	shift 3
 	[[ ${name} =~ ^[A-Za-z0-9_-]+$ ]] || die "Invalid schedule name '${name}'."
 	(($# > 0)) || die "The schedule ${name} has no command."
+	# Both go into the unit files or the cron job line by line; a line break would add lines of its own.
+	[[ ${calendar} != *[[:cntrl:]]* && ${description} != *[[:cntrl:]]* ]] ||
+		die "The schedule or the description of ${name} contains a line break or another control character."
 	for word in "$@"; do
 		[[ ${word} != *%* && ${word} != *$'\n'* ]] || die "The command of the schedule ${name} contains % or a line break."
 	done
