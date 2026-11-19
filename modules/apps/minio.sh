@@ -198,7 +198,10 @@ _minio_s3() {
 		chmod 600 "${netrc}"
 		printf 'machine %s login %s password %s\n' "$(app_domain)" "${SILO_DEFAULT_LOGIN}" "${SILO_DEFAULT_LOGIN}" >"${netrc}"
 	fi
-	page=$(app_get "${path}" --netrc-file "${netrc}" --aws-sigv4 aws:amz:us-east-1:s3 -X "${method}" "$@") || true
+	# curl before 7.88 (Rocky and AlmaLinux 9: 7.76) leaves x-amz-content-sha256 out, and MinIO answers 400 without it;
+	# the payload goes over HTTPS, where UNSIGNED-PAYLOAD is allowed.
+	page=$(app_get "${path}" --netrc-file "${netrc}" --aws-sigv4 aws:amz:us-east-1:s3 \
+		-H 'x-amz-content-sha256: UNSIGNED-PAYLOAD' -X "${method}" "$@") || true
 	rm -f -- "${netrc}"
 	printf '%s' "${page}"
 	return
