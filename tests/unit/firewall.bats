@@ -187,12 +187,15 @@ records() {
 	[ "$(cat "${LSS_STATE_DIR}/firewall/web")" = 443/tcp ]
 }
 
-# distro_default ID VERSION: writes FW_NFT_CONF as the default of a distribution (a table "inet filter" that drops input,
-# like Alpine's and Arch's) and lists its checksum in a defaults file of the test.
+# distro_default ID VERSION [forward]: writes FW_NFT_CONF as the default of a distribution (a table "inet filter" that
+# drops input, like Alpine's and Arch's, with a forward chain that drops as well if the third argument is "forward") and
+# lists its checksum in a defaults file of the test.
 distro_default() {
+	local forward=''
 	export FW_NFT_DEFAULTS=${BATS_TEST_TMPDIR}/nftables-defaults.conf
-	printf '#!/usr/sbin/nft -f\nflush ruleset\ntable inet filter {\n\tchain input {\n\t\ttype filter hook input priority 0; policy drop;\n\t}\n}\ninclude "%s/*.nft"\n' \
-		"${FW_NFT_FILE%/*}" >"${FW_NFT_CONF}"
+	[[ ${3:-} != forward ]] || forward='\tchain forward {\n\t\ttype filter hook forward priority 0; policy drop;\n\t}\n'
+	printf '#!/usr/sbin/nft -f\nflush ruleset\ntable inet filter {\n\tchain input {\n\t\ttype filter hook input priority 0; policy drop;\n\t}\n%b}\ninclude "%s/*.nft"\n' \
+		"${forward}" "${FW_NFT_FILE%/*}" >"${FW_NFT_CONF}"
 	chmod 0755 "${FW_NFT_CONF}"
 	printf '# A comment\n%s %s /etc/%s %s\n' "$1" "$2" "${FW_NFT_CONF##*/}" "$(sha256sum "${FW_NFT_CONF}" | cut -d ' ' -f 1)" \
 		>"${FW_NFT_DEFAULTS}"
@@ -551,4 +554,122 @@ rollback_job() {
 		[[ ${output} == *"${unit} is active; switch it off or use it instead of nftables."* ]]
 	done
 	run ! grep -q 'nft -f' "${STUB_LOG}"
+}
+
+@test "fw_enable warns when the default it replaces dropped forwarded packets, and only then" {
+	export LSS_FIREWALL=nftables
+	OS_ID=alpine
+	OS_VERSION=3.24.2
+	OS_NAME='Alpine Linux v3.24'
+	records
+	distro_default alpine 3.24 forward
+	run fw_enable
+	[ "${status}" -eq 0 ]
+	[[ ${output} == *"dropped forwarded packets (chain forward, policy drop); lss's table has no forward chain"* ]]
+	# The default without a forward chain: nothing to warn about.
+	rm -f -- "${FW_NFT_CONF}".lss-* "${FW_NFT_CONF}"
+	distro_default alpine 3.24
+	run fw_enable
+	[ "${status}" -eq 0 ]
+	[[ ${output} != *"forwarded packets"* ]]
+}
+
+@test "the header of lss's nftables configuration claims no saved default" {
+	[[ $(_fw_nft_conf_content on) == *"If it replaced a default of the distribution, a copy is next"* ]]
+	[[ $(_fw_nft_conf_content on) != *"lss saved the default"* ]]
+}
+
+@test "fw_nft_conf is FW_NFT_CONF, else the file the nftables service of the family loads" {
+	[ "$(fw_nft_conf)" = "${FW_NFT_CONF}" ]
+	FW_NFT_CONF=
+	OS_FAMILY=alpine
+	[ "$(fw_nft_conf)" = /etc/nftables.nft ]
+	OS_FAMILY=rhel
+	[ "$(fw_nft_conf)" = /etc/sysconfig/nftables.conf ]
+	for OS_FAMILY in debian arch suse; do
+		[ "$(fw_nft_conf)" = /etc/nftables.conf ]
+	done
+}
+
+@test "without systemd and without setsid the rollback is a job under nohup alone" {
+	export SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22' LSS_FIREWALL=nftables LSS_INIT=openrc
+	export FW_RUN_DIR=${BATS_TEST_TMPDIR}/run
+	# shellcheck disable=SC2329 # hides setsid from fw_rollback_arm
+	type() {
+		[[ $1 == -P && $2 == setsid ]] && return 1
+		builtin type "$@"
+	}
+	fw_rollback_arm 600 2>/dev/null
+	unset -f type
+	local pid i
+	pid=$(rollback_job)
+	tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -qF ': lss-firewall-rollback; sleep 600; nft delete table inet lss;'
+	fw_rollback_cancel
+	for ((i = 0; i < 50; i++)); do
+		gone "${pid}" && break
+		sleep 0.1
+	done
+	gone "${pid}"
+	[ ! -e "${FW_RUN_DIR}/firewall-rollback.pid" ]
+	run ! grep -q 'nft delete' "${STUB_LOG}"
+}
+
+# module_stubs: the module firewall with everything around mod_configure replaced by recorders in $STUB_LOG.
+module_stubs() {
+	# shellcheck source=modules/security/firewall.sh
+	source "${REPO_ROOT}/modules/security/firewall.sh"
+	# shellcheck disable=SC2329 # called by mod_configure
+	opt() { :; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	opt_int() { printf '120'; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_ssh_port() { printf '22'; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_allow() { printf 'allow %s\n' "$1" >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_apply_all() { return 0; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_rollback_arm() { printf 'arm %s\n' "$1" >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_rollback_cancel() { printf 'cancel\n' >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_enable() { printf 'enable\n' >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by mod_configure
+	_fw_is_open() { printf 'open %s\n' "$1" >>"${STUB_LOG}"; }
+}
+
+@test "mod_configure switches nftables on through fw_enable inside the rollback window and keeps it up to date" {
+	export LSS_FIREWALL=nftables
+	module_stubs
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_is_enabled() { return 1; }
+	mod_configure
+	[ "$(grep -E '^(allow|arm|enable|open|cancel)' "${STUB_LOG}" | paste -sd ' ' -)" = 'allow 22/tcp arm 120 enable open 22 cancel' ]
+	# Already on: no rollback window, but fw_enable brings the configuration up to date.
+	: >"${STUB_LOG}"
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_is_enabled() { return 0; }
+	mod_configure
+	[ "$(grep -E '^(allow|arm|enable|open|cancel)' "${STUB_LOG}" | paste -sd ' ' -)" = 'allow 22/tcp enable' ]
+}
+
+@test "mod_configure and mod_verify fail while another table drops input, and the rollback stays armed" {
+	export LSS_FIREWALL=nftables
+	module_stubs
+	# shellcheck disable=SC2329 # called by _fw_no_foreign_drop
+	nft() {
+		[[ $* == 'list chains' ]] || return 0
+		printf '%s\n' 'table inet filter {' '	chain input {' '		type filter hook input priority filter; policy drop;' '	}' '}'
+	}
+	# shellcheck disable=SC2329 # called by mod_configure
+	fw_is_enabled() { return 1; }
+	run mod_configure
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the input chain inet filter input of another nftables table drops by default"* ]]
+	run ! grep -qx -e cancel -e 'open 22' "${STUB_LOG}"
+	# shellcheck disable=SC2329 # called by mod_verify
+	fw_is_enabled() { return 0; }
+	run mod_verify
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the input chain inet filter input of another nftables table drops by default"* ]]
 }

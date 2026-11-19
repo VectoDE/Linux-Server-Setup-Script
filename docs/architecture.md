@@ -90,7 +90,8 @@ families and nftables elsewhere (iptables where `nft` is missing); `LSS_FIREWALL
 `inet lss` of its own and iptables a chain `LSS-INPUT`; lss writes their whole rule set from the records each time, and
 both drop what no rule accepts. A packet has to pass every input chain of nftables, so a second table that drops by
 default would drop what lss opens: lss replaces the nftables configuration of the distribution only while it is
-unchanged (its checksum is in `data/nftables-defaults.conf`), keeps a copy with a time stamp, and stops with a message
+unchanged (its checksum is in `data/nftables-defaults.conf`), keeps a copy with a time stamp (and warns if its forward
+chain dropped, which lss's table does not), and stops with a message
 at a configuration the administrator changed; `lss verify` checks that no other table drops input by default. While
 the firewall module enables the firewall, a timer (without systemd a background job) is armed that switches it off
 again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock you out.

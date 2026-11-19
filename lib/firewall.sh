@@ -549,7 +549,8 @@ _fw_nft_is_default() {
 # whose input chain would drop what lss accepts. "off" (fw_disable) leaves the include out.
 _fw_nft_conf_content() {
 	printf '%s\n' "# Managed by lss (module firewall). The nftables service loads this file at boot: the table of lss only," \
-		'# without "flush ruleset" and without other tables. A default of the distribution it replaced is next to it as' 		'# <name>.lss-<date>-<time>.'
+		'# without "flush ruleset" and without other tables. If it replaced a default of the distribution, a copy is next' \
+		'# to it as <name>.lss-<date>-<time>.'
 	[[ $1 != on ]] || printf 'include "%s"\n' "${FW_NFT_FILE}"
 	return
 }
@@ -593,6 +594,10 @@ _fw_nft_boot() {
 		backup="${conf}.lss-$(date +%Y%m%d-%H%M%S)"
 		cp -p -- "${conf}" "${backup}" || die "firewall: could not save ${conf} as ${backup}."
 		log_info "firewall: saved the default ${conf} of the distribution as ${backup}."
+		# lss's table has an input chain only: what the default's forward chain dropped is routed from now on.
+		if grep -Eq 'hook[[:space:]]+forward.*policy[[:space:]]+drop' "${conf}"; then
+			log_warn "firewall: the default ${conf} dropped forwarded packets (chain forward, policy drop); lss's table has no forward chain, so nftables does not filter routed traffic (containers, VPN) any more. Add your own forward rules in a table of their own if you need them."
+		fi
 		mapfile -t tables < <(sed -n 's/^[[:space:]]*table[[:space:]]\{1,\}\([a-z0-9]\{1,\}[[:space:]]\{1,\}[A-Za-z0-9_]\{1,\}\)[[:space:]]*{.*/\1/p' "${conf}")
 		# The file keeps its mode (Debian's is an executable nft script) and its owner.
 		mode=$(stat -c '%a' "${conf}")
