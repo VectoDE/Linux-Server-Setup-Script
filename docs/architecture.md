@@ -88,8 +88,11 @@ If the firewall module is installed, the rule is applied at once; if it is insta
 rule. Removing a module closes its ports. The backend is ufw on Debian and Ubuntu, firewalld on the RHEL and SUSE
 families and nftables elsewhere (iptables where `nft` is missing); `LSS_FIREWALL` picks one. nftables gets a table
 `inet lss` of its own and iptables a chain `LSS-INPUT`; lss writes their whole rule set from the records each time, and
-both drop what no rule accepts. While the firewall module enables the firewall, a timer is armed
-that switches it off again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock
+both drop what no rule accepts. A packet has to pass every input chain of nftables, so a second table that drops by
+default would drop what lss opens: lss replaces the nftables configuration of the distribution only while it is
+unchanged (its checksum is in `data/nftables-defaults.conf`), keeps a copy with a time stamp, and stops with a message
+at a configuration the administrator changed; `lss verify` checks that no other table drops input by default. While
+the firewall module enables the firewall, a timer (without systemd a background job) is armed that switches it off again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock
 you out.
 
 Published container ports never reach the INPUT rules of ufw or firewalld: Docker, Podman and kube-proxy redirect

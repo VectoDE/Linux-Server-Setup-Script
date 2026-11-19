@@ -34,6 +34,12 @@ setup() {
 	return
 }
 
+# A rollback job a failed test left behind would keep bats waiting (it holds the output of bats open).
+teardown() {
+	fw_rollback_cancel 2>/dev/null || true
+	return 0
+}
+
 # records: the rules of two modules and a trusted network.
 records() {
 	mkdir -p "${LSS_STATE_DIR}/firewall" "${LSS_STATE_DIR}/firewall-trusted"
@@ -181,25 +187,171 @@ records() {
 	[ "$(cat "${LSS_STATE_DIR}/firewall/web")" = 443/tcp ]
 }
 
-@test "fw_enable loads nftables, adds the include once and enables the service" {
-	export LSS_FIREWALL=nftables
-	printf '#!/usr/sbin/nft -f\nflush ruleset\n' >"${FW_NFT_CONF}"
+# distro_default ID VERSION: writes FW_NFT_CONF as the default of a distribution (a table "inet filter" that drops input,
+# like Alpine's and Arch's) and lists its checksum in a defaults file of the test.
+distro_default() {
+	export FW_NFT_DEFAULTS=${BATS_TEST_TMPDIR}/nftables-defaults.conf
+	printf '#!/usr/sbin/nft -f\nflush ruleset\ntable inet filter {\n\tchain input {\n\t\ttype filter hook input priority 0; policy drop;\n\t}\n}\ninclude "%s/*.nft"\n' \
+		"${FW_NFT_FILE%/*}" >"${FW_NFT_CONF}"
 	chmod 0755 "${FW_NFT_CONF}"
+	printf '# A comment\n%s %s /etc/%s %s\n' "$1" "$2" "${FW_NFT_CONF##*/}" "$(sha256sum "${FW_NFT_CONF}" | cut -d ' ' -f 1)" \
+		>"${FW_NFT_DEFAULTS}"
+}
+
+@test "fw_enable replaces the unchanged default of the distribution by a configuration that loads only lss's table" {
+	export LSS_FIREWALL=nftables
+	OS_ID=alpine
+	OS_VERSION=3.24.2
+	OS_NAME='Alpine Linux v3.24'
 	records
+	distro_default alpine 3.24
+	local original
+	original=$(<"${FW_NFT_CONF}")
 	fw_enable
-	grep -qxF "nft -f ${FW_NFT_FILE}" "${STUB_LOG}"
+	# The default is saved with a time stamp, then replaced: the include of lss, no flush, no other table.
+	local -a backups=("${FW_NFT_CONF}".lss-*)
+	[ "${#backups[@]}" -eq 1 ]
+	[ "$(<"${backups[0]}")" = "${original}" ]
 	grep -qxF "include \"${FW_NFT_FILE}\"" "${FW_NFT_CONF}"
+	run ! grep -q -e '^[[:space:]]*flush' -e '^[[:space:]]*table' -e '\*\.nft' "${FW_NFT_CONF}"
+	head -n 1 "${FW_NFT_CONF}" | grep -q '^# Managed by lss (module firewall)\.'
+	# The table of the default that is loaded now goes; lss's rules are loaded and the service is enabled.
+	grep -qxF 'nft delete table inet filter' "${STUB_LOG}"
+	grep -qxF "nft -f ${FW_NFT_FILE}" "${STUB_LOG}"
 	grep -q 'systemctl enable --now nftables' "${STUB_LOG}"
+	# Again: lss's own configuration stays, nothing is saved or deleted a second time.
+	: >"${STUB_LOG}"
 	fw_enable
+	backups=("${FW_NFT_CONF}".lss-*)
+	[ "${#backups[@]}" -eq 1 ]
+	run ! grep -q 'nft delete' "${STUB_LOG}"
 	[ "$(grep -c include "${FW_NFT_CONF}")" -eq 1 ]
-	# A configuration that includes the whole directory needs no line of its own.
-	printf 'include "%s/*.nft"\n' "${FW_NFT_FILE%/*}" >"${FW_NFT_CONF}"
+	# A configuration that is missing is written as well.
+	rm -f -- "${FW_NFT_CONF}"
 	fw_enable
-	[ "$(grep -c include "${FW_NFT_CONF}")" -eq 1 ]
+	grep -qxF "include \"${FW_NFT_FILE}\"" "${FW_NFT_CONF}"
 	# Refused rules stop the run.
 	STUB_EXIT_nft=1 run fw_enable
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"nftables does not take the rules"* ]]
+}
+
+@test "a default is recognised by its checksum, the ID and the version of the system" {
+	OS_ID=alpine
+	distro_default alpine 3.24
+	OS_VERSION=3.24.2
+	_fw_nft_is_default "${FW_NFT_CONF}"
+	OS_VERSION=3.24
+	_fw_nft_is_default "${FW_NFT_CONF}"
+	OS_VERSION=3.240.1
+	run ! _fw_nft_is_default "${FW_NFT_CONF}"
+	OS_VERSION=3.23.4
+	run ! _fw_nft_is_default "${FW_NFT_CONF}"
+	OS_ID=arch
+	OS_VERSION=''
+	run ! _fw_nft_is_default "${FW_NFT_CONF}"
+	distro_default arch '*'
+	_fw_nft_is_default "${FW_NFT_CONF}"
+	# One changed byte and it is the administrator's file.
+	printf '# mine\n' >>"${FW_NFT_CONF}"
+	run ! _fw_nft_is_default "${FW_NFT_CONF}"
+}
+
+@test "fw_enable stops at a changed configuration and keeps one that loads lss's rules itself" {
+	export LSS_FIREWALL=nftables
+	OS_ID=alpine
+	OS_VERSION=3.24.2
+	OS_NAME='Alpine Linux v3.24'
+	distro_default alpine 3.24
+	printf 'table inet mine {\n}\n' >>"${FW_NFT_CONF}"
+	local before
+	before=$(<"${FW_NFT_CONF}")
+	# Changed, but it includes the directory of lss's file: kept as it is.
+	fw_enable
+	[ "$(<"${FW_NFT_CONF}")" = "${before}" ]
+	grep -qxF "nft -f ${FW_NFT_FILE}" "${STUB_LOG}"
+	# Changed and without an include: the run stops before anything is loaded and says what to do.
+	printf '#!/usr/sbin/nft -f\nflush ruleset\ntable inet filter {\n}\n' >"${FW_NFT_CONF}"
+	before=$(<"${FW_NFT_CONF}")
+	: >"${STUB_LOG}"
+	run fw_enable
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"firewall: lss leaves ${FW_NFT_CONF} as it is: it is not the unchanged default of Alpine Linux v3.24."* ]]
+	[[ ${output} == *"Add the line include \"${FW_NFT_FILE}\" to it"* ]]
+	[[ ${output} == *"move the file away, then lss writes its own"* ]]
+	[ "$(<"${FW_NFT_CONF}")" = "${before}" ]
+	run ! grep -q -e 'nft -f' -e 'nft delete' "${STUB_LOG}"
+	# The unchanged default, but the administrator's rules sit in the directory it loads: the run stops as well.
+	distro_default alpine 3.24
+	mkdir -p "${FW_NFT_FILE%/*}"
+	printf 'table inet mine {\n}\n' >"${FW_NFT_FILE%/*}/mine.nft"
+	run fw_enable
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"it loads ${FW_NFT_FILE%/*}/mine.nft as well, which lss's configuration would leave out"* ]]
+	local -a backups=("${FW_NFT_CONF}".lss-*)
+	[ ! -e "${backups[0]}" ]
+}
+
+@test "fw_disable leaves lss's configuration of the service without the include" {
+	export LSS_FIREWALL=nftables
+	fw_enable
+	grep -qxF "include \"${FW_NFT_FILE}\"" "${FW_NFT_CONF}"
+	fw_disable
+	_fw_nft_is_own "${FW_NFT_CONF}"
+	run ! grep -q include "${FW_NFT_CONF}"
+	fw_enable
+	grep -qxF "include \"${FW_NFT_FILE}\"" "${FW_NFT_CONF}"
+}
+
+@test "an input chain of another table with policy drop is found, lss's own is not" {
+	export LSS_FIREWALL=nftables
+	# shellcheck disable=SC2329 # called by fw_nft_foreign_drop
+	nft() {
+		[[ $* == 'list chains' ]] || return 0
+		printf '%s\n' 'table inet filter {' '	chain input {' \
+			'		type filter hook input priority filter; policy drop;' '	}' '	chain output {' \
+			'		type filter hook output priority filter; policy drop;' '	}' '}' 'table ip nat {' '	chain prerouting {' \
+			'		type nat hook prerouting priority dstnat; policy accept;' '	}' '}' 'table inet lss {' '	chain input {' \
+			'		type filter hook input priority filter; policy drop;' '	}' '}' 'table inet docker {' '	chain input {' \
+			'		type filter hook input priority filter; policy accept;' '	}' '}'
+	}
+	[ "$(fw_nft_foreign_drop)" = 'inet filter input' ]
+	# shellcheck source=modules/security/firewall.sh
+	source "${REPO_ROOT}/modules/security/firewall.sh"
+	run _fw_no_foreign_drop
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the input chain inet filter input of another nftables table drops by default (policy drop)"* ]]
+	# The SSH rule of lss does not count while that chain drops.
+	# shellcheck disable=SC2329 # called by _fw_is_open
+	nft() {
+		case $* in
+		'list table inet lss') printf '\t\ttcp dport 22 accept\n' ;;
+		'list chains') printf 'table inet filter {\n\tchain input {\n\t\ttype filter hook input priority 0; policy drop;\n\t}\n}\n' ;;
+		*) ;;
+		esac
+	}
+	run ! _fw_is_open 22
+	# shellcheck disable=SC2329 # called by _fw_is_open
+	nft() {
+		[[ $* != 'list table inet lss' ]] || printf '\t\ttcp dport 22 accept\n'
+		return 0
+	}
+	_fw_is_open 22
+	_fw_no_foreign_drop
+	run ! _fw_is_open 443
+}
+
+@test "every default configuration in data/nftables-defaults.conf names a system, a file below /etc and a SHA-256" {
+	local id version file checksum count=0
+	while read -r id version file checksum; do
+		[[ -n ${id} && ${id} != '#'* ]] || continue
+		[[ ${id} =~ ^[a-z]+$ && ${version} =~ ^([0-9]+(\.[0-9]+)?|\*)$ && ${file} == /etc/* && ${checksum} =~ ^[0-9a-f]{64}$ ]]
+		count=$((count + 1))
+	done <"${REPO_ROOT}/data/nftables-defaults.conf"
+	((count > 0))
+	# Alpine and Arch, whose defaults drop input, are there.
+	grep -q '^alpine 3\.24 /etc/nftables.nft ' "${REPO_ROOT}/data/nftables-defaults.conf"
+	grep -q '^arch \* /etc/nftables.conf ' "${REPO_ROOT}/data/nftables-defaults.conf"
 }
 
 @test "fw_enable hooks iptables into INPUT and loads the rules at boot with systemd or OpenRC" {
@@ -295,6 +447,68 @@ records() {
 	export LSS_FIREWALL=iptables
 	fw_rollback_arm 60 2>/dev/null
 	grep -q 'systemd-run .*/bin/sh -c while iptables -D INPUT -j LSS-INPUT; do :; done;' "${STUB_LOG}"
+	run fw_rollback_arm 1m
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"the rollback needs a number of seconds, got '1m'."* ]]
+}
+
+# gone PID: the process has ended (a child of the test that nobody waited for stays a zombie until the test ends).
+gone() {
+	[[ ! -e /proc/$1 ]] || grep -q '^State:[[:space:]]*Z' "/proc/$1/status" 2>/dev/null
+}
+
+# rollback_job: the process ID of the rollback job, once its shell runs (the PID file exists before the exec).
+rollback_job() {
+	local pid i
+	pid=$(<"${FW_RUN_DIR}/firewall-rollback.pid")
+	for ((i = 0; i < 50; i++)); do
+		tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null | grep -qF ': lss-firewall-rollback;' && break
+		sleep 0.1
+	done
+	printf '%s' "${pid}"
+}
+
+@test "without systemd the rollback is a job of its own that cancelling stops, and it fires when nobody does" {
+	export SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22' LSS_FIREWALL=nftables LSS_INIT=openrc
+	export FW_RUN_DIR=${BATS_TEST_TMPDIR}/run
+	fw_rollback_arm 600 2>/dev/null
+	run ! grep -q -e systemd-run -e systemctl "${STUB_LOG}"
+	local pid
+	pid=$(rollback_job)
+	tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -qF ': lss-firewall-rollback; sleep 600; nft delete table inet lss;'
+	[ "$(stat -c '%a' "${FW_RUN_DIR}")" = 700 ]
+	fw_rollback_cancel
+	local i
+	for ((i = 0; i < 50; i++)); do
+		gone "${pid}" && break
+		sleep 0.1
+	done
+	gone "${pid}"
+	[ ! -e "${FW_RUN_DIR}/firewall-rollback.pid" ]
+	run ! grep -q 'nft delete' "${STUB_LOG}"
+	# A process ID that is not the job (left from before a reboot) is not killed; the file goes.
+	sleep 600 3>&- &
+	local other=$!
+	printf '%s\n' "${other}" >"${FW_RUN_DIR}/firewall-rollback.pid"
+	fw_rollback_cancel
+	kill -0 "${other}"
+	kill "${other}"
+	[ ! -e "${FW_RUN_DIR}/firewall-rollback.pid" ]
+	# Nobody cancels: after a second the table of lss goes (the stub nft records it) and the job removes its file.
+	fw_rollback_arm 1 2>/dev/null
+	for ((i = 0; i < 100; i++)); do
+		grep -qxF 'nft delete table inet lss' "${STUB_LOG}" && [[ ! -e ${FW_RUN_DIR}/firewall-rollback.pid ]] && break
+		sleep 0.1
+	done
+	grep -qxF 'nft delete table inet lss' "${STUB_LOG}"
+	[ ! -e "${FW_RUN_DIR}/firewall-rollback.pid" ]
+	# firewalld without systemd is stopped through its init script.
+	: >"${STUB_LOG}"
+	export LSS_FIREWALL=firewalld
+	fw_rollback_arm 600 2>/dev/null
+	pid=$(rollback_job)
+	tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -qF 'sleep 600; rc-service firewalld stop || service firewalld stop;'
+	fw_rollback_cancel
 }
 
 @test "fw_enable refuses to add rules next to an active ufw, firewalld or Proxmox VE firewall" {

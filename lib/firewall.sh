@@ -49,14 +49,17 @@ fw_declarative() {
 	return
 }
 
-# Where the rule sets of nftables and iptables live. The nftables service loads its configuration at boot
-# (/etc/nftables.conf, on Alpine /etc/nftables.nft, or FW_NFT_CONF); fw_enable adds an include of FW_NFT_FILE to it
-# unless it already includes the directory. The iptables files are loaded at boot by lss-firewall.service or, without systemd,
-# by the OpenRC local service (FW_LOCAL_D).
+# Where the rule sets of nftables and iptables live. The nftables service loads its configuration at boot (fw_nft_conf,
+# or FW_NFT_CONF); fw_enable makes it load FW_NFT_FILE (_fw_nft_boot). FW_NFT_DEFAULTS lists the checksums of the
+# configurations the distributions ship. The iptables files are loaded at boot by lss-firewall.service or, without
+# systemd, by the OpenRC local service (FW_LOCAL_D). FW_RUN_DIR holds the process ID of the rollback job where there is
+# no systemd-run.
 FW_NFT_FILE=${FW_NFT_FILE:-/etc/nftables.d/lss.nft}
 FW_NFT_CONF=${FW_NFT_CONF:-}
+FW_NFT_DEFAULTS=${FW_NFT_DEFAULTS:-}
 FW_IPT_DIR=${FW_IPT_DIR:-/etc/lss/firewall}
 FW_LOCAL_D=${FW_LOCAL_D:-/etc/local.d}
+FW_RUN_DIR=${FW_RUN_DIR:-/run/lss}
 
 # Attempts and the pause in seconds for a ufw command that loses a race in iptables.
 FW_UFW_TRIES=3
@@ -505,9 +508,126 @@ fw_sync() {
 	return
 }
 
+# fw_nft_conf: the file the nftables service loads at boot: FW_NFT_CONF, else /etc/nftables.nft on Alpine,
+# /etc/sysconfig/nftables.conf on the RHEL family (what its nftables.service names) and /etc/nftables.conf elsewhere.
+fw_nft_conf() {
+	if [[ -n ${FW_NFT_CONF} ]]; then
+		printf '%s' "${FW_NFT_CONF}"
+		return 0
+	fi
+	case ${OS_FAMILY} in
+	alpine) printf '/etc/nftables.nft' ;;
+	rhel) printf '/etc/sysconfig/nftables.conf' ;;
+	*) printf '/etc/nftables.conf' ;;
+	esac
+	return
+}
+
+# _fw_nft_is_default FILE: FILE is the configuration the distribution ships, unchanged: FW_NFT_DEFAULTS
+# (data/nftables-defaults.conf) lists its SHA-256 for this system (ID and VERSION_ID) and a file of the same name.
+_fw_nft_is_default() {
+	local conf=$1 list sum id version file checksum
+	list=${FW_NFT_DEFAULTS:-${LSS_ROOT}/data/nftables-defaults.conf}
+	[[ -f ${conf} && -r ${list} ]] || return 1
+	sum=$(sha256sum "${conf}" | cut -d ' ' -f 1)
+	while read -r id version file checksum; do
+		[[ -n ${id} && ${id} != '#'* ]] || continue
+		[[ ${id} == "${OS_ID}" && ${checksum} == "${sum}" && ${file##*/} == "${conf##*/}" ]] || continue
+		if [[ ${version} == '*' || ${version} == "${OS_VERSION}" || ${OS_VERSION} == "${version}".* ]]; then
+			return 0
+		fi
+	done <"${list}"
+	return 1
+}
+
+# _fw_nft_conf_content on|off: lss's configuration for the nftables service. It loads lss's table and nothing else: no
+# "flush ruleset", which would take the tables of Docker, Podman or libvirt with it, and no table of the distribution,
+# whose input chain would drop what lss accepts. "off" (fw_disable) leaves the include out.
+_fw_nft_conf_content() {
+	printf '%s\n' "# Managed by lss (module firewall). The nftables service loads this file at boot: the table of lss only," \
+		'# without "flush ruleset" and without other tables. lss saved the default of the distribution next to it.'
+	[[ $1 != on ]] || printf 'include "%s"\n' "${FW_NFT_FILE}"
+	return
+}
+
+# _fw_nft_is_own FILE: FILE is lss's configuration (_fw_nft_conf_content).
+_fw_nft_is_own() {
+	[[ -f $1 ]] && [[ $(head -n 1 "$1") == '# Managed by lss (module firewall).'* ]]
+	return
+}
+
+# _fw_nft_custom CONF [REASON]: stops the run, because lss does not change an nftables configuration of the
+# administrator, and says what to do.
+_fw_nft_custom() {
+	local conf=$1 reason=${2:-it is not the unchanged default of ${OS_NAME:-the distribution}}
+	die "firewall: lss leaves ${conf} as it is: ${reason}. The nftables service loads it at boot, and an input chain in it with \"policy drop\" would drop what lss opens, SSH included. Add the line include \"${FW_NFT_FILE}\" to it and keep no other input chain with \"policy drop\" (or move the file away, then lss writes its own), and run lss again."
+}
+
+# _fw_nft_boot: makes the nftables service load lss's rules at boot through fw_nft_conf.
+#   missing, or lss's own   lss writes its configuration (_fw_nft_conf_content).
+#   the distribution's default (_fw_nft_is_default)
+#                           lss keeps a copy with a time stamp (CONF.lss-YYYYMMDD-HHMMSS), writes its configuration
+#                           and deletes the tables of the default that are loaded now (Alpine and Arch drop input in a
+#                           table "inet filter" of their own; Alpine's has no rule for SSH).
+#   anything else           kept when it includes FW_NFT_FILE or its directory (fw_nft_foreign_drop then checks that
+#                           nothing else drops by default); otherwise the run stops (_fw_nft_custom).
+_fw_nft_boot() {
+	local conf mode=644 owner=root:root backup table dir snippet
+	local -a tables=() others=() words=()
+	conf=$(fw_nft_conf)
+	if [[ -e ${conf} ]] && ! _fw_nft_is_own "${conf}"; then
+		if ! _fw_nft_is_default "${conf}"; then
+			if grep -qF -e "include \"${FW_NFT_FILE}\"" -e "include \"${FW_NFT_FILE%/*}/*.nft\"" "${conf}"; then
+				return 0
+			fi
+			_fw_nft_custom "${conf}"
+		fi
+		# A default that loads the whole directory (Alpine) loads the administrator's files in it as well; lss's
+		# configuration would leave them out.
+		dir=${FW_NFT_FILE%/*}
+		if grep -qF "include \"${dir}/*.nft\"" "${conf}"; then
+			for snippet in "${dir}"/*.nft; do
+				[[ ! -f ${snippet} || ${snippet} == "${FW_NFT_FILE}" ]] || others+=("${snippet}")
+			done
+			((${#others[@]} == 0)) ||
+				_fw_nft_custom "${conf}" "it loads ${others[*]} as well, which lss's configuration would leave out"
+		fi
+		backup="${conf}.lss-$(date +%Y%m%d-%H%M%S)"
+		cp -p -- "${conf}" "${backup}" || die "firewall: could not save ${conf} as ${backup}."
+		log_info "firewall: saved the default ${conf} of the distribution as ${backup}."
+		mapfile -t tables < <(sed -n 's/^[[:space:]]*table[[:space:]]\{1,\}\([a-z0-9]\{1,\}[[:space:]]\{1,\}[A-Za-z0-9_]\{1,\}\)[[:space:]]*{.*/\1/p' "${conf}")
+		# The file keeps its mode (Debian's is an executable nft script) and its owner.
+		mode=$(stat -c '%a' "${conf}")
+		owner=$(stat -c '%U:%G' "${conf}")
+	elif [[ -e ${conf} ]]; then
+		mode=$(stat -c '%a' "${conf}")
+	fi
+	file_write "0${mode}" "${owner}" "${conf}" < <(_fw_nft_conf_content on)
+	for table in "${tables[@]}"; do
+		read -r -a words <<<"${table}"
+		[[ ${words[*]} != 'inet lss' ]] || continue
+		if nft list table "${words[@]}" >/dev/null 2>&1; then
+			nft delete table "${words[@]}" || die "firewall: could not delete the table ${words[*]} of the default ${conf}."
+			log_info "firewall: deleted the table ${words[*]} that the default ${conf} had loaded."
+			files_note_change "nftables: deleted table ${words[*]}"
+		fi
+	done
+	return
+}
+
+# fw_nft_foreign_drop: every input base chain outside lss's table whose policy is drop, as "FAMILY TABLE CHAIN", one
+# per line. A packet has to pass every base chain on the hook, so such a chain drops what lss accepts.
+fw_nft_foreign_drop() {
+	{ nft list chains 2>/dev/null || true; } | awk '
+		$1 == "table" { table = $2 " " $3; next }
+		$1 == "chain" { chain = $2; next }
+		/hook input/ && /policy drop/ && table != "inet lss" { print table " " chain }'
+	return
+}
+
 # fw_enable: switches nftables or iptables on with the recorded rules and keeps them across reboots: nftables through
-# an include in FW_NFT_CONF and its service, iptables through lss-firewall.service (systemd) or the OpenRC local
-# service. SysV and Upstart have no such hook; lss warns that the rules are gone after a reboot there.
+# its service and lss's configuration for it (_fw_nft_boot), iptables through lss-firewall.service (systemd) or the
+# OpenRC local service. SysV and Upstart have no such hook; lss warns that the rules are gone after a reboot there.
 fw_enable() {
 	local backend
 	backend=$(fw_backend)
@@ -515,15 +635,9 @@ fw_enable() {
 	_fw_no_other_firewall
 	fw_sync
 	if [[ ${backend} == nftables ]]; then
+		# The configuration first: one of the administrator stops the run before lss loads anything.
+		_fw_nft_boot
 		nft -f "${FW_NFT_FILE}" || die "nftables does not take the rules in ${FW_NFT_FILE}."
-		local conf=${FW_NFT_CONF:-/etc/nftables.conf} mode owner
-		[[ -n ${FW_NFT_CONF} || ${OS_FAMILY} != alpine ]] || conf=/etc/nftables.nft
-		if [[ ! -f ${conf} ]] || ! grep -qF -e "include \"${FW_NFT_FILE}\"" -e "include \"${FW_NFT_FILE%/*}/*.nft\"" "${conf}"; then
-			# The file keeps its mode (Debian's is an executable nft script) and its owner.
-			mode=$(stat -c '%a' "${conf}" 2>/dev/null) || mode=644
-			owner=$(stat -c '%U:%G' "${conf}" 2>/dev/null) || owner=root:root
-			file_ensure_lines "0${mode}" "${owner}" "${conf}" <<<"include \"${FW_NFT_FILE}\""
-		fi
 		svc_enable nftables
 		return
 	fi
@@ -588,6 +702,12 @@ fw_disable() {
 	nftables)
 		if type -P nft >/dev/null && nft list table inet lss >/dev/null 2>&1; then
 			nft delete table inet lss
+		fi
+		# lss's configuration of the nftables service stays (without the include), so the next fw_enable knows it.
+		local conf
+		conf=$(fw_nft_conf)
+		if _fw_nft_is_own "${conf}"; then
+			file_write "0$(stat -c '%a' "${conf}")" "$(stat -c '%U:%G' "${conf}")" "${conf}" < <(_fw_nft_conf_content off)
 		fi
 		;;
 	iptables)
@@ -663,23 +783,53 @@ fw_ssh_port() {
 }
 
 # fw_rollback_arm SECONDS: if lss runs over SSH, schedules a firewall shutdown in case this session dies. The
-# caller cancels it with fw_rollback_cancel once the SSH rule is confirmed.
+# caller cancels it with fw_rollback_cancel once the SSH rule is confirmed. Under systemd a transient timer runs it
+# (systemd-run); without systemd (OpenRC, SysV, Upstart) a job of its own that outlives the session (setsid, nohup),
+# whose process ID lss keeps in FW_RUN_DIR/firewall-rollback.pid.
 fw_rollback_arm() {
 	[[ -n ${SSH_CONNECTION:-} ]] || return 0
-	local command
+	local seconds=${1:-120} command pidfile
+	local -a detach=(nohup)
+	[[ ${seconds} =~ ^[0-9]+$ ]] || die "firewall: the rollback needs a number of seconds, got '${seconds}'."
 	case $(fw_backend) in
 	ufw) command='ufw --force disable' ;;
-	firewalld) command='systemctl stop firewalld' ;;
+	firewalld)
+		command='systemctl stop firewalld'
+		svc_is_systemd || command='rc-service firewalld stop || service firewalld stop'
+		;;
 	nftables) command='nft delete table inet lss' ;;
 	*) command='while iptables -D INPUT -j LSS-INPUT; do :; done; while ip6tables -D INPUT -j LSS-INPUT; do :; done' ;;
 	esac
-	systemctl stop lss-firewall-rollback.timer >/dev/null 2>&1 || true
-	systemd-run --quiet --unit=lss-firewall-rollback --on-active="${1:-120}" /bin/sh -c "${command}" >/dev/null
-	log_warn "Firewall rollback armed: it switches the firewall off in ${1:-120} s unless lss confirms SSH access."
+	fw_rollback_cancel
+	if svc_is_systemd && type -P systemd-run >/dev/null; then
+		systemd-run --quiet --unit=lss-firewall-rollback --on-active="${seconds}" /bin/sh -c "${command}" >/dev/null
+	else
+		pidfile="${FW_RUN_DIR}/firewall-rollback.pid"
+		mkdir -p "${FW_RUN_DIR}"
+		chmod 0700 "${FW_RUN_DIR}"
+		! type -P setsid >/dev/null || detach=(setsid nohup)
+		# The first command names the job, so fw_rollback_cancel stops this one only. setsid gives it a session and a
+		# process group of its own (with its process ID), which the end of the SSH session does not reach.
+		"${detach[@]}" /bin/sh -c ": lss-firewall-rollback; sleep ${seconds}; ${command}; rm -f '${pidfile}'" \
+			</dev/null >/dev/null 2>&1 &
+		printf '%s\n' "$!" >"${pidfile}"
+	fi
+	log_warn "Firewall rollback armed: it switches the firewall off in ${seconds} s unless lss confirms SSH access."
 }
 
+# fw_rollback_cancel: stops the rollback of fw_rollback_arm, the transient timer or the job of its own.
 fw_rollback_cancel() {
-	systemctl stop lss-firewall-rollback.timer >/dev/null 2>&1 || true
-	systemctl reset-failed lss-firewall-rollback.service >/dev/null 2>&1 || true
+	local pidfile="${FW_RUN_DIR}/firewall-rollback.pid" pid
+	if svc_is_systemd; then
+		systemctl stop lss-firewall-rollback.timer >/dev/null 2>&1 || true
+		systemctl reset-failed lss-firewall-rollback.service >/dev/null 2>&1 || true
+	fi
+	[[ -f ${pidfile} ]] || return 0
+	pid=$(<"${pidfile}")
+	# Only the job of fw_rollback_arm: after a reboot the process ID may belong to another process.
+	if [[ ${pid} =~ ^[0-9]+$ ]] && tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null | grep -qF ': lss-firewall-rollback;'; then
+		kill -- "-${pid}" 2>/dev/null || kill -- "${pid}" 2>/dev/null || true
+	fi
+	rm -f -- "${pidfile}"
 	return
 }

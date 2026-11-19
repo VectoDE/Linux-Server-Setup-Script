@@ -106,21 +106,41 @@ mod_configure() {
 			done
 		fi
 		files_note_change "firewall enabled"
+		_fw_no_foreign_drop
 		_fw_is_open "${ssh_port}" || die "firewall: SSH port ${ssh_port} is not open; the firewall stays off."
 		fw_rollback_cancel
+	elif fw_declarative; then
+		# Already on: the configuration of the nftables service and the boot hook of iptables are brought up to date
+		# (a default configuration of the distribution that an older lss left in place is replaced).
+		fw_enable
 	elif [[ $(fw_backend) == firewalld ]]; then
 		firewall-cmd --reload >/dev/null
 	fi
 	return
 }
 
-# _fw_is_open PORT [PROTO]: the port is open to everyone.
+# _fw_no_foreign_drop: with nftables, no input chain of another table drops by default (fw_nft_foreign_drop); it would
+# drop what lss's table accepts, SSH included.
+_fw_no_foreign_drop() {
+	local foreign
+	[[ $(fw_backend) == nftables ]] || return 0
+	foreign=$(fw_nft_foreign_drop)
+	[[ -z ${foreign} ]] ||
+		die "firewall: the input chain ${foreign//$'\n'/, } of another nftables table drops by default (policy drop), so it drops what lss opens, SSH included. Delete that table or give it the rules of lss (see nft list ruleset), then run lss again."
+	return
+}
+
+# _fw_is_open PORT [PROTO]: the port is open to everyone. With nftables the rule of lss counts only while no other
+# table drops input by default.
 _fw_is_open() {
 	local port=$1 proto=${2:-tcp}
 	case $(fw_backend) in
 	ufw) ufw status | grep -qE "^${port/-/:}/${proto}[[:space:]]+ALLOW" ;;
 	firewalld) firewall-cmd --zone=public --query-port="${port}/${proto}" >/dev/null ;;
-	nftables) nft list table inet lss 2>/dev/null | grep -qE "^[[:space:]]*${proto} dport ${port} accept$" ;;
+	nftables)
+		nft list table inet lss 2>/dev/null | grep -qE "^[[:space:]]*${proto} dport ${port} accept$" &&
+			[[ -z $(fw_nft_foreign_drop) ]]
+		;;
 	*) iptables -S LSS-INPUT 2>/dev/null | grep -qxF -- "-A LSS-INPUT -p ${proto} -m ${proto} --dport ${port/-/:} -j ACCEPT" ;;
 	esac
 	return
@@ -129,6 +149,7 @@ _fw_is_open() {
 mod_verify() {
 	local ssh_port spec
 	fw_is_enabled || die "firewall: $(_fw_unit) is not active."
+	_fw_no_foreign_drop
 	ssh_port=$(fw_ssh_port)
 	_fw_is_open "${ssh_port}" || die "firewall: the SSH port ${ssh_port} is not open."
 	if [[ $(fw_backend) == nftables ]]; then
