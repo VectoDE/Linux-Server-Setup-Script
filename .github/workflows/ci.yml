@@ -89,7 +89,9 @@ jobs:
           BASH_UNDER_TEST: ${{ matrix.bash }}
         # The bash of the image must be the one under test; the tests run as in the coverage job (kcov image, root).
         run: |
-          docker run --rm -v "$PWD:/src" -v "$RUNNER_TEMP/bats:/bats:ro" -w /src "lss-unit-bash:$BASH_UNDER_TEST" \
+          docker run --rm -v "$PWD:/src" -v "$RUNNER_TEMP/bats:/bats:ro" -w /src \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/src \
+            "lss-unit-bash:$BASH_UNDER_TEST" \
             bash -c 'case $BASH_VERSION in "$1".*) ;; *) echo "bash $BASH_VERSION, expected $1" >&2; exit 1 ;; esac
               echo "bash $BASH_VERSION"
               exec /bats/bin/bats --print-output-on-failure tests/unit' bash "$BASH_UNDER_TEST"
