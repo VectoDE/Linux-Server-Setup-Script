@@ -131,7 +131,15 @@ write_release() {
 	[ "${OS_MAJOR}" = 9 ]
 	os_is_rhel
 	run ! os_is_debian
-	write_release 'ID=alpine'
+	write_release 'ID=alpine' 'VERSION_ID=3.21.2'
+	[ "${OS_FAMILY}" = alpine ]
+	write_release 'ID=opensuse-leap' 'VERSION_ID="15.6"'
+	[ "${OS_FAMILY}" = suse ]
+	write_release 'ID=endeavouros' 'ID_LIKE=arch'
+	[ "${OS_FAMILY}" = arch ]
+	write_release 'ID=tumbleweed-derivative' 'ID_LIKE="opensuse suse"'
+	[ "${OS_FAMILY}" = suse ]
+	write_release 'ID=gentoo'
 	[ "${OS_FAMILY}" = unknown ]
 }
 

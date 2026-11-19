@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# pacman-key stub: "--list-keys FPR" succeeds for fingerprints listed in $STUB_PACMAN_KEYS; every other command is
+# recorded and exits with $STUB_EXIT_pacman_key (default 0).
+if [[ $1 == --list-keys ]]; then
+	printf 'pacman-key %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+	[[ " ${STUB_PACMAN_KEYS:-} " == *" $2 "* ]]
+	exit
+fi
+# shellcheck source=tests/fixtures/bin/_stub.bash
+source "$(dirname "$0")/_stub.bash"
+stub_main pacman-key "$@"

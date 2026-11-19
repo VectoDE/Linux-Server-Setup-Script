@@ -54,6 +54,7 @@ os_detect() {
 	OS_NAME=$(_os_value PRETTY_NAME)
 	OS_ARCH=${LSS_ARCH:-$(uname -m)}
 	OS_PROXMOX=0
+	# shellcheck disable=SC2034 # read by the modules of stage 9d (Proxmox VE) and the tests
 	if [[ -d ${LSS_PVE_DIR} ]] && command -v pveversion >/dev/null 2>&1; then
 		OS_PROXMOX=1
 	fi
