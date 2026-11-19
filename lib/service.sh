@@ -56,7 +56,7 @@ _svc_name() {
 _svc_sysv_enabled() {
 	local link
 	for link in "${SVC_RC_DIR}"/rc[2345].d/S[0-9][0-9]"$1"; do
-		[[ -e ${link} ]] && return 0
+		[[ -e ${link} || -L ${link} ]] && return 0
 	done
 	return 1
 }

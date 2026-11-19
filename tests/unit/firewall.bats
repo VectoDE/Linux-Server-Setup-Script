@@ -212,7 +212,18 @@ records() {
 		cat >>"${writes}"
 	}
 	# iptables -C fails: the jump is inserted.
-	STUB_EXIT_iptables=1 STUB_EXIT_ip6tables=1 fw_enable
+	# shellcheck disable=SC2329 # called by fw_enable
+	iptables() {
+		printf 'iptables %s\n' "$*" >>"${STUB_LOG}"
+		[[ $1 != -C ]]
+	}
+	# shellcheck disable=SC2329 # called by fw_enable
+	ip6tables() {
+		printf 'ip6tables %s\n' "$*" >>"${STUB_LOG}"
+		[[ $1 != -C ]]
+	}
+	fw_enable
+	unset -f iptables ip6tables
 	grep -qxF "iptables-restore --noflush ${FW_IPT_DIR}/rules.v4" "${STUB_LOG}"
 	grep -qxF 'iptables -I INPUT 1 -j LSS-INPUT' "${STUB_LOG}"
 	grep -qxF 'ip6tables -I INPUT 1 -j LSS-INPUT' "${STUB_LOG}"
