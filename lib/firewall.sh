@@ -512,6 +512,7 @@ fw_enable() {
 	local backend
 	backend=$(fw_backend)
 	fw_declarative || die "fw_enable is for nftables and iptables; ${backend} is switched on by the firewall module."
+	_fw_no_other_firewall
 	fw_sync
 	if [[ ${backend} == nftables ]]; then
 		nft -f "${FW_NFT_FILE}" || die "nftables does not take the rules in ${FW_NFT_FILE}."
@@ -563,6 +564,21 @@ EOF
 		;;
 	*) log_warn "firewall: $(svc_init) has no boot hook lss knows; the iptables rules are gone after a reboot." ;;
 	esac
+	return
+}
+
+# _fw_no_other_firewall: refuses to add lss's own rules next to an active ufw, firewalld or Proxmox VE firewall; two
+# firewalls that each drop what they do not know would block each other's ports.
+_fw_no_other_firewall() {
+	local unit
+	if type -P ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
+		die "firewall: ufw is active; switch it off or set LSS_FIREWALL=ufw instead of $(fw_backend)."
+	fi
+	for unit in firewalld pve-firewall; do
+		if svc_is_active "${unit}"; then
+			die "firewall: ${unit} is active; switch it off or use it instead of $(fw_backend)."
+		fi
+	done
 	return
 }
 

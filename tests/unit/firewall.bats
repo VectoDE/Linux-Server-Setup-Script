@@ -296,3 +296,17 @@ records() {
 	fw_rollback_arm 60 2>/dev/null
 	grep -q 'systemd-run .*/bin/sh -c while iptables -D INPUT -j LSS-INPUT; do :; done;' "${STUB_LOG}"
 }
+
+@test "fw_enable refuses to add rules next to an active ufw, firewalld or Proxmox VE firewall" {
+	export LSS_FIREWALL=nftables
+	STUB_OUT_ufw='Status: active' run fw_enable
+	[ "${status}" -eq 1 ]
+	[[ ${output} == *"ufw is active; switch it off or set LSS_FIREWALL=ufw instead of nftables."* ]]
+	local unit
+	for unit in firewalld pve-firewall; do
+		STUB_ACTIVE_UNITS=${unit} run fw_enable
+		[ "${status}" -eq 1 ]
+		[[ ${output} == *"${unit} is active; switch it off or use it instead of nftables."* ]]
+	done
+	run ! grep -q 'nft -f' "${STUB_LOG}"
+}
