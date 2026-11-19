@@ -83,7 +83,7 @@ jobs:
       - name: Build the image
         env:
           BASH_UNDER_TEST: ${{ matrix.bash }}
-        run: docker build -q -t "lss-unit-bash:$BASH_UNDER_TEST" "tests/unit/images/bash-$BASH_UNDER_TEST"
+        run: docker build -q -t "lss-unit-bash:$BASH_UNDER_TEST" -f "tests/unit/images/bash-$BASH_UNDER_TEST/Containerfile" "tests/unit/images/bash-$BASH_UNDER_TEST"
       - name: Unit tests
         env:
           BASH_UNDER_TEST: ${{ matrix.bash }}
