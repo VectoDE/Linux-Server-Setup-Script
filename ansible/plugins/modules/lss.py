@@ -138,13 +138,18 @@ def value_text(value):
 
 
 def installed_modules(module):
-    """Names of the modules lss lists as installed."""
+    """Names of the modules lss lists as installed: the rows of the table under the header "MODULE STATE", up to the
+    first empty line. lss status prints the vendor support of the system and an empty line before the table."""
     output = lss_command(module, "status")
     names = set()
+    in_table = False
     for line in output.splitlines():
-        if not line.strip() or line.startswith("Failed services"):
-            break
         fields = line.split()
+        if not in_table:
+            in_table = fields[:2] == ["MODULE", "STATE"]
+            continue
+        if not fields:
+            break
         if len(fields) >= 2 and fields[1] == "installed":
             names.add(fields[0])
     return names
