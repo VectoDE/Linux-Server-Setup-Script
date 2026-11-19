@@ -575,7 +575,7 @@ _fw_no_other_firewall() {
 		die "firewall: ufw is active; switch it off or set LSS_FIREWALL=ufw instead of $(fw_backend)."
 	fi
 	for unit in firewalld pve-firewall; do
-		if svc_is_active "${unit}"; then
+		if svc_exists "${unit}" && svc_is_active "${unit}"; then
 			die "firewall: ${unit} is active; switch it off or use it instead of $(fw_backend)."
 		fi
 	done
