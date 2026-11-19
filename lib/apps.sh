@@ -247,17 +247,22 @@ _app_nc_occ() {
 	return
 }
 
-# _app_route_trust ROUTE: the certificate an app must trust to reach the route ROUTE of this server through the web
-# server: the CA of a private ACME server (LSS_TLS_CA_BUNDLE) or, without the tls module, the self-signed certificate
-# of the route; nothing for Let's Encrypt. Prints the file, or nothing.
+# _app_route_trust ROUTE: the certificate an app must trust to reach the route ROUTE of this server through the
+# reverse proxy: the CA of a private ACME server (LSS_TLS_CA_BUNDLE, or LSS_TRAEFIK_ACME_CA_BUNDLE where Traefik's own
+# ACME client issues the route's certificate, for example the roots of Pebble) or, with neither, the self-signed
+# certificate of the route; nothing for Let's Encrypt. Where Traefik's ACME client issues the certificate, the
+# self-signed placeholder of the route is never trusted: Traefik does not present it (traefik_tls_conf), so trusting it
+# would pin a certificate nobody serves. Prints the file, or nothing.
 _app_route_trust() {
-	local route=$1 bundle
-	if state_installed tls; then
+	local route=$1 bundle=''
+	if traefik_active && traefik_acme && [[ ! -d ${WEB_CERT_LIVE}/${route} ]]; then
+		bundle=$(config_option traefik acme_ca_bundle '')
+	elif state_installed tls; then
 		bundle=$(config_option tls ca_bundle '')
-		[[ -z ${bundle} || ! -s ${bundle} ]] || printf '%s' "${bundle}"
-	elif [[ -s ${WEB_TLS_DIR}/${route}/fullchain.pem ]]; then
-		printf '%s/%s/fullchain.pem' "${WEB_TLS_DIR}" "${route}"
+	else
+		bundle=${WEB_TLS_DIR}/${route}/fullchain.pem
 	fi
+	[[ -z ${bundle} || ! -s ${bundle} ]] || printf '%s' "${bundle}"
 	return
 }
 
@@ -281,7 +286,7 @@ app_collabora_trust() {
 	return
 }
 
-# app_collabora_check: Collabora reaches Nextcloud through the web server and accepts its certificate (the WOPI
+# app_collabora_check: Collabora reaches Nextcloud through the reverse proxy and accepts its certificate (the WOPI
 # access check of Collabora, the same connection it opens for every document).
 app_collabora_check() {
 	local nextcloud collabora page
@@ -386,12 +391,13 @@ app_timer_remove() {
 }
 
 # app_site PORT [NAME DOMAIN...]: the HTTPS route NAME (default: the module) for the host names DOMAIN (default: those
-# of the app) to 127.0.0.1:PORT, through web_proxy_route (lib/web.sh).
+# of the app) to 127.0.0.1:PORT, through web_proxy_route (lib/web.sh): Traefik when it is installed, otherwise the web
+# server.
 app_site() {
 	local port=$1 name=${2:-${LSS_MODULE}}
 	local -a domains=("${@:3}")
 	[[ ${#domains[@]} -gt 0 ]] || read -ra domains <<<"$(app_domains)"
-	web_proxy_route "${name}" "http://127.0.0.1:${port}" "${domains[@]}"
+	web_proxy_route "${name}" "${domains[*]}" "http://127.0.0.1:${port}"
 	return
 }
 

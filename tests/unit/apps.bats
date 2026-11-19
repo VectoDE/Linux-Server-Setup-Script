@@ -204,13 +204,17 @@ docker() {
 @test "the site proxies to 127.0.0.1 for every host name and gets a certificate with tls" {
 	config_set LSS_DEMO_DOMAINS 'cloud.example.com www.example.com'
 	# shellcheck disable=SC2329 # called by app_site
+	web_server() {
+		printf 'nginx'
+	}
+	# shellcheck disable=SC2329 # called by app_site
 	web_cert_placeholder() {
 		printf 'placeholder %s\n' "$*" >>"${STUB_LOG}"
 	}
 	# shellcheck disable=SC2329 # called by app_site
 	web_site_write() {
 		printf 'site %s\n' "$*" >>"${STUB_LOG}"
-		LSS_FILE_CHANGED=1
+		files_note_change "site $1"
 	}
 	# shellcheck disable=SC2329 # called by app_site
 	web_reload() {
@@ -386,6 +390,38 @@ docker() {
 	[[ ${output} == *"Nextcloud Office (richdocuments) cannot be installed"* ]]
 }
 
+@test "with Traefik's own ACME client an app trusts the CA of that server, never the placeholder of the route" {
+	WEB_TLS_DIR=${BATS_TEST_TMPDIR}/tls
+	WEB_CERT_LIVE=${BATS_TEST_TMPDIR}/live
+	mkdir -p "${WEB_TLS_DIR}/collabora" "${WEB_CERT_LIVE}"
+	printf 'PLACEHOLDER
+' >"${WEB_TLS_DIR}/collabora/fullchain.pem"
+	# Without Traefik's ACME client the self-signed certificate of the route is what the route presents.
+	[ "$(_app_route_trust collabora)" = "${WEB_TLS_DIR}/collabora/fullchain.pem" ]
+	state_set traefik status installed
+	[ "$(_app_route_trust collabora)" = "${WEB_TLS_DIR}/collabora/fullchain.pem" ]
+	# Traefik does not present the placeholder when it issues the certificate itself: no trust without a CA bundle.
+	config_set LSS_TRAEFIK_ACME true
+	[ -z "$(_app_route_trust collabora)" ]
+	# A private ACME server (Pebble): its roots, not the placeholder.
+	printf 'PEBBLE ROOT
+' >"${BATS_TEST_TMPDIR}/pebble.pem"
+	config_set LSS_TRAEFIK_ACME_CA_BUNDLE "${BATS_TEST_TMPDIR}/pebble.pem"
+	[ "$(_app_route_trust collabora)" = "${BATS_TEST_TMPDIR}/pebble.pem" ]
+	# A bundle that does not exist or is empty is no trust anchor.
+	config_set LSS_TRAEFIK_ACME_CA_BUNDLE "${BATS_TEST_TMPDIR}/missing.pem"
+	[ -z "$(_app_route_trust collabora)" ]
+	# A route with a certificate of the tls module keeps the CA of that module.
+	config_set LSS_TRAEFIK_ACME_CA_BUNDLE "${BATS_TEST_TMPDIR}/pebble.pem"
+	mkdir -p "${WEB_CERT_LIVE}/collabora"
+	state_set tls status installed
+	[ -z "$(_app_route_trust collabora)" ]
+	printf 'TLS CA
+' >"${BATS_TEST_TMPDIR}/tls-ca.pem"
+	config_set LSS_TLS_CA_BUNDLE "${BATS_TEST_TMPDIR}/tls-ca.pem"
+	[ "$(_app_route_trust collabora)" = "${BATS_TEST_TMPDIR}/tls-ca.pem" ]
+}
+
 @test "timers run a command in a container of the stack and go away on removal" {
 	# shellcheck disable=SC2329 # called by app_timer
 	svc_unit() {
@@ -419,6 +455,10 @@ docker() {
 }
 
 @test "a second site of an app has its own name and host names, and goes away with its certificate" {
+	# shellcheck disable=SC2329 # called by app_site
+	web_server() {
+		printf 'nginx'
+	}
 	# shellcheck disable=SC2329 # called by app_site
 	web_cert_placeholder() {
 		return 0

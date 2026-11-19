@@ -415,7 +415,7 @@ group_caption() {
 	monitoring) printf 'Metrics, logs and alerts with Prometheus, Grafana, Loki and Alloy, or Netdata on its own.' ;;
 	network) printf 'A WireGuard VPN for the admin interfaces, a validating DNS resolver and a time server.' ;;
 	mail) printf 'The server sends its own mail through a relay, or runs a mail server for your domains with webmail.' ;;
-	apps) printf 'Self-hosted apps as Docker Compose stacks behind the web server, each on its own host name.' ;;
+	apps) printf 'Self-hosted apps as Docker Compose stacks behind the reverse proxy, each on its own host name.' ;;
 	*) printf 'The modules in modules/%s.' "${group}" ;;
 	esac
 	return

@@ -4,7 +4,7 @@
 
 MOD_NAME="wordpress"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="WordPress 7.1 with MariaDB as a Docker Compose stack behind the web server, installed with a first administrator; the theme and plugin editor is off"
+MOD_DESCRIPTION="WordPress 7.1 with MariaDB as a Docker Compose stack behind the reverse proxy, installed with a first administrator; the theme and plugin editor is off"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the WordPress site, separated by spaces; empty: wordpress.<host name of the server>
@@ -65,7 +65,7 @@ services:
         define('DISALLOW_FILE_EDIT', true);
     ports:
       - 127.0.0.1:$(opt_int port):80
-    # WordPress calls itself (WP-Cron, site health) through the web server of this server.
+    # WordPress calls itself (WP-Cron, site health) through the reverse proxy of this server.
     extra_hosts:
       - "${domain}:host-gateway"
     volumes:

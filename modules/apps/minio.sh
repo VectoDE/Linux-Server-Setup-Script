@@ -4,7 +4,7 @@
 
 MOD_NAME="minio"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="S3-compatible object storage with the MinIO server code (PGSTY Silo, the maintained fork, since MinIO archived its community edition) behind the web server: the S3 API and the web console as two HTTPS sites"
+MOD_DESCRIPTION="S3-compatible object storage with the MinIO server code (PGSTY Silo, the maintained fork, since MinIO archived its community edition) behind the reverse proxy: the S3 API and the web console as two HTTPS sites"
 MOD_REQUIRES="system nginx|apache|caddy"
 MOD_MODES="native docker"
 MOD_OPTIONS="domains||Host names of the S3 API, separated by spaces; empty: minio.<host name of the server>

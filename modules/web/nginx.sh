@@ -4,7 +4,7 @@
 
 MOD_NAME="nginx"
 MOD_GROUP="web"
-MOD_DESCRIPTION="nginx web server: HTTPS only (TLS 1.2 and 1.3), security headers, closed default server, admin port on localhost"
+MOD_DESCRIPTION="nginx web server: HTTPS only (TLS 1.2 and 1.3), security headers, closed default server, admin port on localhost; behind Traefik on 127.0.0.1 only"
 MOD_REQUIRES="system"
 MOD_CONFLICTS="apache caddy"
 MOD_OPTIONS="max_body|64m|Largest request body (uploads), for example 64m or 1g
@@ -86,10 +86,10 @@ EOF
 # Unknown host names get no answer (444) on both ports; port 80 still serves ACME challenges for every name.
 _nginx_default_conf() {
 	printf '# Managed by lss (module nginx). Requests for host names without a site.\nserver {\n'
-	_web_listen_nginx 80 default_server
+	web_nginx_listen http default_server
 	printf '\tserver_name _;\n\tlocation /.well-known/acme-challenge/ {\n\t\troot %s;\n\t}\n' "${WEB_ACME_ROOT}"
 	printf '\tlocation / {\n\t\treturn 444;\n\t}\n}\n\nserver {\n'
-	_web_listen_nginx 443 "default_server $(web_nginx_ssl_flags)"
+	web_nginx_listen https default_server
 	printf '\tserver_name _;\n'
 	_web_tls_nginx "${WEB_TLS_DIR}/default"
 	printf '\treturn 444;\n}\n'
@@ -108,6 +108,36 @@ _nginx_admin_conf() {
 	printf '\tserver_name _;\n\tclient_max_body_size %s;\n' "$(opt max_body)"
 	web_headers nginx | grep -v Strict-Transport-Security
 	printf '\tlocation = / {\n\t\treturn 404;\n\t}\n\tinclude %s/admin/*.conf;\n}\n' "${NGINX_DIR}"
+	return
+}
+
+# The listeners every site includes: ports 80 and 443 on every address, or the backend ports on 127.0.0.1 behind
+# Traefik.
+_nginx_listen_http() {
+	printf '# Managed by lss (module nginx). The HTTP listener of every site.\n'
+	web_nginx_listen http
+	return
+}
+
+_nginx_listen_https() {
+	printf '# Managed by lss (module nginx). The HTTPS listener of every site.\n'
+	web_nginx_listen https
+	if web_nginx_http2_directive; then
+		printf '\thttp2 on;\n'
+	fi
+	return
+}
+
+# Behind Traefik the client address comes from X-Forwarded-For, which Traefik sets; only requests from the loopback
+# interface may carry it. Logs, fail2ban and ModSecurity then see the client instead of Traefik.
+_nginx_realip_conf() {
+	cat <<'EOF'
+# Managed by lss (module nginx). The web server runs behind Traefik.
+set_real_ip_from 127.0.0.1;
+set_real_ip_from ::1;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+EOF
 	return
 }
 
@@ -137,6 +167,17 @@ mod_configure() {
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
 	_nginx_proxy_conf | file_write 0644 root:root "${NGINX_DIR}/proxy.conf"
 	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	_nginx_listen_http | file_write 0644 root:root "${NGINX_DIR}/listen-http.conf"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	_nginx_listen_https | file_write 0644 root:root "${NGINX_DIR}/listen-https.conf"
+	[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	if web_backend; then
+		_nginx_realip_conf | file_write 0644 root:root "${NGINX_DIR}/http/realip.conf"
+		[[ ${LSS_FILE_CHANGED} == 0 ]] || changed=1
+	elif [[ -e ${NGINX_DIR}/http/realip.conf ]]; then
+		file_remove "${NGINX_DIR}/http/realip.conf"
+		changed=1
+	fi
 	file_write 0644 root:root "${WEB_ACME_ROOT}/.well-known/acme-challenge/lss-probe" <<<"lss"
 	if opt_bool admin_public; then
 		web_admin_htpasswd nginx
@@ -152,22 +193,27 @@ mod_configure() {
 		svc_restart nginx
 	fi
 	web_ids_configure
+	traefik_backend_sync nginx
 	return
 }
 
 mod_verify() {
+	local http https
+	http=$(web_http_port)
+	https=$(web_https_port)
 	svc_is_active nginx || die "nginx: the service is not running."
 	web_test nginx || die "nginx: the configuration does not load."
-	[[ $(curl -fsS --max-time 10 http://127.0.0.1/.well-known/acme-challenge/lss-probe 2>/dev/null) == lss ]] ||
-		die "nginx: port 80 does not serve the ACME challenge path."
-	openssl s_client -connect 127.0.0.1:443 -servername lss-probe </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ||
-		die "nginx: port 443 does not answer with TLS."
+	[[ $(curl -fsS --max-time 10 "http://127.0.0.1:${http}/.well-known/acme-challenge/lss-probe" 2>/dev/null) == lss ]] ||
+		die "nginx: port ${http} does not serve the ACME challenge path."
+	openssl s_client -connect "127.0.0.1:${https}" -servername lss-probe </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ||
+		die "nginx: port ${https} does not answer with TLS."
 	curl -s --max-time 10 -o /dev/null "http://127.0.0.1:${WEB_ADMIN_PORT}/" || opt_bool admin_public ||
 		die "nginx: the admin port ${WEB_ADMIN_PORT} does not answer on 127.0.0.1."
 	return
 }
 
 mod_remove() {
+	traefik_backend_sync ''
 	svc_disable nginx
 	svc_dropin_remove nginx.service lss-sandbox
 	file_remove "${NGINX_DIR}"

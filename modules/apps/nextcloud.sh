@@ -4,7 +4,7 @@
 
 MOD_NAME="nextcloud"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Nextcloud Hub 34 with PostgreSQL as a Docker Compose stack behind the web server, background jobs by a systemd timer, linked to Collabora Online when the collabora module is installed"
+MOD_DESCRIPTION="Nextcloud Hub 34 with PostgreSQL as a Docker Compose stack behind the reverse proxy, background jobs by a systemd timer, linked to Collabora Online when the collabora module is installed"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Nextcloud site, separated by spaces; empty: nextcloud.<host name of the server>
@@ -79,7 +79,7 @@ EOF
 
 # _nc_extra_hosts: the host names of Nextcloud and Collabora (also before the collabora module is installed, so adding
 # it later does not recreate the container) resolve to the host inside the container, so Nextcloud reaches both sites
-# through the web server even where the public address does not loop back.
+# through the reverse proxy even where the public address does not loop back.
 _nc_extra_hosts() {
 	local domain
 	for domain in $(app_domains) $(app_domains_of collabora); do

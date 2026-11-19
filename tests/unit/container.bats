@@ -108,10 +108,10 @@ setup() {
 	ctr_args docker web "${IMAGE}" --volume "${dir}/fine:/data"
 }
 
-@test "only Portainer gets the socket, in the host user namespace, without SELinux separation on RHEL" {
+@test "only Portainer and the socket proxy of Traefik get the socket, in the host user namespace, without SELinux separation on RHEL" {
 	run ctr_args docker web "${IMAGE}" --socket
 	[ "${status}" -eq 1 ]
-	[[ ${output} == *"only lss-portainer may have the socket"* ]]
+	[[ ${output} == *"only lss-portainer lss-traefik-docker may have the socket"* ]]
 	ctr_args docker lss-portainer "${IMAGE}" --socket
 	[[ ${CTR_ARGS[*]} == *"--volume /var/run/docker.sock:/var/run/docker.sock --userns host"* ]]
 	[[ ${CTR_ARGS[*]} != *label=disable* ]]

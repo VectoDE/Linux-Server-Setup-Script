@@ -88,10 +88,12 @@ for unit in nginx apache2 httpd haproxy postfix postfix@- dovecot; do
 		systemctl reload "\${unit}"
 	fi
 done
-# Caddy keeps certificates it loaded from files until it restarts.
-if systemctl is-active --quiet caddy; then
-	systemctl restart caddy
-fi
+# Caddy and Traefik keep certificates they loaded from files until they restart.
+for unit in caddy lss-traefik; do
+	if systemctl is-active --quiet "\${unit}"; then
+		systemctl restart "\${unit}"
+	fi
+done
 EOF
 	return
 }

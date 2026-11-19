@@ -4,7 +4,7 @@
 
 MOD_NAME="forgejo"
 MOD_GROUP="apps"
-MOD_DESCRIPTION="Forgejo 16 (Git hosting) as a rootless Docker Compose stack behind the web server, with SQLite, Git over HTTPS only and no open registration"
+MOD_DESCRIPTION="Forgejo 16 (Git hosting) as a rootless Docker Compose stack behind the reverse proxy, with SQLite, Git over HTTPS only and no open registration"
 MOD_REQUIRES="docker nginx|apache|caddy"
 MOD_MODES="docker"
 MOD_OPTIONS="domains||Host names of the Forgejo site, separated by spaces; empty: forgejo.<host name of the server>
@@ -46,7 +46,7 @@ _fj_email() {
 }
 
 # _fj_compose: the stack. Forgejo reads its keys from files (the *_URI settings), so they are neither in app.ini nor
-# in the environment. SSH stays off: Git works over HTTPS through the web server.
+# in the environment. SSH stays off: Git works over HTTPS through the reverse proxy.
 _fj_compose() {
 	local domain
 	domain=$(app_domain)
