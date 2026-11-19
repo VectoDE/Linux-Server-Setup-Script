@@ -23,13 +23,77 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which part of the matrix runs. The whole matrix runs on main, in the nightly and manual runs and on every pull
+  # request into main, so nothing reaches main without it. A pull request into another branch (a stacked pull request,
+  # whose branch is merged up the stack on every change) runs a representative part: every required check (base,
+  # security and scanners on every system, the host and profile jobs), every container group on Debian 13 and AlmaLinux
+  # 10 on x86_64 and on Debian 13 on arm64, the VM runs kernel, minimal-secure and containers on Debian 13 and AlmaLinux
+  # 10, the office profile on Rocky Linux 9 (SELinux), every module at once on Debian 13, and the app stacks on Debian
+  # 13 and Rocky Linux 9 and on the arm64 host. A manual run (workflow_dispatch) on the branch runs the whole matrix.
+  plan:
+    name: Plan the matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      container-exclude: ${{ steps.plan.outputs.container-exclude }}
+      vm: ${{ steps.plan.outputs.vm }}
+      apps-exclude: ${{ steps.plan.outputs.apps-exclude }}
+      apps-arm64-exclude: ${{ steps.plan.outputs.apps-arm64-exclude }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/integration.yml
+          sparse-checkout-cone-mode: false
+      - name: Whole matrix or the part for a stacked pull request
+        id: plan
+        env:
+          FULL: ${{ github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch }}
+          # Every VM run of this stage (the vm job takes its matrix from here).
+          VM: "[]"
+        run: |
+          # The container matrix as written below; yq is part of the runner image.
+          container="$(yq -o=json -I=0 '.jobs.container.strategy.matrix' .github/workflows/integration.yml)"
+          if [[ $FULL == true ]]; then
+            container_exclude='[]' vm="$VM" apps_exclude='[]' apps_arm64_exclude='[]'
+          else
+            container_exclude="$(jq -c '
+              . as $m | has("arch") as $arch
+              | [$m.system[] | select(. != "debian-13" and . != "almalinux-10") as $s
+                 | $m.group[] | select(. != "base" and . != "security" and . != "scanners")
+                 | {system: $s, group: .} + (if $arch then {arch: "x64"} else {} end)]
+                + (if $arch then [$m.system[] | select(. != "debian-13") | {system: ., arch: "arm64"}] else [] end)
+              ' <<<"$container")"
+            vm="$(jq -c '[.[] | select(
+                ((.system == "debian-13" or .system == "almalinux-10")
+                 and (.run == "kernel" or .run == "profile minimal-secure" or .run == "containers"))
+                or (.system == "rocky-9" and .run == "profile office")
+                or (.system == "debian-13" and .run == "profile all"))]' <<<"$VM")"
+            apps_exclude="$(jq -c '[.system[] | select(. != "debian-13" and . != "rocky-9") | {system: .}]' \
+              <<<"$container")"
+            apps_arm64_exclude="$(jq -c '[.system[] | select(. != "ubuntu-24.04") | {system: .}]' <<<"$container")"
+          fi
+          {
+            echo "container-exclude=$container_exclude"
+            echo "vm=$vm"
+            echo "apps-exclude=$apps_exclude"
+            echo "apps-arm64-exclude=$apps_arm64_exclude"
+          } >>"$GITHUB_OUTPUT"
+          echo "Whole matrix: $FULL; container jobs left out: $(jq length <<<"$container_exclude")" \
+            >>"$GITHUB_STEP_SUMMARY"
+
   container:
     name: ${{ matrix.system }} / ${{ matrix.group }}
+    needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        exclude: ${{ fromJSON(needs.plan.outputs.container-exclude) }}
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
         group: [base, security, scanners]
         include:
