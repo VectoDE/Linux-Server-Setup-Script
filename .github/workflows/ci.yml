@@ -59,3 +59,37 @@ jobs:
         run: '"$RUNNER_TEMP/bats/bin/bats" --print-output-on-failure tests/unit'
       - name: Coverage
         run: scripts/dev/coverage.sh "$RUNNER_TEMP/bats" "$RUNNER_TEMP/coverage"
+
+  # The unit tests under every bash the supported systems ship (5.1 on Ubuntu 22.04 and RHEL 9, 5.2 on Debian, Ubuntu
+  # 24.04 and RHEL 10, 5.3 on Ubuntu 26.04) and under 4.4, the oldest lss accepts. Official bash images, pinned by
+  # digest in tests/unit/images and updated by Dependabot.
+  unit-bash:
+    name: Unit tests, bash ${{ matrix.bash }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        bash: ['4.4', '5.1', '5.2', '5.3']
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install bats
+        run: scripts/dev/install-bats.sh "$RUNNER_TEMP/bats"
+      - name: Build the image
+        env:
+          BASH_UNDER_TEST: ${{ matrix.bash }}
+        run: docker build -q -t "lss-unit-bash:$BASH_UNDER_TEST" "tests/unit/images/bash-$BASH_UNDER_TEST"
+      - name: Unit tests
+        env:
+          BASH_UNDER_TEST: ${{ matrix.bash }}
+        # The bash of the image must be the one under test; the tests run as in the coverage job (kcov image, root).
+        run: |
+          docker run --rm -v "$PWD:/src" -v "$RUNNER_TEMP/bats:/bats:ro" -w /src "lss-unit-bash:$BASH_UNDER_TEST" \
+            bash -c 'case $BASH_VERSION in "$1".*) ;; *) echo "bash $BASH_VERSION, expected $1" >&2; exit 1 ;; esac
+              echo "bash $BASH_VERSION"
+              exec /bats/bin/bats --print-output-on-failure tests/unit' bash "$BASH_UNDER_TEST"

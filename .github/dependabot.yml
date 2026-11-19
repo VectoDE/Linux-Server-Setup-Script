@@ -41,6 +41,27 @@ updates:
       images:
         patterns: ['*']
 
+  # The bash images of the unit tests (.github/workflows/ci.yml, job unit-bash), pinned by digest. Each tag is the
+  # bash version under test, so only the digest of the same tag is updated.
+  - package-ecosystem: docker
+    directories:
+      - /tests/unit/images/bash-4.4
+      - /tests/unit/images/bash-5.1
+      - /tests/unit/images/bash-5.2
+      - /tests/unit/images/bash-5.3
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    labels: [dependencies, docker]
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    groups:
+      bash-images:
+        patterns: ['*']
+
   # Python tools of the Ansible collection checks (tests/ansible/requirements.txt, pinned with hashes).
   - package-ecosystem: pip
     directory: /tests/ansible

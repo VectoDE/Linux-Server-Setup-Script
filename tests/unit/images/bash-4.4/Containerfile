@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# The unit tests under bash 4.4 (.github/workflows/ci.yml, job "Unit tests, bash"). The official image is Alpine with
+# bash built from source in /usr/local/bin, first in PATH; the other tools the tests call come from Alpine, as GNU
+# tools like on the supported systems. None of these packages pulls in Alpine's own bash.
+FROM bash:4.4@sha256:2ae8e461b944ae9b7cb036aabc93bb5d1e6c9fc324c943efded4403db252cfe9
+
+RUN apk add --no-cache coreutils diffutils file findutils gawk gettext git grep gzip jq ncurses openssl \
+		openssh-keygen perl procps-ng python3 sed tar tzdata unzip util-linux xz \
+	&& [ "$(command -v bash)" = /usr/local/bin/bash ]
