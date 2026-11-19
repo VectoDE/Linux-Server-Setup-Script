@@ -295,7 +295,7 @@ random on amd64 with Go 1.24 or later (fixed in wazero 1.9.0). arm64 is unaffect
 (the default) or `both`, lss puts ModSecurity in Coraza's place on amd64:
 
 - with nginx or Apache, lss installs the `modsecurity` module itself (once; removing `traefik` removes it again, unless
-  you installed it yourself) and sends the routes of applications through the web server too, so every request passes
+  you installed it yourself) and sends the routes of applications through nginx or Apache too, so every request passes
   the WAF: Traefik, then nginx or Apache with ModSecurity, then the application on 127.0.0.1. Run `lss configure traefik`
   after installing nginx or Apache later, so it adds ModSecurity then.
 - Caddy has no ModSecurity connector. Requests reach Caddy and the applications unfiltered, and lss says so on every
@@ -393,7 +393,7 @@ moment, both to `/var/backups/lss-apps`. Restic backs up that directory together
 they are (Nextcloud's files, MinIO's objects). `lss verify` runs this step for each app, so a broken dump shows up before
 the night's backup.
 
-Nextcloud and Collabora Online call each other through the web server, and both check the other's certificate. Without
+Nextcloud and Collabora Online call each other through the reverse proxy, and both check the other's certificate. Without
 the `tls` module, every site gets a self-signed certificate for its own names, and each app trusts the other's site.
 
 `minio` is the MinIO server code, maintained as [PGSTY Silo](https://github.com/pgsty/silo) since MinIO archived its

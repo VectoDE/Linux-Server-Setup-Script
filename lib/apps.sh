@@ -255,7 +255,7 @@ _app_nc_occ() {
 # would pin a certificate nobody serves. Prints the file, or nothing.
 _app_route_trust() {
 	local route=$1 bundle=''
-	if traefik_active && _traefik_acme && [[ ! -d ${WEB_CERT_LIVE}/${route} ]]; then
+	if traefik_active && traefik_acme && [[ ! -d ${WEB_CERT_LIVE}/${route} ]]; then
 		bundle=$(config_option traefik acme_ca_bundle '')
 	elif state_installed tls; then
 		bundle=$(config_option tls ca_bundle '')
@@ -286,7 +286,7 @@ app_collabora_trust() {
 	return
 }
 
-# app_collabora_check: Collabora reaches Nextcloud through the web server and accepts its certificate (the WOPI
+# app_collabora_check: Collabora reaches Nextcloud through the reverse proxy and accepts its certificate (the WOPI
 # access check of Collabora, the same connection it opens for every document).
 app_collabora_check() {
 	local nextcloud collabora page

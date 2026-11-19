@@ -46,7 +46,7 @@ _fj_email() {
 }
 
 # _fj_compose: the stack. Forgejo reads its keys from files (the *_URI settings), so they are neither in app.ini nor
-# in the environment. SSH stays off: Git works over HTTPS through the web server.
+# in the environment. SSH stays off: Git works over HTTPS through the reverse proxy.
 _fj_compose() {
 	local domain
 	domain=$(app_domain)

@@ -78,7 +78,7 @@ traefik_waf_fallback() {
 	return
 }
 
-# traefik_waf_backend: the routes of applications pass through the web server, whose ModSecurity stands in for Coraza
+# traefik_waf_backend: the routes of applications pass through nginx or Apache, whose ModSecurity stands in for Coraza
 # (Traefik -> nginx or Apache with ModSecurity -> application). Caddy has no ModSecurity, so routes stay direct there.
 # TRAEFIK_BACKEND_GONE is set while the web server is being removed.
 traefik_waf_backend() {
@@ -138,7 +138,7 @@ _traefik_drop() {
 traefik_tls_conf() {
 	local dir cipher
 	local -A routes=()
-	if _traefik_acme; then
+	if traefik_acme; then
 		for dir in $(web_route_names); do
 			[[ -d ${WEB_CERT_LIVE}/${dir} ]] || routes[${dir}]=1
 		done
@@ -213,15 +213,16 @@ traefik_backend_sync() {
 	if [[ -n ${server} ]]; then
 		traefik_backend_conf | _traefik_write "${TRAEFIK_DYNAMIC}/backend.yml"
 	else
-		# Routes that passed through the web server (traefik_waf_backend) go straight to their applications again.
+		# Routes that passed through nginx or Apache (traefik_waf_backend) go straight to their applications again.
 		TRAEFIK_BACKEND_GONE=1 web_routes_apply
 		_traefik_drop "${TRAEFIK_DYNAMIC}/backend.yml"
 	fi
 	return
 }
 
-# _traefik_acme: Traefik requests certificates itself (LSS_TRAEFIK_ACME).
-_traefik_acme() {
+# traefik_acme: Traefik requests the certificates of the routes itself (LSS_TRAEFIK_ACME); other libraries ask here
+# instead of reading the setting.
+traefik_acme() {
 	config_bool "$(config_key traefik acme)"
 	return
 }
@@ -235,7 +236,7 @@ traefik_route_conf() {
 	done
 	printf '# Managed by lss (route %s).\nhttp:\n  routers:\n    route-%s:\n' "${name}" "${name}"
 	printf '      entryPoints: [websecure]\n      rule: "%s"\n      service: route-%s\n' "${rule}" "${name}"
-	if _traefik_acme; then
+	if traefik_acme; then
 		printf '      tls:\n        certResolver: lss\n'
 	fi
 	printf '  services:\n    route-%s:\n      loadBalancer:\n' "${name}"

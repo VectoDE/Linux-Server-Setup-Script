@@ -65,7 +65,7 @@ services:
         define('DISALLOW_FILE_EDIT', true);
     ports:
       - 127.0.0.1:$(opt_int port):80
-    # WordPress calls itself (WP-Cron, site health) through the web server of this server.
+    # WordPress calls itself (WP-Cron, site health) through the reverse proxy of this server.
     extra_hosts:
       - "${domain}:host-gateway"
     volumes:

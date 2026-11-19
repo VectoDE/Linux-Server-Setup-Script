@@ -968,7 +968,7 @@ stub_traefik_routes() {
 	[ -z "$(web_route_names)" ]
 }
 
-@test "where Coraza cannot run a route passes through the web server's ModSecurity, and goes direct when it leaves" {
+@test "where Coraza cannot run a route passes through the ModSecurity of nginx or Apache, and goes direct when it leaves" {
 	as_test_user
 	stub_traefik_routes
 	use_server nginx
@@ -984,7 +984,7 @@ stub_traefik_routes() {
 	TRAEFIK_BACKEND_GONE=1 LSS_MODULE=nginx web_routes_apply
 	grep -qxF 'traefik_route_write app http://127.0.0.1:3000 app.example.com' "${STUB_LOG}"
 	[ ! -e "${site}" ]
-	# ModSecurity asked for explicitly keeps its meaning: what goes through the web server, routes direct.
+	# ModSecurity asked for explicitly keeps its meaning: what goes through nginx or Apache, routes direct.
 	: >"${STUB_LOG}"
 	export LSS_TRAEFIK_WAF=modsecurity
 	LSS_MODULE=nginx web_routes_apply

@@ -79,7 +79,7 @@ EOF
 
 # _nc_extra_hosts: the host names of Nextcloud and Collabora (also before the collabora module is installed, so adding
 # it later does not recreate the container) resolve to the host inside the container, so Nextcloud reaches both sites
-# through the web server even where the public address does not loop back.
+# through the reverse proxy even where the public address does not loop back.
 _nc_extra_hosts() {
 	local domain
 	for domain in $(app_domains) $(app_domains_of collabora); do
