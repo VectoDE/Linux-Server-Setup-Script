@@ -18,7 +18,7 @@ lib/
   template.sh           {{NAME}} placeholders, without eval
   pkg.sh repo.sh fetch.sh   packages, vendor repositories with pinned keys, downloads with pinned checksums
   service.sh            systemd units, drop-ins and timers
-  firewall.sh           ufw or firewalld; ports and trusted networks recorded per module
+  firewall.sh           ufw, firewalld, nftables or iptables; ports and trusted networks recorded per module
   container.sh          hardened container runs, Compose check, container firewall, Trivy
   secrets.sh state.sh   generated secrets; which modules are installed, in which version and mode
   ui.sh                 the interactive menu (whiptail, or plain prompts)
@@ -83,9 +83,12 @@ lss only makes sure its own lines are there.
 
 ## Firewall
 
-Modules never call ufw or firewalld themselves. They call `fw_allow 443/tcp`, and lss records the rule for that
-module. If the firewall module is installed, the rule is applied at once; if it is installed later, it applies every
-recorded rule. Removing a module closes its ports. While the firewall module enables the firewall, a timer is armed
+Modules never call the firewall themselves. They call `fw_allow 443/tcp`, and lss records the rule for that module.
+If the firewall module is installed, the rule is applied at once; if it is installed later, it applies every recorded
+rule. Removing a module closes its ports. The backend is ufw on Debian and Ubuntu, firewalld on the RHEL and SUSE
+families and nftables elsewhere (iptables where `nft` is missing); `LSS_FIREWALL` picks one. nftables gets a table
+`inet lss` of its own and iptables a chain `LSS-INPUT`; lss writes their whole rule set from the records each time, and
+both drop what no rule accepts. While the firewall module enables the firewall, a timer is armed
 that switches it off again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock
 you out.
 

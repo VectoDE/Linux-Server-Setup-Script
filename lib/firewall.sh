@@ -2,8 +2,11 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Firewall abstraction: ufw on Debian and Ubuntu, firewalld on the RHEL family. Rules are recorded per module in
-# /var/lib/lss/firewall/<module>, so removing a module closes exactly its ports.
+# Firewall abstraction (fw_backend): ufw on Debian and Ubuntu, firewalld on the RHEL and SUSE families, nftables
+# elsewhere, iptables where nft is missing; LSS_FIREWALL chooses one of them. Rules are recorded per module in
+# /var/lib/lss/firewall/<module>, so removing a module closes exactly its ports. ufw and firewalld get each rule as it
+# comes. nftables and iptables get lss's whole rule set from the records every time (fw_sync): a table "inet lss" of
+# its own, or a chain LSS-INPUT that INPUT jumps to; both drop what no rule accepts.
 #
 # Rule spec: PORT/PROTO[:SCOPE], for example 443/tcp, 51820/udp:public, 3000/tcp:vpn, 5432/tcp:local.
 #   public  open to everyone
@@ -16,9 +19,44 @@
 # fw_container_ports.
 
 fw_backend() {
-	if os_is_debian; then printf 'ufw'; else printf 'firewalld'; fi
+	local backend
+	backend=$(config_get LSS_FIREWALL '')
+	case ${backend} in
+	ufw | firewalld | nftables | iptables)
+		printf '%s' "${backend}"
+		return 0
+		;;
+	'') ;;
+	*) die "LSS_FIREWALL '${backend}' is none of ufw, firewalld, nftables and iptables." ;;
+	esac
+	case ${OS_FAMILY} in
+	debian) printf 'ufw' ;;
+	rhel | suse) printf 'firewalld' ;;
+	*)
+		if ! type -P nft >/dev/null && type -P iptables-restore >/dev/null; then
+			printf 'iptables'
+		else
+			printf 'nftables'
+		fi
+		;;
+	esac
 	return
 }
+
+# fw_declarative: the backend takes lss's whole rule set at once (nftables, iptables).
+fw_declarative() {
+	[[ $(fw_backend) == nftables || $(fw_backend) == iptables ]]
+	return
+}
+
+# Where the rule sets of nftables and iptables live. The nftables service loads its configuration at boot
+# (/etc/nftables.conf, on Alpine /etc/nftables.nft, or FW_NFT_CONF); fw_enable adds an include of FW_NFT_FILE to it
+# unless it already includes the directory. The iptables files are loaded at boot by lss-firewall.service or, without systemd,
+# by the OpenRC local service (FW_LOCAL_D).
+FW_NFT_FILE=${FW_NFT_FILE:-/etc/nftables.d/lss.nft}
+FW_NFT_CONF=${FW_NFT_CONF:-}
+FW_IPT_DIR=${FW_IPT_DIR:-/etc/lss/firewall}
+FW_LOCAL_D=${FW_LOCAL_D:-/etc/local.d}
 
 # Attempts and the pause in seconds for a ufw command that loses a race in iptables.
 FW_UFW_TRIES=3
@@ -66,11 +104,12 @@ fw_vpn_address() {
 }
 
 fw_is_enabled() {
-	if [[ $(fw_backend) == ufw ]]; then
-		type -P ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'
-	else
-		svc_is_active firewalld
-	fi
+	case $(fw_backend) in
+	ufw) type -P ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active' ;;
+	firewalld) svc_is_active firewalld ;;
+	nftables) type -P nft >/dev/null && nft list table inet lss >/dev/null 2>&1 ;;
+	*) type -P iptables >/dev/null && iptables -C INPUT -j LSS-INPUT >/dev/null 2>&1 ;;
+	esac
 	return
 }
 
@@ -114,6 +153,8 @@ _fw_firewalld() {
 _fw_apply() {
 	local action=$1 port=${FW_PORT} range output
 	range=${port/-/:}
+	# nftables and iptables take the whole rule set from the records (fw_sync).
+	! fw_declarative || return 0
 	if [[ $(fw_backend) == ufw ]]; then
 		local -a rule=()
 		if [[ ${FW_SCOPE} == vpn ]]; then
@@ -144,11 +185,12 @@ _fw_apply() {
 
 # The backend tool is installed (the firewall module installs it).
 fw_available() {
-	if [[ $(fw_backend) == ufw ]]; then
-		type -P ufw >/dev/null
-	else
-		command -v firewall-offline-cmd >/dev/null 2>&1
-	fi
+	case $(fw_backend) in
+	ufw) type -P ufw >/dev/null ;;
+	firewalld) command -v firewall-offline-cmd >/dev/null 2>&1 ;;
+	nftables) type -P nft >/dev/null ;;
+	*) type -P iptables-restore >/dev/null && type -P ip6tables-restore >/dev/null ;;
+	esac
 	return
 }
 
@@ -172,6 +214,7 @@ fw_apply_all() {
 			LSS_MODULE=${module} _fw_trust_apply add "${network}" "${interface}"
 		done <"${registry}"
 	done
+	fw_sync
 	return
 }
 
@@ -191,6 +234,7 @@ fw_allow() {
 		printf '%s\n' "${spec}" >>"${registry}"
 		files_note_change "firewall allow ${spec}"
 	done
+	fw_sync
 	fw_container_sync
 	return
 }
@@ -211,6 +255,7 @@ fw_remove_module() {
 	fi
 	# Only reached when every rule is gone (or no firewall tool is installed, so no rule can exist).
 	rm -f -- "${registry}"
+	fw_sync
 	fw_container_sync
 	return
 }
@@ -282,6 +327,7 @@ _fw_check_interface() {
 _fw_trust_apply() {
 	local action=$1 network=$2 interface=$3 output
 	local -a rule=(in on "${interface}" from "${network}")
+	! fw_declarative || return 0
 	if [[ $(fw_backend) == ufw ]]; then
 		if [[ ${action} == add ]]; then
 			output=$(ufw allow "${rule[@]}" comment "lss:${LSS_MODULE:-core}" 2>&1) ||
@@ -321,6 +367,7 @@ fw_trust() {
 	mkdir -p "$(dirname "${registry}")"
 	printf '%s\n' "${entry}" >>"${registry}"
 	files_note_change "firewall trust ${network} on ${interface}"
+	fw_sync
 	return
 }
 
@@ -336,6 +383,211 @@ _fw_trust_remove_module() {
 		done <"${registry}"
 	fi
 	rm -f -- "${registry}"
+	fw_sync
+	return
+}
+
+# _fw_records: every recorded rule as "port PROTO PORT SCOPE" and every trusted network as "trust NETWORK INTERFACE",
+# sorted, so the same records always give the same rule set.
+_fw_records() {
+	local registry spec network interface
+	for registry in "${LSS_STATE_DIR:-/var/lib/lss}"/firewall/*; do
+		[[ -f ${registry} ]] || continue
+		while IFS= read -r spec; do
+			[[ -n ${spec} ]] || continue
+			_fw_parse "${spec}"
+			[[ ${FW_SCOPE} == local ]] || printf 'port %s %s %s\n' "${FW_PROTO}" "${FW_PORT}" "${FW_SCOPE}"
+		done <"${registry}"
+	done
+	for registry in "${LSS_STATE_DIR:-/var/lib/lss}"/firewall-trusted/*; do
+		[[ -f ${registry} ]] || continue
+		while read -r network interface; do
+			[[ -n ${network} && -n ${interface} ]] || continue
+			printf 'trust %s %s\n' "${network}" "${interface}"
+		done <"${registry}"
+	done
+	return
+}
+
+# fw_nft_ruleset: lss's table for nftables. Loading it replaces the table in one transaction (the empty "table" line
+# lets "delete" succeed when the table does not exist yet), so there is never a moment without rules.
+fw_nft_ruleset() {
+	local kind a b c vpn family
+	vpn=$(fw_vpn_network)
+	printf '%s\n' '# Managed by lss: the rules of the modules (lss firewall records), replaced as a whole.' \
+		'table inet lss' 'delete table inet lss' 'table inet lss {' '	chain input {' \
+		'		type filter hook input priority filter; policy drop;' '		ct state established,related accept' \
+		'		ct state invalid drop' '		iifname "lo" accept' '		meta l4proto { icmp, ipv6-icmp } accept'
+	while read -r kind a b c; do
+		case ${kind} in
+		port)
+			if [[ ${c} == vpn ]]; then
+				printf '\t\tip saddr %s %s dport %s accept\n' "${vpn}" "${a}" "${b}"
+			else
+				printf '\t\t%s dport %s accept\n' "${a}" "${b}"
+			fi
+			;;
+		*)
+			family=ip
+			[[ ${a} != *:* ]] || family=ip6
+			printf '\t\tiifname "%s" %s saddr %s accept\n' "${b}" "${family}" "${a}"
+			;;
+		esac
+	done < <(_fw_records | sort -u)
+	printf '%s\n' '	}' '}'
+	return
+}
+
+# fw_ipt_ruleset 4|6: lss's chain for iptables-restore --noflush (IPv4) or ip6tables-restore --noflush (IPv6). The
+# WireGuard network is IPv4, so its rules exist only in the IPv4 set; trusted networks go to the set of their family.
+fw_ipt_ruleset() {
+	local version=$1 kind a b c vpn icmp=icmp
+	vpn=$(fw_vpn_network)
+	[[ ${version} == 4 ]] || icmp=ipv6-icmp
+	printf '%s\n' '# Managed by lss: the rules of the modules (lss firewall records), replaced as a whole.' '*filter' \
+		':LSS-INPUT - [0:0]' '-F LSS-INPUT' '-A LSS-INPUT -i lo -j ACCEPT' \
+		'-A LSS-INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' \
+		'-A LSS-INPUT -m conntrack --ctstate INVALID -j DROP' "-A LSS-INPUT -p ${icmp} -j ACCEPT"
+	while read -r kind a b c; do
+		case ${kind} in
+		port)
+			if [[ ${c} == vpn ]]; then
+				[[ ${version} == 4 ]] || continue
+				printf -- '-A LSS-INPUT -s %s -p %s -m %s --dport %s -j ACCEPT\n' "${vpn}" "${a}" "${a}" "${b/-/:}"
+			else
+				printf -- '-A LSS-INPUT -p %s -m %s --dport %s -j ACCEPT\n' "${a}" "${a}" "${b/-/:}"
+			fi
+			;;
+		*)
+			if [[ ${a} == *:* ]]; then
+				[[ ${version} == 6 ]] || continue
+			else
+				[[ ${version} == 4 ]] || continue
+			fi
+			printf -- '-A LSS-INPUT -i %s -s %s -j ACCEPT\n' "${b}" "${a}"
+			;;
+		esac
+	done < <(_fw_records | sort -u)
+	printf '%s\n' '-A LSS-INPUT -j DROP' 'COMMIT'
+	return
+}
+
+# _fw_ipt_hook iptables|ip6tables: INPUT jumps to LSS-INPUT first.
+_fw_ipt_hook() {
+	"$1" -C INPUT -j LSS-INPUT >/dev/null 2>&1 || "$1" -I INPUT 1 -j LSS-INPUT
+	return
+}
+
+# fw_sync: writes the rule set of nftables or iptables from the records and loads it while the firewall is on. ufw and
+# firewalld take their rules one by one, so for them it does nothing.
+fw_sync() {
+	local backend
+	backend=$(fw_backend)
+	if ! fw_declarative || ! fw_available; then
+		return 0
+	fi
+	if [[ ${backend} == nftables ]]; then
+		file_write 0600 root:root "${FW_NFT_FILE}" < <(fw_nft_ruleset)
+		if [[ ${LSS_FILE_CHANGED} == 1 ]] && fw_is_enabled; then
+			nft -f "${FW_NFT_FILE}" || die "nftables does not take the rules in ${FW_NFT_FILE}."
+		fi
+		return 0
+	fi
+	file_write 0600 root:root "${FW_IPT_DIR}/rules.v4" < <(fw_ipt_ruleset 4)
+	local changed=${LSS_FILE_CHANGED}
+	file_write 0600 root:root "${FW_IPT_DIR}/rules.v6" < <(fw_ipt_ruleset 6)
+	[[ ${changed} == 1 || ${LSS_FILE_CHANGED} == 1 ]] || return 0
+	if fw_is_enabled; then
+		iptables-restore --noflush "${FW_IPT_DIR}/rules.v4" || die "iptables does not take the rules in ${FW_IPT_DIR}/rules.v4."
+		ip6tables-restore --noflush "${FW_IPT_DIR}/rules.v6" ||
+			die "ip6tables does not take the rules in ${FW_IPT_DIR}/rules.v6."
+	fi
+	return
+}
+
+# fw_enable: switches nftables or iptables on with the recorded rules and keeps them across reboots: nftables through
+# an include in FW_NFT_CONF and its service, iptables through lss-firewall.service (systemd) or the OpenRC local
+# service. SysV and Upstart have no such hook; lss warns that the rules are gone after a reboot there.
+fw_enable() {
+	local backend
+	backend=$(fw_backend)
+	fw_declarative || die "fw_enable is for nftables and iptables; ${backend} is switched on by the firewall module."
+	fw_sync
+	if [[ ${backend} == nftables ]]; then
+		nft -f "${FW_NFT_FILE}" || die "nftables does not take the rules in ${FW_NFT_FILE}."
+		local conf=${FW_NFT_CONF:-/etc/nftables.conf} mode owner
+		[[ -n ${FW_NFT_CONF} || ${OS_FAMILY} != alpine ]] || conf=/etc/nftables.nft
+		if [[ ! -f ${conf} ]] || ! grep -qF -e "include \"${FW_NFT_FILE}\"" -e "include \"${FW_NFT_FILE%/*}/*.nft\"" "${conf}"; then
+			# The file keeps its mode (Debian's is an executable nft script) and its owner.
+			mode=$(stat -c '%a' "${conf}" 2>/dev/null) || mode=644
+			owner=$(stat -c '%U:%G' "${conf}" 2>/dev/null) || owner=root:root
+			file_ensure_lines "0${mode}" "${owner}" "${conf}" <<<"include \"${FW_NFT_FILE}\""
+		fi
+		svc_enable nftables
+		return
+	fi
+	iptables-restore --noflush "${FW_IPT_DIR}/rules.v4" || die "iptables does not take the rules in ${FW_IPT_DIR}/rules.v4."
+	ip6tables-restore --noflush "${FW_IPT_DIR}/rules.v6" || die "ip6tables does not take the rules in ${FW_IPT_DIR}/rules.v6."
+	_fw_ipt_hook iptables
+	_fw_ipt_hook ip6tables
+	local load
+	load="iptables-restore --noflush ${FW_IPT_DIR}/rules.v4 && ip6tables-restore --noflush ${FW_IPT_DIR}/rules.v6"
+	load+=" && { iptables -C INPUT -j LSS-INPUT || iptables -I INPUT 1 -j LSS-INPUT; }"
+	load+=" && { ip6tables -C INPUT -j LSS-INPUT || ip6tables -I INPUT 1 -j LSS-INPUT; }"
+	case $(svc_init) in
+	systemd)
+		svc_unit lss-firewall.service <<EOF
+# Managed by lss (module ${LSS_MODULE:-firewall}). Loads lss's iptables rules at boot.
+[Unit]
+Description=lss firewall rules (iptables)
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '${load}'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+		svc_enable lss-firewall.service
+		;;
+	openrc)
+		file_write 0755 root:root "${FW_LOCAL_D}/lss-firewall.start" <<EOF
+#!/bin/sh
+# Managed by lss (module ${LSS_MODULE:-firewall}). Loads lss's iptables rules at boot.
+${load}
+EOF
+		svc_enable local
+		;;
+	*) log_warn "firewall: $(svc_init) has no boot hook lss knows; the iptables rules are gone after a reboot." ;;
+	esac
+	return
+}
+
+# fw_disable: takes lss's rules out of nftables or iptables and off the boot path; the records stay.
+fw_disable() {
+	case $(fw_backend) in
+	nftables)
+		if type -P nft >/dev/null && nft list table inet lss >/dev/null 2>&1; then
+			nft delete table inet lss
+		fi
+		;;
+	iptables)
+		local tool
+		for tool in iptables ip6tables; do
+			type -P "${tool}" >/dev/null || continue
+			while "${tool}" -C INPUT -j LSS-INPUT >/dev/null 2>&1; do
+				"${tool}" -D INPUT -j LSS-INPUT
+			done
+		done
+		svc_disable lss-firewall.service
+		file_remove /etc/systemd/system/lss-firewall.service
+		file_remove "${FW_LOCAL_D}/lss-firewall.start"
+		;;
+	*) die "fw_disable is for nftables and iptables." ;;
+	esac
 	return
 }
 
@@ -399,7 +651,12 @@ fw_ssh_port() {
 fw_rollback_arm() {
 	[[ -n ${SSH_CONNECTION:-} ]] || return 0
 	local command
-	if [[ $(fw_backend) == ufw ]]; then command='ufw --force disable'; else command='systemctl stop firewalld'; fi
+	case $(fw_backend) in
+	ufw) command='ufw --force disable' ;;
+	firewalld) command='systemctl stop firewalld' ;;
+	nftables) command='nft delete table inet lss' ;;
+	*) command='while iptables -D INPUT -j LSS-INPUT; do :; done; while ip6tables -D INPUT -j LSS-INPUT; do :; done' ;;
+	esac
 	systemctl stop lss-firewall-rollback.timer >/dev/null 2>&1 || true
 	systemd-run --quiet --unit=lss-firewall-rollback --on-active="${1:-120}" /bin/sh -c "${command}" >/dev/null
 	log_warn "Firewall rollback armed: it switches the firewall off in ${1:-120} s unless lss confirms SSH access."

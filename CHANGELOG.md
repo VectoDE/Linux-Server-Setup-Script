@@ -27,6 +27,11 @@ now or later.
   disable, restart and reload services through the same helpers. `svc_schedule` writes a persistent systemd timer, or
   a cron job in `/etc/cron.d` without systemd; OnCalendar times that cron cannot express are refused. Drop-ins,
   sandboxes and units of lss's own are skipped without systemd.
+- Firewall backends nftables and iptables besides ufw and firewalld: nftables on Alpine, Arch and other systems
+  outside the Debian, RHEL and SUSE families (iptables where `nft` is missing), any of the four with `LSS_FIREWALL`.
+  lss writes their whole rule set from the records each time, a table `inet lss` or a chain `LSS-INPUT` for IPv4 and
+  IPv6, drops what no rule accepts and loads the rules at boot (nftables service, `lss-firewall.service` or the OpenRC
+  local service).
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
   CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
   `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and
