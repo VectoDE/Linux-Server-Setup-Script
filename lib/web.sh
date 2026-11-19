@@ -223,7 +223,7 @@ _web_self_signed() {
 # web_cert_placeholder NAME [DOMAIN...]: until NAME has a certificate of its own, its directory holds a copy of the
 # default certificate, so a site can point at WEB_TLS_DIR/NAME from the start and keeps that path after the real one
 # arrives. With DOMAIN, the placeholder is a self-signed certificate for these names instead, so clients that trust
-# it (a Nextcloud that calls Collabora through the web server) can check the host name; it follows the names and is
+# it (a Nextcloud that calls Collabora through the reverse proxy) can check the host name; it follows the names and is
 # renewed within 30 days of expiry, and a certificate of the tls module (lineage NAME) is never replaced.
 web_cert_placeholder() {
 	local name=$1 dir

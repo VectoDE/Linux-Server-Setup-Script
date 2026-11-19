@@ -129,7 +129,7 @@ _traefik_wait() {
 
 # _traefik_waf_fallback: where Coraza is asked for and cannot run (amd64, see lib/traefik.sh), ModSecurity in the web
 # server takes its place: lss installs the modsecurity module (once, and removes it again with Traefik) and
-# traefik_waf_backend sends the routes of the applications through the web server, so every request passes a WAF.
+# traefik_waf_backend sends the routes of the applications through nginx or Apache, so every request passes a WAF.
 # Caddy has no ModSecurity connector; without a web server there is nothing to filter in.
 _traefik_waf_fallback() {
 	local server reason='traefik: Coraza waits for a Traefik release with wazero 1.9 on amd64'

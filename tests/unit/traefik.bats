@@ -172,6 +172,14 @@ use_module() {
 	[[ ${output} == *$'      tls:\n        certResolver: lss'* ]]
 }
 
+@test "other libraries learn from traefik_acme whether Traefik requests the certificates itself" {
+	run ! traefik_acme
+	export LSS_TRAEFIK_ACME=true
+	traefik_acme
+	export LSS_TRAEFIK_ACME=false
+	run ! traefik_acme
+}
+
 @test "a route file is written for Traefik and removed again" {
 	as_test_user
 	use_module traefik
@@ -357,7 +365,7 @@ use_module() {
 	run ! traefik_waf_fallback
 }
 
-@test "routes pass through the web server for ModSecurity only where Coraza cannot run and nginx or Apache serves" {
+@test "routes pass through nginx or Apache for ModSecurity only where Coraza cannot run and nginx or Apache serves" {
 	load_module
 	OS_ARCH=x86_64
 	run ! traefik_waf_backend
@@ -382,7 +390,7 @@ use_module() {
 	run ! traefik_waf_backend
 }
 
-@test "a route through the web server points Traefik at the backend with its transport" {
+@test "a route through nginx or Apache points Traefik at the backend with its transport" {
 	load_module
 	run traefik_route_conf app "https://127.0.0.1:${WEB_BACKEND_HTTPS_PORT}" app.example.com
 	[[ ${output} == *$'      loadBalancer:\n        serversTransport: lss-backend\n        servers:\n          - url: https://127.0.0.1:8443'* ]]
