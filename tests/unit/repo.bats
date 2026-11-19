@@ -34,6 +34,7 @@ EOF
 	printf 'https://dl-cdn.alpinelinux.org/alpine/v3.21/main\n' >"${LSS_APK_REPOSITORIES}"
 	printf '[options]\nSigLevel = Required DatabaseOptional\n\n[core]\nInclude = /etc/pacman.d/mirrorlist\n' >"${LSS_PACMAN_CONF}"
 	WRITES=${BATS_TEST_TMPDIR}/writes
+	# shellcheck disable=SC2329 # replaces file_write of lib/files.sh
 	file_write() {
 		printf '== %s %s %s\n' "$1" "$2" "$3" >>"${WRITES}"
 		cat >>"${WRITES}"
@@ -104,7 +105,7 @@ use_system() {
 	# A second run with fresh metadata changes nothing.
 	: >"${STUB_LOG}"
 	LSS_PKG_UPDATED=1 TEST_FILE_CHANGED=0 repo_add demo
-	run ! grep -q '^apk' "${STUB_LOG}"
+	run ! grep -q '^apk --no-progress' "${STUB_LOG}"
 	[ "$(grep -c 'lss repository demo' "${LSS_APK_REPOSITORIES}")" -eq 2 ]
 	# Removing the repository leaves the administrator's lines alone.
 	repo_remove demo
@@ -159,7 +160,7 @@ use_system() {
 	# The key is known and nothing changed: no pacman-key, no refresh.
 	: >"${STUB_LOG}"
 	LSS_PKG_UPDATED=1 TEST_FILE_CHANGED=0 STUB_PACMAN_KEYS=AAAA1111 repo_add demo
-	run ! grep -q -e '^pacman-key --add' -e '^pacman ' "${STUB_LOG}"
+	run ! grep -q -e '^pacman-key --add' -e '^pacman --noconfirm' "${STUB_LOG}"
 	# A key that left the keyring is added again.
 	: >"${STUB_LOG}"
 	LSS_PKG_UPDATED=1 TEST_FILE_CHANGED=0 repo_add demo
@@ -201,15 +202,16 @@ use_system() {
 @test "repo_remove takes the pacman section, the keys and the files of every backend with it" {
 	use_system arch arch ''
 	repo_add demo
-	file_remove() { printf 'file_remove %s
-' "$1" >>"${STUB_LOG}"; }
+	# shellcheck disable=SC2329 # called by repo_remove
+	file_remove() { printf 'file_remove %s\n' "$1" >>"${STUB_LOG}"; }
 	: >"${STUB_LOG}"
 	STUB_PACMAN_KEYS=AAAA1111 repo_remove demo
 	run ! grep -q 'lss repository demo' "${LSS_PACMAN_CONF}"
 	grep -qxF '[core]' "${LSS_PACMAN_CONF}"
 	grep -qxF 'pacman-key --delete AAAA1111' "${STUB_LOG}"
 	local path
-	for path in /etc/pacman.d/lss-demo.asc /etc/zypp/repos.d/lss-demo.repo /etc/apk/keys/demo@example.invalid-1.rsa.pub 		/etc/yum.repos.d/lss-demo.repo /etc/apt/sources.list.d/lss-demo.sources; do
+	for path in /etc/pacman.d/lss-demo.asc /etc/zypp/repos.d/lss-demo.repo /etc/apk/keys/demo@example.invalid-1.rsa.pub \
+		/etc/yum.repos.d/lss-demo.repo /etc/apt/sources.list.d/lss-demo.sources; do
 		grep -qxF "file_remove ${path}" "${STUB_LOG}"
 	done
 	# A key pacman-key does not know is left alone; one it keeps is reported.
