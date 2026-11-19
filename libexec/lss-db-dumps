@@ -14,6 +14,12 @@
 #   mongodb          mongodump of every database as an archive, with the administrator from the lss secrets
 #   redis, valkey    BGSAVE, then a copy of the RDB snapshot
 # One file per engine in /var/backups/lss-db (root only), replaced on every run; restic keeps the history.
+# bash 4.4 or newer (docs/architecture.md, "Bash"): inherit_errexit, and "${array[@]}" of an empty array under set -u.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf '%s needs bash 4.4 or newer; this is bash %s.
+' "${0##*/}" "${BASH_VERSION}" >&2
+	exit 1
+fi
 set -Eeuo pipefail
 shopt -s inherit_errexit
 

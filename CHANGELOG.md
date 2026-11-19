@@ -32,6 +32,8 @@ now or later.
   lss writes their whole rule set from the records each time, a table `inet lss` or a chain `LSS-INPUT` for IPv4 and
   IPv6, drops what no rule accepts and loads the rules at boot (nftables service, `lss-firewall.service` or the OpenRC
   local service).
+- Minimum bash 4.4, checked first by every entry script with a clear message instead of a failure halfway
+  ([architecture](docs/architecture.md#bash)); `config_parse` no longer needs a nameref.
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
   CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
   `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and

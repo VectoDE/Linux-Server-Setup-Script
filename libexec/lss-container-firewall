@@ -18,6 +18,12 @@
 # (/var/lib/lss/container-ports, written from the firewall rules every module recorded with fw_allow). Connections
 # straight to a container address (from a neighbour on the same network) are dropped for the Docker and Podman
 # networks. Traffic the containers start themselves and answers to it pass.
+# bash 4.4 or newer (docs/architecture.md, "Bash"): inherit_errexit, and "${array[@]}" of an empty array under set -u.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf '%s needs bash 4.4 or newer; this is bash %s.
+' "${0##*/}" "${BASH_VERSION}" >&2
+	exit 1
+fi
 set -Eeuo pipefail
 shopt -s inherit_errexit
 

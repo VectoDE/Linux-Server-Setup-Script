@@ -15,6 +15,12 @@
 # The numbers of findings, fixes and notes also go to the node exporter for Prometheus (lss_guard_*).
 # Every finding goes to the journal (identifier lss-guard); a summary goes to the webhook and the e-mail address.
 # Notes (logins, bans) are part of the summary but do not make the run fail.
+# bash 4.4 or newer (docs/architecture.md, "Bash"): inherit_errexit, and "${array[@]}" of an empty array under set -u.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf '%s needs bash 4.4 or newer; this is bash %s.
+' "${0##*/}" "${BASH_VERSION}" >&2
+	exit 1
+fi
 set -Eeuo pipefail
 shopt -s inherit_errexit
 

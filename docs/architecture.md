@@ -117,3 +117,12 @@ refused.
   in `/opt/lss` belongs to root and nobody else can write it.
 - Secrets are generated with the kernel's random source, stored with mode 0600, masked in logs, and passed to
   programs through files or standard input, never on the command line.
+
+## Bash
+
+lss needs bash 4.4 or newer (Debian 10, Ubuntu 18.04, RHEL 8 and their successors have it; Alpine and Arch ship
+bash 5). Every entry script (`lss`, `bootstrap.sh`, `lib/step.sh` and the programs in `libexec/`) checks the version
+before anything else and stops with a clear message below 4.4. Two features decide the line: `inherit_errexit`
+(bash 4.4), which lets a failing command inside `$(...)` stop the run, and the expansion of an empty array with
+`"${array[@]}"`, which bash 4.3 and older report as an unbound variable under `set -u`. The libraries use no nameref
+(`local -n`, bash 4.3); `config_parse` fills the array it is named with `printf -v`.

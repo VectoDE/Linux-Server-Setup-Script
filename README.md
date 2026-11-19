@@ -38,6 +38,9 @@ support that is left (Debian: Freexian ELTS; Ubuntu: Ubuntu Pro; RHEL: Extended 
 | Profile `office`                        | 1.5 GB; 2 GB on the RHEL family           | 10 GB     | 9 to 16 min             |
 | Profile `devops`                        | 1 GB; 1.5 GB on the RHEL family           | 7 GB      | 6 to 11 min             |
 
+lss needs bash 4.4 or newer, which every supported release ships; below 4.4 it stops at once with a clear message
+([why](docs/architecture.md#bash)).
+
 One CPU core is enough; more cores mainly shorten the first AIDE database build. The disk figure includes the swap
 file (`LSS_SWAP_SIZE`, 1 GB in the measurement), the journal (up to `LSS_LOGGING_MAX_USE`, 1 GB) and the audit logs
 (up to 10 × 32 MiB). The RHEL family needs more memory because dnf loads its repository metadata during every install,

@@ -10,6 +10,12 @@
 # Input (environment): LSS_ROOT, LSS_STEP_MODULE, LSS_STEP_NAME, LSS_STEP_FILE, LSS_STEP_CONTEXT (file with the
 # settings of the calling lss process, written by module_run).
 
+# bash 4.4 or newer (docs/architecture.md, "Bash"): inherit_errexit, and "${array[@]}" of an empty array under set -u.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf '%s needs bash 4.4 or newer; this is bash %s.
+' "${0##*/}" "${BASH_VERSION}" >&2
+	exit 1
+fi
 set -Eeuo pipefail
 # lastpipe: in "generator | file_write ..." the last command runs in this shell, so LSS_FILE_CHANGED and the
 # change notes it sets reach the caller.
