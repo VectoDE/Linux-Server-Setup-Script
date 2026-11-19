@@ -63,11 +63,18 @@ os_detect() {
 		case ${OS_ID} in
 		debian | ubuntu) OS_FAMILY=debian ;;
 		rhel | rocky | almalinux | centos) OS_FAMILY=rhel ;;
+		opensuse-* | sles | sled | sle-micro) OS_FAMILY=suse ;;
+		alpine) OS_FAMILY=alpine ;;
+		arch | archarm) OS_FAMILY=arch ;;
 		*)
 			if [[ " ${OS_LIKE} " == *" debian "* ]]; then
 				OS_FAMILY=debian
 			elif [[ " ${OS_LIKE} " == *" rhel "* || " ${OS_LIKE} " == *" fedora "* ]]; then
 				OS_FAMILY=rhel
+			elif [[ " ${OS_LIKE} " == *" suse "* || " ${OS_LIKE} " == *" opensuse "* ]]; then
+				OS_FAMILY=suse
+			elif [[ " ${OS_LIKE} " == *" arch "* ]]; then
+				OS_FAMILY=arch
 			else
 				OS_FAMILY=unknown
 			fi
