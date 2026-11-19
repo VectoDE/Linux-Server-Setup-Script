@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# apk stub: "info -e PACKAGE" succeeds for packages listed in $STUB_INSTALLED; every other command is recorded and
+# exits with $STUB_EXIT_apk (default 0).
+if [[ $1 == info ]]; then
+	printf 'apk %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+	[[ " ${STUB_INSTALLED:-} " == *" ${*: -1} "* ]]
+	exit
+fi
+# shellcheck source=tests/fixtures/bin/_stub.bash
+source "$(dirname "$0")/_stub.bash"
+stub_main apk "$@"

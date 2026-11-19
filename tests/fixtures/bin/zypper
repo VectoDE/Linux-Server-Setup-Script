@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 VectoDE
+#
+# SPDX-License-Identifier: MIT
+
+# zypper stub: records the call with ZYPP_LOCK_TIMEOUT; the exit status is the first line of $STUB_ZYPPER_EXITS (a
+# file, which loses that line), or $STUB_EXIT_zypper (default 0) when the file is missing or empty.
+printf 'zypper %s (lock %s)\n' "$*" "${ZYPP_LOCK_TIMEOUT:-none}" >>"${STUB_LOG:-/dev/null}"
+code=${STUB_EXIT_zypper:-0}
+if [[ -s ${STUB_ZYPPER_EXITS:-} ]]; then
+	code=$(head -n 1 "${STUB_ZYPPER_EXITS}")
+	sed -i 1d "${STUB_ZYPPER_EXITS}"
+fi
+exit "${code}"

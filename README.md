@@ -24,6 +24,10 @@ touches the system, restores its files when something fails, and can prove with 
 x86_64 and arm64 (aarch64). CI runs on x86_64: on every pull request it installs, verifies, installs again and removes
 every module on each tested system.
 
+lss runs only on the releases of the support matrix in `data/systems.conf` and refuses every other system. When the
+vendor of a release ends its security support, every lss run, `lss status` and the guard warn and name the extended
+support that is left (Debian: Freexian ELTS; Ubuntu: Ubuntu Pro; RHEL: Extended Life Cycle Support).
+
 ## System requirements
 
 | Setup                                   | RAM                                       | Free disk | Install time            |
@@ -33,6 +37,9 @@ every module on each tested system.
 | `minimal-secure` with `clamav`          | 2.5 GB                                    | 4.5 GB    | about 1 min more        |
 | Profile `office`                        | 1.5 GB; 2 GB on the RHEL family           | 10 GB     | 9 to 16 min             |
 | Profile `devops`                        | 1 GB; 1.5 GB on the RHEL family           | 7 GB      | 6 to 11 min             |
+
+lss needs bash 4.4 or newer, which every supported release ships; below 4.4 it stops at once with a clear message
+([why](docs/architecture.md#bash)).
 
 One CPU core is enough; more cores mainly shorten the first AIDE database build. The disk figure includes the swap
 file (`LSS_SWAP_SIZE`, 1 GB in the measurement), the journal (up to `LSS_LOGGING_MAX_USE`, 1 GB) and the audit logs
@@ -183,6 +190,7 @@ Without a command, `sudo lss` opens a menu. On the RHEL family, sudo looks for c
 | `lss configure MODULE...`            | Apply changed settings to installed modules                                      |
 | `lss verify [MODULE...]`             | Check that installed modules work and that nobody changed their files            |
 | `lss status`                         | Installed modules and their services                                             |
+| `lss support`                        | Vendor support of this release; a warning (exit status 2) after its end          |
 | `lss remove MODULE... [--purge]`     | Remove modules; `--purge` also deletes their data                                |
 | `lss audit`                          | Lynis audit with the hardening index                                             |
 | `lss secrets show NAME`              | Print a generated secret, such as `admin-user-password`                          |

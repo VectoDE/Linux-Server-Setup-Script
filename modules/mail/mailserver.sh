@@ -393,6 +393,20 @@ _ms_dovecot() {
 
 # --- Rspamd ----------------------------------------------------------------------------------------------------------
 
+# _ms_rspamd_user: the account Rspamd runs as, which its package creates: _rspamd on Debian, Ubuntu and the Rspamd
+# packages of older RHEL releases, rspamd on others (the package of AlmaLinux 10 and Rocky 10). Without either (before
+# the package is installed, in the tests) it stays _rspamd.
+_ms_rspamd_user() {
+	local candidate
+	for candidate in _rspamd rspamd; do
+		if getent group "${candidate}" >/dev/null 2>&1; then
+			MS_RSPAMD_USER=${candidate}
+			break
+		fi
+	done
+	return 0
+}
+
 # _ms_dkim_key DOMAIN: the DKIM key of DOMAIN (RSA 2048, made once); prints the public key for the DNS record.
 _ms_dkim_key() {
 	local domain=$1 key
@@ -794,6 +808,7 @@ mod_configure() {
 	local before hostname cert main master
 	before=$(files_changes_of mailserver)
 	_ms_parse
+	_ms_rspamd_user
 	hostname=$(_ms_hostname)
 	cert=$(_ms_cert_dir)
 	if [[ -z $(opt certificate) ]]; then
@@ -846,6 +861,7 @@ _ms_served_cert() {
 mod_verify() {
 	local hostname cert expected served port verify id message try result key unit domain
 	_ms_parse
+	_ms_rspamd_user
 	hostname=$(_ms_hostname)
 	cert=$(_ms_cert_dir)
 	verify="${MAIL_VERIFY_LOCALPART}@${MS_DOMAINS[0]}"

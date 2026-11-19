@@ -28,8 +28,8 @@ _config_unquote() {
 
 # config_parse FILE ARRAY_NAME: reads KEY=value lines into the associative array.
 config_parse() {
-	local file=$1 line key value number=0
-	local -n target=$2
+	local file=$1 target=$2 line key value number=0
+	[[ ${target} =~ ^[A-Z_][A-Z0-9_]*$ ]] || die "config_parse: invalid array name '${target}'."
 	[[ -r ${file} ]] || die "Cannot read configuration file ${file}."
 	while IFS= read -r line || [[ -n ${line} ]]; do
 		number=$((number + 1))
@@ -44,8 +44,8 @@ config_parse() {
 		key=${key#export }
 		value=${line#*=}
 		config_valid_key "${key}" || die "${file}:${number}: invalid key '${key}' (expected LSS_ followed by A-Z, 0-9, _)."
-		# shellcheck disable=SC2034 # nameref to the caller's array
-		target["${key}"]=$(_config_unquote "${value}")
+		# The key is checked above, so the element name is safe; printf -v needs no nameref.
+		printf -v "${target}[${key}]" '%s' "$(_config_unquote "${value}")"
 	done <"${file}"
 	return
 }
@@ -82,13 +82,13 @@ config_set() {
 # config_get KEY [DEFAULT]: prints the effective value.
 config_get() {
 	local key=$1 default=${2-}
-	if [[ -v LSS_CFG_SET[${key}] ]]; then
+	if [[ -n ${LSS_CFG_SET[${key}]+set} ]]; then
 		printf '%s' "${LSS_CFG_SET[${key}]}"
 	elif [[ -n ${!key+set} ]] && [[ $(declare -p "${key}" 2>/dev/null) == 'declare -x'* ]]; then
 		printf '%s' "${!key}"
-	elif [[ -v LSS_CFG_FILE[${key}] ]]; then
+	elif [[ -n ${LSS_CFG_FILE[${key}]+set} ]]; then
 		printf '%s' "${LSS_CFG_FILE[${key}]}"
-	elif [[ -v LSS_CFG_PROFILE[${key}] ]]; then
+	elif [[ -n ${LSS_CFG_PROFILE[${key}]+set} ]]; then
 		printf '%s' "${LSS_CFG_PROFILE[${key}]}"
 	else
 		printf '%s' "${default}"

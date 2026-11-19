@@ -4,13 +4,13 @@
 
 MOD_NAME="firewall"
 MOD_GROUP="security"
-MOD_DESCRIPTION="Host firewall (ufw or firewalld): inbound closed except SSH and the ports of installed modules"
+MOD_DESCRIPTION="Host firewall (ufw, firewalld, nftables or iptables): inbound closed except SSH and the ports of installed modules"
 MOD_REQUIRES="system"
 MOD_OPTIONS="allow||Extra rules, separated by spaces: PORT/tcp|udp[:public|vpn]
 rollback|120|Seconds after which the firewall switches itself off again if lss cannot confirm SSH access"
 
 _fw_unit() {
-	if [[ $(fw_backend) == ufw ]]; then printf 'ufw'; else printf 'firewalld'; fi
+	fw_backend
 	return
 }
 
@@ -24,11 +24,12 @@ mod_check() {
 }
 
 mod_install() {
-	if [[ $(fw_backend) == ufw ]]; then
-		pkg_install ufw
-	else
-		pkg_install firewalld
-	fi
+	case $(fw_backend) in
+	ufw) pkg_install ufw ;;
+	firewalld) pkg_install firewalld ;;
+	nftables) pkg_install nftables ;;
+	*) pkg_install_family 'iptables' 'iptables' 'iptables' 'iptables ip6tables' 'iptables' ;;
+	esac
 	return
 }
 
@@ -81,17 +82,19 @@ mod_configure() {
 	for spec in $(opt allow); do
 		fw_allow "${spec}"
 	done
-	if [[ $(fw_backend) == ufw ]]; then
-		_fw_defaults_ufw
-	else
-		_fw_defaults_firewalld
-	fi
+	case $(fw_backend) in
+	ufw) _fw_defaults_ufw ;;
+	firewalld) _fw_defaults_firewalld ;;
+	*) ;;
+	esac
 	# Rules other modules recorded before the firewall existed.
 	fw_apply_all >/dev/null
 
 	if ! fw_is_enabled; then
 		fw_rollback_arm "$(opt_int rollback)"
-		if [[ $(fw_backend) == ufw ]]; then
+		if fw_declarative; then
+			fw_enable
+		elif [[ $(fw_backend) == ufw ]]; then
 			ufw --force enable >/dev/null
 			svc_enable ufw
 		else
@@ -103,31 +106,58 @@ mod_configure() {
 			done
 		fi
 		files_note_change "firewall enabled"
+		_fw_no_foreign_drop
 		_fw_is_open "${ssh_port}" || die "firewall: SSH port ${ssh_port} is not open; the firewall stays off."
 		fw_rollback_cancel
+	elif fw_declarative; then
+		# Already on: the configuration of the nftables service and the boot hook of iptables are brought up to date
+		# (a default configuration of the distribution that an older lss left in place is replaced).
+		fw_enable
 	elif [[ $(fw_backend) == firewalld ]]; then
 		firewall-cmd --reload >/dev/null
 	fi
 	return
 }
 
-# _fw_is_open PORT [PROTO]: the port is open to everyone.
+# _fw_no_foreign_drop: with nftables, no input chain of another table drops by default (fw_nft_foreign_drop); it would
+# drop what lss's table accepts, SSH included.
+_fw_no_foreign_drop() {
+	local foreign
+	[[ $(fw_backend) == nftables ]] || return 0
+	foreign=$(fw_nft_foreign_drop)
+	[[ -z ${foreign} ]] ||
+		die "firewall: the input chain ${foreign//$'\n'/, } of another nftables table drops by default (policy drop), so it drops what lss opens, SSH included. Delete that table (nft list ruleset shows it) and take it out of $(fw_nft_conf), which the nftables service loads at boot, then run lss again."
+	return
+}
+
+# _fw_is_open PORT [PROTO]: the port is open to everyone. With nftables the rule of lss counts only while no other
+# table drops input by default.
 _fw_is_open() {
 	local port=$1 proto=${2:-tcp}
-	if [[ $(fw_backend) == ufw ]]; then
-		ufw status | grep -qE "^${port/-/:}/${proto}[[:space:]]+ALLOW"
-	else
-		firewall-cmd --zone=public --query-port="${port}/${proto}" >/dev/null
-	fi
+	case $(fw_backend) in
+	ufw) ufw status | grep -qE "^${port/-/:}/${proto}[[:space:]]+ALLOW" ;;
+	firewalld) firewall-cmd --zone=public --query-port="${port}/${proto}" >/dev/null ;;
+	nftables)
+		nft list table inet lss 2>/dev/null | grep -qE "^[[:space:]]*${proto} dport ${port} accept$" &&
+			[[ -z $(fw_nft_foreign_drop) ]]
+		;;
+	*) iptables -S LSS-INPUT 2>/dev/null | grep -qxF -- "-A LSS-INPUT -p ${proto} -m ${proto} --dport ${port/-/:} -j ACCEPT" ;;
+	esac
 	return
 }
 
 mod_verify() {
 	local ssh_port spec
 	fw_is_enabled || die "firewall: $(_fw_unit) is not active."
+	_fw_no_foreign_drop
 	ssh_port=$(fw_ssh_port)
 	_fw_is_open "${ssh_port}" || die "firewall: the SSH port ${ssh_port} is not open."
-	if [[ $(fw_backend) == ufw ]]; then
+	if [[ $(fw_backend) == nftables ]]; then
+		nft list chain inet lss input | grep -q 'policy drop;' || die "firewall: inbound traffic is not dropped by default."
+	elif [[ $(fw_backend) == iptables ]]; then
+		iptables -S LSS-INPUT | tail -n 1 | grep -qxF -- '-A LSS-INPUT -j DROP' ||
+			die "firewall: inbound traffic is not dropped by default."
+	elif [[ $(fw_backend) == ufw ]]; then
 		ufw status verbose | grep -q 'Default: deny (incoming)' || die "firewall: inbound traffic is not denied by default."
 	else
 		[[ $(firewall-cmd --get-default-zone) == public ]] || die "firewall: default zone is not public."
@@ -146,7 +176,9 @@ mod_verify() {
 # Switches the firewall off. The rules of other modules stay recorded, so installing the module again restores them.
 mod_remove() {
 	fw_rollback_cancel
-	if [[ $(fw_backend) == ufw ]]; then
+	if fw_declarative; then
+		fw_disable
+	elif [[ $(fw_backend) == ufw ]]; then
 		if type -P ufw >/dev/null; then
 			ufw --force disable >/dev/null
 		fi

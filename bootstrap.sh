@@ -19,6 +19,12 @@
 # /opt/lss/current/lss. Links are replaced with rename(2), so a reader sees the old or the new version, never none.
 # Older versions than these two are deleted.
 
+# bash 4.4 or newer (docs/architecture.md, "Bash"): inherit_errexit, and "${array[@]}" of an empty array under set -u.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf '%s needs bash 4.4 or newer; this is bash %s.
+' "${0##*/}" "${BASH_VERSION}" >&2
+	exit 1
+fi
 set -Eeuo pipefail
 shopt -s inherit_errexit
 

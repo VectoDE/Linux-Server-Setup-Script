@@ -18,7 +18,7 @@ lib/
   template.sh           {{NAME}} placeholders, without eval
   pkg.sh repo.sh fetch.sh   packages, vendor repositories with pinned keys, downloads with pinned checksums
   service.sh            systemd units, drop-ins and timers
-  firewall.sh           ufw or firewalld; ports and trusted networks recorded per module
+  firewall.sh           ufw, firewalld, nftables or iptables; ports and trusted networks recorded per module
   container.sh          hardened container runs, Compose check, container firewall, Trivy
   secrets.sh state.sh   generated secrets; which modules are installed, in which version and mode
   ui.sh                 the interactive menu (whiptail, or plain prompts)
@@ -83,11 +83,18 @@ lss only makes sure its own lines are there.
 
 ## Firewall
 
-Modules never call ufw or firewalld themselves. They call `fw_allow 443/tcp`, and lss records the rule for that
-module. If the firewall module is installed, the rule is applied at once; if it is installed later, it applies every
-recorded rule. Removing a module closes its ports. While the firewall module enables the firewall, a timer is armed
-that switches it off again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock
-you out.
+Modules never call the firewall themselves. They call `fw_allow 443/tcp`, and lss records the rule for that module.
+If the firewall module is installed, the rule is applied at once; if it is installed later, it applies every recorded
+rule. Removing a module closes its ports. The backend is ufw on Debian and Ubuntu, firewalld on the RHEL and SUSE
+families and nftables elsewhere (iptables where `nft` is missing); `LSS_FIREWALL` picks one. nftables gets a table
+`inet lss` of its own and iptables a chain `LSS-INPUT`; lss writes their whole rule set from the records each time, and
+both drop what no rule accepts. A packet has to pass every input chain of nftables, so a second table that drops by
+default would drop what lss opens: lss replaces the nftables configuration of the distribution only while it is
+unchanged (its checksum is in `data/nftables-defaults.conf`), keeps a copy with a time stamp (and warns if its forward
+chain dropped, which lss's table does not), and stops with a message
+at a configuration the administrator changed; `lss verify` checks that no other table drops input by default. While
+the firewall module enables the firewall, a timer (without systemd a background job) is armed that switches it off
+again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock you out.
 
 Published container ports never reach the INPUT rules of ufw or firewalld: Docker, Podman and kube-proxy redirect
 them to the container address (DNAT), so the packet is forwarded. The container modules (docker, podman, k3s)
@@ -114,3 +121,12 @@ refused.
   in `/opt/lss` belongs to root and nobody else can write it.
 - Secrets are generated with the kernel's random source, stored with mode 0600, masked in logs, and passed to
   programs through files or standard input, never on the command line.
+
+## Bash
+
+lss needs bash 4.4 or newer (Debian 10, Ubuntu 18.04, RHEL 8 and their successors have it; Alpine and Arch ship
+bash 5). Every entry script (`lss`, `bootstrap.sh`, `lib/step.sh` and the programs in `libexec/`) checks the version
+before anything else and stops with a clear message below 4.4. Two features decide the line: `inherit_errexit`
+(bash 4.4), which lets a failing command inside `$(...)` stop the run, and the expansion of an empty array with
+`"${array[@]}"`, which bash 4.3 and older report as an unbound variable under `set -u`. The libraries use no nameref
+(`local -n`, bash 4.3); `config_parse` fills the array it is named with `printf -v`.

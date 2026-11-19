@@ -12,6 +12,34 @@ now or later.
 
 ### Added
 
+- Support matrix in `data/systems.conf`: lss finds the release by `ID` and `VERSION_ID` there, refuses only what is
+  not listed, warns on every run, in `lss status` and in the guard findings once the vendor's security support has
+  ended, and names the extended support left. `lss support` prints it (exit status 2 after the end). Proxmox VE is
+  told apart from Debian by `/etc/pve` and `pveversion`.
+- Package backends for apt, dnf, yum (RHEL 7 and older), zypper, apk and pacman: install, remove, refresh, upgrade,
+  security-only upgrade (`pkg_upgrade_security`) and the installed check, each tried three times with fresh metadata
+  when a mirror fails. Systems outside the matrix still get the family of their package manager.
+- Third-party repositories on zypper, apk and pacman: zypper gets an `rpm-md` repository whose pinned key is imported
+  into rpm, apk the vendor's RSA key pinned by its SHA-256 and a block in `/etc/apk/repositories`, pacman the pinned
+  key signed locally with `pacman-key` and a section in `/etc/pacman.conf` that requires signed packages. lss changes
+  only its own block in those shared files. Every repository URL must use HTTPS.
+- Init systems besides systemd: OpenRC, SysV init scripts (update-rc.d or chkconfig) and Upstart start, stop, enable,
+  disable, restart and reload services through the same helpers. `svc_schedule` writes a persistent systemd timer, or
+  a cron job in `/etc/cron.d` without systemd; OnCalendar times that cron cannot express are refused. Drop-ins,
+  sandboxes and units of lss's own are skipped without systemd.
+- Firewall backends nftables and iptables besides ufw and firewalld: nftables on Alpine, Arch and other systems
+  outside the Debian, RHEL and SUSE families (iptables where `nft` is missing), any of the four with `LSS_FIREWALL`.
+  lss writes their whole rule set from the records each time, a table `inet lss` or a chain `LSS-INPUT` for IPv4 and
+  IPv6, drops what no rule accepts and loads the rules at boot (nftables service, `lss-firewall.service` or the OpenRC
+  local service). The unchanged nftables configuration of the distribution (checksums in
+  `data/nftables-defaults.conf`; Alpine's and Arch's drop input in a table of their own) is saved with a time stamp
+  and replaced by one that loads only lss's table, without `flush ruleset` (lss warns when that default had a forward
+  chain with `policy drop`, which goes with it); a changed one stops the run, before
+  anything is loaded, with what to do. `lss verify` fails while another table has an input chain with
+  `policy drop`. Without systemd the SSH rollback runs as a job of its own (PID in `/run/lss`) instead of a systemd
+  timer.
+- Minimum bash 4.4, checked first by every entry script with a clear message instead of a failure halfway
+  ([architecture](docs/architecture.md#bash)); `config_parse` no longer needs a nameref.
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
   CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
   `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and

@@ -5,6 +5,12 @@
 
 # lss: modular, hardened Linux server setup. See README.md and docs/.
 
+# bash 4.4 or newer (docs/architecture.md, "Bash"): inherit_errexit, and "${array[@]}" of an empty array under set -u.
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf '%s needs bash 4.4 or newer; this is bash %s.
+' "${0##*/}" "${BASH_VERSION}" >&2
+	exit 1
+fi
 set -Eeuo pipefail
 # lastpipe: in "generator | file_write ..." the last command runs in this shell, so LSS_FILE_CHANGED and the
 # change notes it sets reach the caller.
@@ -34,6 +40,7 @@ Commands:
   configure MODULE...            rewrite the configuration of installed modules
   verify [MODULE...]             check installed modules and changed managed files
   status                         installed modules and their services
+  support                        vendor support of this release (exit status 2 after its end)
   remove MODULE... [--purge]     remove modules (--purge also deletes their data)
   audit                          Lynis audit with hardening index
   secrets show NAME              print a generated secret
@@ -143,6 +150,10 @@ start_run() {
 	require_root
 	os_detect
 	os_require_supported
+	local support
+	if ! support=$(os_support_status); then
+		log_warn "${support}"
+	fi
 	LSS_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
 	export LSS_RUN_ID
 	umask 022
@@ -297,8 +308,18 @@ cmd_verify() {
 	return "${failed}"
 }
 
+# cmd_support: the vendor support of this release; exit status 2 after its end (read by the guard).
+cmd_support() {
+	os_detect
+	os_require_supported
+	os_support_status
+	return
+}
+
 cmd_status() {
 	local name
+	os_support_status || true
+	printf '\n'
 	printf '%-18s %-10s %-8s %s\n' MODULE STATE MODE UPDATED
 	while IFS= read -r name; do
 		[[ -n ${name} ]] || continue
@@ -381,6 +402,10 @@ main() {
 		load_settings
 		"cmd_${COMMAND}"
 		return 0
+		;;
+	support)
+		cmd_support
+		return
 		;;
 	*) ;;
 	esac
