@@ -314,7 +314,8 @@ _repo_add_pacman() {
 	siglevel=${siglevel:-Required DatabaseOptional}
 	[[ -n ${server} ]] || die "Repository ${name} has no packages for ${OS_ID}."
 	_repo_https "${name}" "${server}"
-	[[ ${repo} =~ ^[A-Za-z0-9_-]+$ && ! ${repo} =~ ^(options|core|extra|multilib|testing|core-testing|extra-testing|multilib-testing)$ ]] ||
+	# Arch's own databases (with the staging, unstable and former community ones) and "local", which pacman reserves.
+	[[ ${repo} =~ ^[A-Za-z0-9_-]+$ && ! ${repo} =~ ^(options|local|core|extra|multilib|community|testing|staging|(core|extra|multilib|community)-(testing|staging)|(gnome|kde)-unstable)$ ]] ||
 		die "Repository ${name} needs PACMAN_REPO, the name of its database (not one of Arch's own)."
 	_repo_siglevel_ok "${siglevel}" || die "Repository ${name}: SigLevel '${siglevel}' does not require signed packages."
 	key=$(_repo_key "${name}" "${conf}" PACMAN) || exit 1

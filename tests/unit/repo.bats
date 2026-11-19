@@ -177,11 +177,14 @@ use_system() {
 		[ "${status}" -eq 1 ]
 		[[ ${output} == *"SigLevel '${level}' does not require signed packages."* ]]
 	done
-	sed -i 's/^PACMAN_SIGLEVEL=.*/PACMAN_SIGLEVEL=Required DatabaseRequired/; s/^PACMAN_REPO=.*/PACMAN_REPO=core/' \
-		"${LSS_ROOT}/data/repos/demo.conf"
-	run repo_add demo
-	[ "${status}" -eq 1 ]
-	[[ ${output} == *"needs PACMAN_REPO, the name of its database (not one of Arch's own)."* ]]
+	sed -i 's/^PACMAN_SIGLEVEL=.*/PACMAN_SIGLEVEL=Required DatabaseRequired/' "${LSS_ROOT}/data/repos/demo.conf"
+	local own
+	for own in core local extra-staging community kde-unstable; do
+		sed -i "s/^PACMAN_REPO=.*/PACMAN_REPO=${own}/" "${LSS_ROOT}/data/repos/demo.conf"
+		run repo_add demo
+		[ "${status}" -eq 1 ]
+		[[ ${output} == *"needs PACMAN_REPO, the name of its database (not one of Arch's own)."* ]]
+	done
 	sed -i 's/^PACMAN_REPO=.*/PACMAN_REPO=demo/' "${LSS_ROOT}/data/repos/demo.conf"
 	STUB_EXIT_pacman_key=1 run repo_add demo
 	[ "${status}" -eq 1 ]
