@@ -23,13 +23,95 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which part of the matrix runs. The whole matrix (about 280 jobs) runs on main, in the nightly and manual runs and
+  # on every pull request into main, so nothing reaches main without it. A pull request into another branch (a stacked
+  # pull request, whose branch is merged down the stack on every change) runs a representative part: every required
+  # check, every group on one system of the Debian and one of the RHEL family on x86_64, every group on arm64 on one
+  # system, the kernel and profile jobs, and the app stacks on Debian 13 and Rocky Linux 9. A manual run
+  # (workflow_dispatch) on the branch runs the whole matrix there.
+  plan:
+    name: Plan the matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      container-exclude: ${{ steps.plan.outputs.container-exclude }}
+      vm: ${{ steps.plan.outputs.vm }}
+      apps-exclude: ${{ steps.plan.outputs.apps-exclude }}
+      apps-arm64-exclude: ${{ steps.plan.outputs.apps-arm64-exclude }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - name: Full matrix or the part for a stacked pull request
+        id: plan
+        env:
+          FULL: ${{ github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch }}
+        run: |
+          systems='["debian-12","debian-13","ubuntu-22.04","ubuntu-24.04","ubuntu-26.04","rocky-9","almalinux-10"]'
+          all='{"memory":12288,"cpus":4,"disk":"40G","run":"profile all"}'
+          # The VM jobs of every change: the kernel modules and minimal-secure on Debian and the RHEL family, Docker,
+          # Portainer and k3s on every system, the profiles k8s-node, devops and office, every module at once.
+          vm='[
+            {"system":"debian-12","run":"kernel"},{"system":"debian-13","run":"kernel"},
+            {"system":"rocky-9","run":"kernel"},{"system":"almalinux-10","run":"kernel"},
+            {"system":"debian-12","run":"profile minimal-secure"},{"system":"debian-13","run":"profile minimal-secure"},
+            {"system":"rocky-9","run":"profile minimal-secure"},
+            {"system":"almalinux-10","run":"profile minimal-secure"},
+            {"system":"ubuntu-26.04","run":"profile minimal-secure"},
+            {"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},
+            {"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"},
+            {"system":"debian-13","run":"profile office","memory":8192},
+            {"system":"rocky-9","run":"profile office","memory":8192},
+            {"system":"almalinux-10","run":"profile office","memory":8192}
+          ]'
+          vm="$(jq -c --argjson systems "$systems" '. + [$systems[] | {system: ., run: "containers"}]' <<<"$vm")"
+          if [[ $FULL == true ]]; then
+            # Every module at once: on Debian 13 for every change, on every system in the nightly and manual runs.
+            if [[ $GITHUB_EVENT_NAME == schedule || $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
+              vm="$(jq -c --argjson systems "$systems" --argjson all "$all" \
+                '. + [$systems[] | {system: .} + $all]' <<<"$vm")"
+            else
+              vm="$(jq -c --argjson all "$all" '. + [{system: "debian-13"} + $all]' <<<"$vm")"
+            fi
+            container_exclude='[]' apps_exclude='[]' apps_arm64_exclude='[]'
+          else
+            # Containers: base, security and scanners (the required checks) on every system on x86_64, every group on
+            # Debian 13 and AlmaLinux 10 on x86_64 and on Debian 13 on arm64.
+            container_exclude="$(jq -c -n --argjson systems "$systems" '
+              ["web","edge","runtime","database","database-alt","container","backup","backup-alt","monitoring",
+               "network","mail","apps"] as $groups
+              | [$systems[] | select(. != "debian-13" and . != "almalinux-10") as $s
+                 | $groups[] | {system: $s, arch: "x64", group: .}]
+                + [$systems[] | select(. != "debian-13") | {system: ., arch: "arm64"}]')"
+            # VMs: the kernel modules, minimal-secure, Docker and k3s on Debian 13 and AlmaLinux 10, the office profile
+            # on Rocky Linux 9 (SELinux of the RHEL family 9), every module at once on Debian 13.
+            vm="$(jq -c --argjson all "$all" '
+              [.[] | select((.system == "debian-13" or .system == "almalinux-10")
+                            and (.run == "kernel" or .run == "profile minimal-secure" or .run == "containers"))]
+              + [.[] | select(.system == "rocky-9" and .run == "profile office")]
+              + [{system: "debian-13"} + $all]' <<<"$vm")"
+            apps_exclude="$(jq -c -n --argjson systems "$systems" \
+              '[$systems[] | select(. != "debian-13" and . != "rocky-9") | {system: .}]')"
+            apps_arm64_exclude="$(jq -c -n --argjson systems "$systems" \
+              '[$systems[] | select(. != "ubuntu-24.04") | {system: .}]')"
+          fi
+          {
+            echo "container-exclude=$container_exclude"
+            echo "vm=$vm"
+            echo "apps-exclude=$apps_exclude"
+            echo "apps-arm64-exclude=$apps_arm64_exclude"
+          } >>"$GITHUB_OUTPUT"
+          echo "Full matrix: $FULL; VM jobs: $(jq length <<<"$vm")" >>"$GITHUB_STEP_SUMMARY"
+
   container:
     name: ${{ matrix.system }}${{ matrix.arch == 'arm64' && ' arm64' || '' }} / ${{ matrix.group }}
+    needs: plan
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
+        exclude: ${{ fromJSON(needs.plan.outputs.container-exclude) }}
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
         group: [base, security, scanners, web, edge, runtime, database, database-alt, container, backup, backup-alt, monitoring, network, mail, apps]
         arch: [x64, arm64]
@@ -142,25 +224,21 @@ jobs:
 
   vm:
     name: ${{ matrix.system }} VM / ${{ matrix.run }}
+    needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        system: [debian-12, debian-13, rocky-9, almalinux-10]
-        run: [kernel, profile minimal-secure]
         # Every module at once (profiles/all.conf), on a clean system without the runner's preinstalled databases: on
         # Debian 13 for every change, on every distribution in the nightly and the manual runs. Docker with Portainer,
         # then k3s (after Docker is removed; they conflict) on every supported system, in a clean VM because the runner
         # already has Docker; minimal-secure on the newest Ubuntu release; the Kubernetes node profile with a Lynis audit;
         # Docker with the monitoring stack and Forgejo, as on a DevOps server; mail, Nextcloud with Collabora Online and
         # Vaultwarden, as on an office server, also on Rocky Linux 9 (the SELinux policy of the RHEL family 9 and 10).
-        # With the apps, profile all needs most of the memory and processors of the runner.
-        include: >-
-          ${{ fromJSON(format('[{0},{1}]', '{"system":"debian-12","run":"containers"},{"system":"debian-13","run":"containers"},{"system":"ubuntu-22.04","run":"containers"},{"system":"ubuntu-24.04","run":"containers"},{"system":"ubuntu-26.04","run":"containers"},{"system":"rocky-9","run":"containers"},{"system":"almalinux-10","run":"containers"},{"system":"ubuntu-26.04","run":"profile minimal-secure"},{"system":"debian-13","run":"profile k8s-node"},{"system":"almalinux-10","run":"profile k8s-node"},{"system":"debian-13","run":"profile devops"},{"system":"almalinux-10","run":"profile devops"},{"system":"debian-13","run":"profile office","memory":8192},{"system":"rocky-9","run":"profile office","memory":8192},{"system":"almalinux-10","run":"profile office","memory":8192}',
-          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-          && '{"system":"debian-12","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"debian-13","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"rocky-9","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"almalinux-10","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-22.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-24.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"},{"system":"ubuntu-26.04","run":"profile all","memory":12288,"cpus":4,"disk":"40G"}'
-          || '{"system":"debian-13","run":"profile all","memory":12288,"cpus":4,"disk":"40G"}')) }}
+        # With the apps, profile all needs most of the memory and processors of the runner. The list comes from the plan
+        # job, which runs a part of it on stacked pull requests.
+        include: ${{ fromJSON(needs.plan.outputs.vm) }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -213,6 +291,7 @@ jobs:
   # again and removed on its own. Nextcloud alone, then with Collabora Online (Nextcloud Office).
   apps:
     name: ${{ matrix.system }} VM / apps ${{ matrix.set }}
+    needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
@@ -220,6 +299,7 @@ jobs:
       matrix:
         system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
         set: [office, dev, web]
+        exclude: ${{ fromJSON(needs.plan.outputs.apps-exclude) }}
         include:
           - set: office
             base: docker,nginx
@@ -264,6 +344,7 @@ jobs:
   # runner's kernel: its netfilter modules load on the runner, as a container cannot load them.
   apps-arm64:
     name: ${{ matrix.system == 'host' && 'ubuntu-24.04 arm64' || format('{0} arm64 container', matrix.system) }} / apps ${{ matrix.set }}
+    needs: plan
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     strategy:
@@ -271,6 +352,7 @@ jobs:
       matrix:
         system: [host, debian-12, debian-13, ubuntu-22.04, ubuntu-26.04, rocky-9, almalinux-10]
         set: [office, dev, web]
+        exclude: ${{ fromJSON(needs.plan.outputs.apps-arm64-exclude) }}
         include:
           - set: office
             base: docker,nginx
