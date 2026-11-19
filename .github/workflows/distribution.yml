@@ -118,8 +118,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        arch: [x64, arm64]
+        # Every system on both architectures on main, in the nightly and manual runs and on pull requests into main;
+        # Debian 13 and AlmaLinux 10 on x86_64 and Debian 13 on arm64 on a stacked pull request (see integration.yml).
+        system: >-
+          ${{ fromJSON(
+          (github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch)
+          && '["debian-12","debian-13","ubuntu-22.04","ubuntu-24.04","ubuntu-26.04","rocky-9","almalinux-10"]'
+          || '["debian-13","almalinux-10"]') }}
+        arch: >-
+          ${{ fromJSON(
+          (github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch)
+          && '["x64","arm64"]' || '["x64"]') }}
+        include: >-
+          ${{ fromJSON(
+          (github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch)
+          && '[]' || '[{"system":"debian-13","arch":"arm64"}]') }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
@@ -146,8 +159,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: [debian-12, debian-13, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, rocky-9, almalinux-10]
-        arch: [x64, arm64]
+        # Every system on both architectures on main, in the nightly and manual runs and on pull requests into main;
+        # Debian 13 and AlmaLinux 10 on x86_64 and Debian 13 on arm64 on a stacked pull request (see integration.yml).
+        system: >-
+          ${{ fromJSON(
+          (github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch)
+          && '["debian-12","debian-13","ubuntu-22.04","ubuntu-24.04","ubuntu-26.04","rocky-9","almalinux-10"]'
+          || '["debian-13","almalinux-10"]') }}
+        arch: >-
+          ${{ fromJSON(
+          (github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch)
+          && '["x64","arm64"]' || '["x64"]') }}
+        include: >-
+          ${{ fromJSON(
+          (github.event_name != 'pull_request' || github.base_ref == github.event.repository.default_branch)
+          && '[]' || '[{"system":"debian-13","arch":"arm64"}]') }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
