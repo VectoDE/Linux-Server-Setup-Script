@@ -257,39 +257,62 @@ distro_default() {
 	run ! _fw_nft_is_default "${FW_NFT_CONF}"
 }
 
-@test "fw_enable stops at a changed configuration and keeps one that loads lss's rules itself" {
+@test "fw_enable stops at every changed configuration before it loads anything" {
 	export LSS_FIREWALL=nftables
 	OS_ID=alpine
 	OS_VERSION=3.24.2
 	OS_NAME='Alpine Linux v3.24'
-	distro_default alpine 3.24
-	printf 'table inet mine {\n}\n' >>"${FW_NFT_CONF}"
-	local before
-	before=$(<"${FW_NFT_CONF}")
-	# Changed, but it includes the directory of lss's file: kept as it is.
-	fw_enable
-	[ "$(<"${FW_NFT_CONF}")" = "${before}" ]
-	grep -qxF "nft -f ${FW_NFT_FILE}" "${STUB_LOG}"
-	# Changed and without an include: the run stops before anything is loaded and says what to do.
-	printf '#!/usr/sbin/nft -f\nflush ruleset\ntable inet filter {\n}\n' >"${FW_NFT_CONF}"
-	before=$(<"${FW_NFT_CONF}")
-	: >"${STUB_LOG}"
-	run fw_enable
-	[ "${status}" -eq 1 ]
-	[[ ${output} == *"firewall: lss leaves ${FW_NFT_CONF} as it is: it is not the unchanged default of Alpine Linux v3.24."* ]]
-	[[ ${output} == *"Add the line include \"${FW_NFT_FILE}\" to it"* ]]
-	[[ ${output} == *"move the file away, then lss writes its own"* ]]
-	[ "$(<"${FW_NFT_CONF}")" = "${before}" ]
-	run ! grep -q -e 'nft -f' -e 'nft delete' "${STUB_LOG}"
+	local before conf
+	# Changed, with or without an include of lss: the run stops, the file stays and nothing is deleted or loaded.
+	for conf in 'include "%s/*.nft"
+table inet mine {
+}
+' '#!/usr/sbin/nft -f
+flush ruleset
+table inet filter {
+}
+'; do
+		distro_default alpine 3.24
+		# shellcheck disable=SC2059 # the format is the content
+		printf "${conf}" "${FW_NFT_FILE%/*}" >"${FW_NFT_CONF}"
+		before=$(<"${FW_NFT_CONF}")
+		: >"${STUB_LOG}"
+		run fw_enable
+		[ "${status}" -eq 1 ]
+		[[ ${output} == *"firewall: lss leaves ${FW_NFT_CONF} as it is: it is not the unchanged default of Alpine Linux v3.24."* ]]
+		[[ ${output} == *"Move the file away (keep your own rules elsewhere), and lss writes a configuration"* ]]
+		[ "$(<"${FW_NFT_CONF}")" = "${before}" ]
+		run ! grep -q -e 'nft delete' -e 'enable --now nftables' "${STUB_LOG}"
+	done
 	# The unchanged default, but the administrator's rules sit in the directory it loads: the run stops as well.
 	distro_default alpine 3.24
 	mkdir -p "${FW_NFT_FILE%/*}"
-	printf 'table inet mine {\n}\n' >"${FW_NFT_FILE%/*}/mine.nft"
+	printf 'table inet mine {
+}
+' >"${FW_NFT_FILE%/*}/mine.nft"
 	run fw_enable
 	[ "${status}" -eq 1 ]
 	[[ ${output} == *"it loads ${FW_NFT_FILE%/*}/mine.nft as well, which lss's configuration would leave out"* ]]
 	local -a backups=("${FW_NFT_CONF}".lss-*)
 	[ ! -e "${backups[0]}" ]
+}
+
+@test "a default with the include line an older lss appended counts as the default and is replaced" {
+	export LSS_FIREWALL=nftables
+	OS_ID=arch
+	OS_VERSION=''
+	distro_default arch '*'
+	printf 'include "%s"
+' "${FW_NFT_FILE}" >>"${FW_NFT_CONF}"
+	_fw_nft_is_default "${FW_NFT_CONF}"
+	fw_enable
+	_fw_nft_is_own "${FW_NFT_CONF}"
+	grep -qxF 'nft delete table inet filter' "${STUB_LOG}"
+	# Another line after the default is a change.
+	distro_default arch '*'
+	printf 'tcp dport 2222 accept
+' >>"${FW_NFT_CONF}"
+	run ! _fw_nft_is_default "${FW_NFT_CONF}"
 }
 
 @test "fw_disable leaves lss's configuration of the service without the include" {
@@ -471,10 +494,15 @@ rollback_job() {
 @test "without systemd the rollback is a job of its own that cancelling stops, and it fires when nobody does" {
 	export SSH_CONNECTION='192.0.2.1 50000 192.0.2.2 22' LSS_FIREWALL=nftables LSS_INIT=openrc
 	export FW_RUN_DIR=${BATS_TEST_TMPDIR}/run
+	# The lock of the run (descriptor 9) stays with lss: a run after a failed one must not wait for the rollback.
+	exec 9>"${BATS_TEST_TMPDIR}/lock"
 	fw_rollback_arm 600 2>/dev/null
+	exec 9>&-
 	run ! grep -q -e systemd-run -e systemctl "${STUB_LOG}"
 	local pid
 	pid=$(rollback_job)
+	[ ! -e "/proc/${pid}/fd/9" ]
+	[ ! -e "/proc/${pid}/fd/3" ]
 	tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -qF ': lss-firewall-rollback; sleep 600; nft delete table inet lss;'
 	[ "$(stat -c '%a' "${FW_RUN_DIR}")" = 700 ]
 	fw_rollback_cancel

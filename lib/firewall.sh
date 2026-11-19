@@ -524,15 +524,19 @@ fw_nft_conf() {
 }
 
 # _fw_nft_is_default FILE: FILE is the configuration the distribution ships, unchanged: FW_NFT_DEFAULTS
-# (data/nftables-defaults.conf) lists its SHA-256 for this system (ID and VERSION_ID) and a file of the same name.
+# (data/nftables-defaults.conf) lists its SHA-256 for this system (ID and VERSION_ID) and a file of the same name. The
+# default with the include line that lss before 2.0 appended to it counts as unchanged as well.
 _fw_nft_is_default() {
-	local conf=$1 list sum id version file checksum
+	local conf=$1 list sum bare id version file checksum
 	list=${FW_NFT_DEFAULTS:-${LSS_ROOT}/data/nftables-defaults.conf}
 	[[ -f ${conf} && -r ${list} ]] || return 1
 	sum=$(sha256sum "${conf}" | cut -d ' ' -f 1)
+	bare=$(awk -v own="include \"${FW_NFT_FILE}\"" '{ line[NR] = $0 } END { n = NR; if (line[n] == own) n--
+		for (i = 1; i <= n; i++) print line[i] }' "${conf}" | sha256sum | cut -d ' ' -f 1)
 	while read -r id version file checksum; do
 		[[ -n ${id} && ${id} != '#'* ]] || continue
-		[[ ${id} == "${OS_ID}" && ${checksum} == "${sum}" && ${file##*/} == "${conf##*/}" ]] || continue
+		[[ ${id} == "${OS_ID}" && (${checksum} == "${sum}" || ${checksum} == "${bare}") && ${file##*/} == "${conf##*/}" ]] ||
+			continue
 		if [[ ${version} == '*' || ${version} == "${OS_VERSION}" || ${OS_VERSION} == "${version}".* ]]; then
 			return 0
 		fi
@@ -545,7 +549,7 @@ _fw_nft_is_default() {
 # whose input chain would drop what lss accepts. "off" (fw_disable) leaves the include out.
 _fw_nft_conf_content() {
 	printf '%s\n' "# Managed by lss (module firewall). The nftables service loads this file at boot: the table of lss only," \
-		'# without "flush ruleset" and without other tables. lss saved the default of the distribution next to it.'
+		'# without "flush ruleset" and without other tables. A default of the distribution it replaced is next to it as' 		'# <name>.lss-<date>-<time>.'
 	[[ $1 != on ]] || printf 'include "%s"\n' "${FW_NFT_FILE}"
 	return
 }
@@ -560,7 +564,7 @@ _fw_nft_is_own() {
 # administrator, and says what to do.
 _fw_nft_custom() {
 	local conf=$1 reason=${2:-it is not the unchanged default of ${OS_NAME:-the distribution}}
-	die "firewall: lss leaves ${conf} as it is: ${reason}. The nftables service loads it at boot, and an input chain in it with \"policy drop\" would drop what lss opens, SSH included. Add the line include \"${FW_NFT_FILE}\" to it and keep no other input chain with \"policy drop\" (or move the file away, then lss writes its own), and run lss again."
+	die "firewall: lss leaves ${conf} as it is: ${reason}. The nftables service loads it at boot, and an input chain in it with \"policy drop\" or a \"flush ruleset\" would drop what lss opens, SSH included. Move the file away (keep your own rules elsewhere), and lss writes a configuration that loads only its table; or set LSS_FIREWALL to ufw, firewalld or iptables. Then run lss again."
 }
 
 # _fw_nft_boot: makes the nftables service load lss's rules at boot through fw_nft_conf.
@@ -569,19 +573,13 @@ _fw_nft_custom() {
 #                           lss keeps a copy with a time stamp (CONF.lss-YYYYMMDD-HHMMSS), writes its configuration
 #                           and deletes the tables of the default that are loaded now (Alpine and Arch drop input in a
 #                           table "inet filter" of their own; Alpine's has no rule for SSH).
-#   anything else           kept when it includes FW_NFT_FILE or its directory (fw_nft_foreign_drop then checks that
-#                           nothing else drops by default); otherwise the run stops (_fw_nft_custom).
+#   anything else           the administrator changed it: the run stops before anything is loaded (_fw_nft_custom).
 _fw_nft_boot() {
 	local conf mode=644 owner=root:root backup table dir snippet
 	local -a tables=() others=() words=()
 	conf=$(fw_nft_conf)
 	if [[ -e ${conf} ]] && ! _fw_nft_is_own "${conf}"; then
-		if ! _fw_nft_is_default "${conf}"; then
-			if grep -qF -e "include \"${FW_NFT_FILE}\"" -e "include \"${FW_NFT_FILE%/*}/*.nft\"" "${conf}"; then
-				return 0
-			fi
-			_fw_nft_custom "${conf}"
-		fi
+		_fw_nft_is_default "${conf}" || _fw_nft_custom "${conf}"
 		# A default that loads the whole directory (Alpine) loads the administrator's files in it as well; lss's
 		# configuration would leave them out.
 		dir=${FW_NFT_FILE%/*}
@@ -808,11 +806,21 @@ fw_rollback_arm() {
 		mkdir -p "${FW_RUN_DIR}"
 		chmod 0700 "${FW_RUN_DIR}"
 		! type -P setsid >/dev/null || detach=(setsid nohup)
-		# The first command names the job, so fw_rollback_cancel stops this one only. setsid gives it a session and a
-		# process group of its own (with its process ID), which the end of the SSH session does not reach.
-		"${detach[@]}" /bin/sh -c ": lss-firewall-rollback; sleep ${seconds}; ${command}; rm -f '${pidfile}'" \
-			</dev/null >/dev/null 2>&1 &
-		printf '%s\n' "$!" >"${pidfile}"
+		# The job writes its own process ID (setsid forks when the caller leads a process group, so $! may be another
+		# process) and becomes a shell whose first command names it, so fw_rollback_cancel stops this one only. setsid
+		# gives it a session and a process group of its own, which the end of the SSH session does not reach. It keeps
+		# no descriptor of lss open, neither the lock of the run (9) nor the output of bats (3).
+		rm -f "${pidfile}"
+		# shellcheck disable=SC2016 # $$ and $1, $2 belong to the job's shell
+		"${detach[@]}" /bin/sh -c 'echo "$$" >"$1" && exec /bin/sh -c "$2"' lss-firewall-rollback "${pidfile}" \
+			": lss-firewall-rollback; sleep ${seconds}; ${command}; rm -f '${pidfile}'" \
+			</dev/null >/dev/null 2>&1 3>&- 9>&- &
+		local i
+		for ((i = 0; i < 50; i++)); do
+			[[ ! -s ${pidfile} ]] || break
+			sleep 0.1
+		done
+		[[ -s ${pidfile} ]] || die "firewall: the rollback job did not start; the firewall stays off."
 	fi
 	log_warn "Firewall rollback armed: it switches the firewall off in ${seconds} s unless lss confirms SSH access."
 }

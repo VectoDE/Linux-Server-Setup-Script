@@ -92,8 +92,8 @@ both drop what no rule accepts. A packet has to pass every input chain of nftabl
 default would drop what lss opens: lss replaces the nftables configuration of the distribution only while it is
 unchanged (its checksum is in `data/nftables-defaults.conf`), keeps a copy with a time stamp, and stops with a message
 at a configuration the administrator changed; `lss verify` checks that no other table drops input by default. While
-the firewall module enables the firewall, a timer (without systemd a background job) is armed that switches it off again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock
-you out.
+the firewall module enables the firewall, a timer (without systemd a background job) is armed that switches it off
+again after two minutes unless lss confirms that SSH still answers, so a wrong rule cannot lock you out.
 
 Published container ports never reach the INPUT rules of ufw or firewalld: Docker, Podman and kube-proxy redirect
 them to the container address (DNAT), so the packet is forwarded. The container modules (docker, podman, k3s)

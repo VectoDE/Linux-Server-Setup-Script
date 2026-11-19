@@ -126,7 +126,7 @@ _fw_no_foreign_drop() {
 	[[ $(fw_backend) == nftables ]] || return 0
 	foreign=$(fw_nft_foreign_drop)
 	[[ -z ${foreign} ]] ||
-		die "firewall: the input chain ${foreign//$'\n'/, } of another nftables table drops by default (policy drop), so it drops what lss opens, SSH included. Delete that table or give it the rules of lss (see nft list ruleset), then run lss again."
+		die "firewall: the input chain ${foreign//$'\n'/, } of another nftables table drops by default (policy drop), so it drops what lss opens, SSH included. Delete that table (nft list ruleset shows it) and take it out of $(fw_nft_conf), which the nftables service loads at boot, then run lss again."
 	return
 }
 

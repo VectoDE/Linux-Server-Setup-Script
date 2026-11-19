@@ -33,9 +33,10 @@ now or later.
   IPv6, drops what no rule accepts and loads the rules at boot (nftables service, `lss-firewall.service` or the OpenRC
   local service). The unchanged nftables configuration of the distribution (checksums in
   `data/nftables-defaults.conf`; Alpine's and Arch's drop input in a table of their own) is saved with a time stamp
-  and replaced by one that loads only lss's table, without `flush ruleset`; a changed one stops the run with what to
-  do. `lss verify` fails while another table has an input chain with `policy drop`. Without systemd the SSH
-  rollback runs as a job of its own (PID in `/run/lss`) instead of a systemd timer.
+  and replaced by one that loads only lss's table, without `flush ruleset`; a changed one stops the run, before
+  anything is loaded, with what to do. `lss verify` fails while another table has an input chain with
+  `policy drop`. Without systemd the SSH rollback runs as a job of its own (PID in `/run/lss`) instead of a systemd
+  timer.
 - Minimum bash 4.4, checked first by every entry script with a clear message instead of a failure halfway
   ([architecture](docs/architecture.md#bash)); `config_parse` no longer needs a nameref.
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
