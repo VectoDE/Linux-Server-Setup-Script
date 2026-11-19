@@ -19,6 +19,10 @@ now or later.
 - Package backends for apt, dnf, yum (RHEL 7 and older), zypper, apk and pacman: install, remove, refresh, upgrade,
   security-only upgrade (`pkg_upgrade_security`) and the installed check, each tried three times with fresh metadata
   when a mirror fails. Systems outside the matrix still get the family of their package manager.
+- Third-party repositories on zypper, apk and pacman: zypper gets an `rpm-md` repository whose pinned key is imported
+  into rpm, apk the vendor's RSA key pinned by its SHA-256 and a block in `/etc/apk/repositories`, pacman the pinned
+  key signed locally with `pacman-key` and a section in `/etc/pacman.conf` that requires signed packages. lss changes
+  only its own block in those shared files. Every repository URL must use HTTPS.
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
   CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
   `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and
