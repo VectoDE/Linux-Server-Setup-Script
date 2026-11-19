@@ -17,6 +17,8 @@ lss_test_setup() {
 	export LSS_RUN_ID=test-run
 	export LSS_JOURNAL=0
 	export LSS_COLOR=never
+	# The stubs stand in for systemd; tests of the other init systems set LSS_INIT themselves.
+	export LSS_INIT=systemd
 	export LSS_VERSION=0.0.0-test
 	export STUB_LOG=${BATS_TEST_TMPDIR}/stub.log
 	export PATH="${REPO_ROOT}/tests/fixtures/bin:${PATH}"

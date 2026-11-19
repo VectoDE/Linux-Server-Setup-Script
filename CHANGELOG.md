@@ -23,6 +23,10 @@ now or later.
   into rpm, apk the vendor's RSA key pinned by its SHA-256 and a block in `/etc/apk/repositories`, pacman the pinned
   key signed locally with `pacman-key` and a section in `/etc/pacman.conf` that requires signed packages. lss changes
   only its own block in those shared files. Every repository URL must use HTTPS.
+- Init systems besides systemd: OpenRC, SysV init scripts (update-rc.d or chkconfig) and Upstart start, stop, enable,
+  disable, restart and reload services through the same helpers. `svc_schedule` writes a persistent systemd timer, or
+  a cron job in `/etc/cron.d` without systemd; OnCalendar times that cron cannot express are refused. Drop-ins,
+  sandboxes and units of lss's own are skipped without systemd.
 - Signed releases: the release workflow builds `lss-<version>.tar.gz`, `bootstrap.sh`, the Ansible collection, a
   CycloneDX SBOM and `SHA256SUMS` and covers them with one build attestation (Sigstore, SLSA provenance).
   `bootstrap.sh` installs lss to `/opt/lss/<version>` behind the link `/opt/lss/current` only after the checksum and
